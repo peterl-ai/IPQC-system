@@ -19,7 +19,7 @@
           <strong>{{ currentTitle }}</strong>
         </div>
         <div class="header-actions">
-          <div class="control-cluster">
+          <div v-if="isDevelopment" class="control-cluster">
             <span>{{ t('header.role') }}</span>
             <a-select :value="mockSession.role.value" size="small" style="width: 112px" @change="changeRole">
               <a-select-option value="admin">{{ t('role.admin') }}</a-select-option>
@@ -68,11 +68,13 @@ const route = useRoute()
 const router = useRouter()
 const collapsed = ref(false)
 const selectedKeys = ref<string[]>([route.path])
+const isDevelopment = import.meta.env.DEV
 
 const icon = (component: object) => () => h(component)
 const menuItems = computed<ItemType[]>(() => {
   const role = mockSession.role.value
-  const items: ItemType[] = [{ key: '/home', icon: icon(HomeOutlined), label: t('nav.home') }]
+  const items: ItemType[] = []
+  if (hasPermission(role, 'home:view')) items.push({ key: '/home', icon: icon(HomeOutlined), label: t('nav.home') })
   const patrolChildren: ItemType[] = [
     hasPermission(role, 'standards:view') ? { key: '/standards', icon: icon(BookOutlined), label: t('nav.standards') } : null,
     hasPermission(role, 'plans:view') ? { key: '/plans', icon: icon(ApartmentOutlined), label: t('nav.plans') } : null,

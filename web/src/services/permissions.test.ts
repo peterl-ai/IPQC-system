@@ -13,8 +13,14 @@ describe('role permission mapping', () => {
     expect(hasPermission('pqe', 'users:view')).toBe(false)
   })
 
-  it('limits IPQA web access to Home and Completed Patrol Records', () => {
-    expect(rolePermissions.ipqa).toEqual(['home:view', 'records:view'])
+  it('limits IPQA web access to Completed Patrol Records only', () => {
+    expect(rolePermissions.ipqa).toEqual(['records:view'])
+    expect(hasPermission('ipqa', 'home:view')).toBe(false)
+    expect(hasPermission('ipqa', 'standards:view')).toBe(false)
+    expect(hasPermission('ipqa', 'plans:view')).toBe(false)
+    expect(hasPermission('ipqa', 'tasks:view')).toBe(false)
+    expect(hasPermission('ipqa', 'users:view')).toBe(false)
+    expect(hasPermission('ipqa', 'records:view')).toBe(true)
     expect(defaultRouteForRole('ipqa')).toBe('/records')
   })
 })

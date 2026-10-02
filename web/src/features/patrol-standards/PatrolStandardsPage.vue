@@ -13,7 +13,7 @@
       </div>
       <div class="table-toolbar">
         <div>
-          <a-button type="primary" @click="editorOpen = true"><PlusOutlined />{{ t('action.new') }}</a-button>
+          <a-button type="primary" @click="openEditor"><PlusOutlined />{{ t('action.new') }}</a-button>
           <a-button><SaveOutlined />{{ t('action.save') }}</a-button>
           <a-button><CopyOutlined />{{ t('action.copy') }}</a-button>
         </div>
@@ -25,7 +25,7 @@
       </div>
       <a-table row-key="id" size="small" :columns="columns" :data-source="standards" :scroll="{ x: 1900 }" :pagination="pagination">
         <template #bodyCell="{ column }">
-          <template v-if="column.key === 'actions'"><a-button type="link" size="small" @click="editorOpen = true">{{ t('common.edit') }}</a-button></template>
+          <template v-if="column.key === 'actions'"><a-button type="link" size="small" @click="openEditor">{{ t('common.edit') }}</a-button></template>
         </template>
         <template #emptyText><a-empty :description="t('common.noData')" /></template>
       </a-table>
@@ -34,32 +34,47 @@
     <a-drawer v-model:open="editorOpen" :title="t('editor.title')" width="min(1080px, 92vw)" class="editor-drawer">
       <a-alert type="info" show-icon :message="t('editor.nonPersistent')" />
       <h3 class="section-title">{{ t('editor.header') }}</h3>
-      <a-form layout="vertical" class="editor-form">
-        <a-form-item :label="t('field.factoryCode')"><a-input /></a-form-item>
-        <a-form-item :label="t('field.factoryName')"><a-input /></a-form-item>
-        <a-form-item :label="t('field.workshopCode')"><a-input /></a-form-item>
-        <a-form-item :label="t('field.lineCode')"><a-input /></a-form-item>
-        <a-form-item :label="t('field.lineName')" required><a-input /></a-form-item>
-        <a-form-item :label="t('field.standardName')" required><a-input /></a-form-item>
-        <a-form-item :label="t('field.materialCode')"><a-input /></a-form-item>
+      <a-form ref="editorFormRef" :model="editorForm" :rules="editorRules" layout="vertical" class="editor-form">
+        <a-form-item :label="t('field.factoryCode')"><a-input v-model:value="editorForm.factoryCode" /></a-form-item>
+        <a-form-item :label="t('field.factoryName')"><a-input v-model:value="editorForm.factoryName" /></a-form-item>
+        <a-form-item :label="t('field.workshopCode')"><a-input v-model:value="editorForm.workshopCode" /></a-form-item>
+        <a-form-item :label="t('field.lineCode')"><a-input v-model:value="editorForm.lineCode" /></a-form-item>
+        <a-form-item name="lineName" :label="t('field.lineName')"><a-input v-model:value="editorForm.lineName" /></a-form-item>
+        <a-form-item name="standardName" :label="t('field.standardName')"><a-input v-model:value="editorForm.standardName" /></a-form-item>
+        <a-form-item :label="t('field.materialCode')"><a-input v-model:value="editorForm.materialCode" /></a-form-item>
       </a-form>
       <div class="section-title-row"><h3 class="section-title">{{ t('editor.detail') }}</h3><a-button><PlusOutlined />{{ t('editor.addItem') }}</a-button></div>
       <a-table size="small" :columns="detailColumns" :data-source="detailRows" :scroll="{ x: 2100 }" :pagination="false" bordered />
-      <template #footer><a-space><a-button type="primary">{{ t('action.save') }}</a-button><a-button @click="editorOpen = false">{{ t('common.cancel') }}</a-button></a-space></template>
+      <template #footer><a-space><a-button type="primary" @click="saveEditor">{{ t('action.save') }}</a-button><a-button @click="editorOpen = false">{{ t('common.cancel') }}</a-button></a-space></template>
     </a-drawer>
   </section>
 </template>
 
 <script setup lang="ts">
-import { computed, reactive, ref } from 'vue'
+import { computed, nextTick, reactive, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import type { TableColumnsType } from 'ant-design-vue'
+import { message, type FormInstance, type TableColumnsType } from 'ant-design-vue'
 import { CopyOutlined, DownloadOutlined, ExportOutlined, ImportOutlined, PlusOutlined, ReloadOutlined, SaveOutlined, SearchOutlined } from '@ant-design/icons-vue'
 import PageHeader from '@/components/PageHeader.vue'
 import { standards } from '@/services/mockData'
+import { buildPatrolStandardRequiredRules } from './validation'
 
 const { t } = useI18n()
 const editorOpen = ref(false)
+const editorFormRef = ref<FormInstance>()
+const editorForm = reactive({
+  factoryCode: '',
+  factoryName: '',
+  workshopCode: '',
+  lineCode: '',
+  lineName: '',
+  standardName: '',
+  materialCode: '',
+})
+const editorRules = computed(() => buildPatrolStandardRequiredRules({
+  lineName: t('editor.validation.lineName'),
+  standardName: t('editor.validation.standardName'),
+}))
 const filters = reactive({ name: '', factory: undefined as string | undefined, line: undefined as string | undefined })
 const factoryOptions = [{ value: 'JAX-01', label: 'JAX-01 · Jacksonville Plant' }]
 const lineOptions = ['LN-A', 'LN-B', 'LN-C'].map((value) => ({ value, label: value }))
@@ -81,4 +96,19 @@ const detailColumns = computed<TableColumnsType>(() => [
 ])
 const detailRows = [{ id: 'skeleton-1', processCode: 'LM-02', processName: 'Lamination', category: 'Process parameter', item: 'Temperature', content: 'Verify actual cycle temperature', upperOperator: '≤', upperValue: '155', lowerOperator: '≥', lowerValue: '145', type: 'Numeric', sampling: '5 modules / shift', sampleCount: '5', photo: 'On abnormal', defect: 'Major' }]
 function resetFilters() { filters.name = ''; filters.factory = undefined; filters.line = undefined }
+async function openEditor() {
+  Object.assign(editorForm, { factoryCode: '', factoryName: '', workshopCode: '', lineCode: '', lineName: '', standardName: '', materialCode: '' })
+  editorOpen.value = true
+  await nextTick()
+  editorFormRef.value?.clearValidate()
+}
+async function saveEditor() {
+  try {
+    await editorFormRef.value?.validate()
+    message.success(t('editor.mockSaved'))
+    editorOpen.value = false
+  } catch {
+    // Ant Design displays field-level messages for invalid required values.
+  }
+}
 </script>

@@ -62,7 +62,8 @@ export default {
   },
   editor: {
     title: 'Patrol Standard Editor', header: 'Standard Information', detail: 'Inspection Detail Skeleton',
-    addItem: 'Add inspection item', nonPersistent: 'Editor shell only; save behavior begins in Phase 1B.',
+    addItem: 'Add inspection item', nonPersistent: 'Editor shell only; data is not persisted.', mockSaved: 'Mock validation passed. No data was persisted.',
+    validation: { lineName: 'Line Name is required.', standardName: 'Patrol Standard Name is required.' },
   },
   task: { rejectTitle: 'Reject Patrol Task', rejectHelp: 'A reason is required before a task can be returned to IPQA.', reasonPlaceholder: 'Enter the correction or re-inspection reason' },
   record: { detailTitle: 'Patrol Record Details', basic: 'Basic Information', inspection: 'Inspection Details', previewTitle: 'Patrol Report Preview', previewNote: 'HTML preview shell · Excel generation is deferred to a backend reporting phase.', reportTitle: 'IN-PROCESS QUALITY INSPECTION REPORT', photoPlaceholder: 'No mock image', documentNo: 'Document No.', reportStatus: 'Approved record' },

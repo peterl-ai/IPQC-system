@@ -21,7 +21,7 @@ export const router = createRouter({
     {
       path: '/',
       component: AppShell,
-      redirect: '/home',
+      redirect: () => defaultRouteForRole(mockSession.role.value),
       children: [
         { path: 'home', name: 'home', component: HomePage, meta: { permission: 'home:view' } },
         { path: 'standards', name: 'standards', component: PatrolStandardsPage, meta: { permission: 'standards:view' } },
@@ -40,7 +40,6 @@ router.beforeEach((to) => {
   if (to.name !== 'forbidden' && !routeIsAuthorized(to)) {
     return { name: 'forbidden', query: { from: to.fullPath } }
   }
-  if (to.path === '/home' && mockSession.role.value === 'ipqa') return defaultRouteForRole('ipqa')
   return true
 })
 
