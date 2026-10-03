@@ -1,6 +1,6 @@
 # JAX Power IPQC Web
 
-Phase 1A Vue web foundation for the JAX Power IPQC system. This project uses mock data only; actions do not persist.
+Vue web application for the JAX Power IPQC system. Phase 1B adds the complete Patrol Standards frontend workflow using in-memory mock data; browser refreshes reset all changes.
 
 ## Local development
 

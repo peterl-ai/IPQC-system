@@ -1,7 +1,25 @@
-export const standards = [
-  { id: 'std-001', no: 1, name: 'Module Assembly Line A Patrol', factoryCode: 'JAX-01', factoryName: 'Jacksonville Plant', workshopCode: 'MOD', lineCode: 'LN-A', lineName: 'Module Line A', materialCode: 'MOD-72C', createdBy: 'A. Morgan', createdTime: '2026-09-12 08:40', updatedBy: 'P. Shah', updatedTime: '2026-09-28 14:22' },
-  { id: 'std-002', no: 2, name: 'Lamination Process Patrol', factoryCode: 'JAX-01', factoryName: 'Jacksonville Plant', workshopCode: 'MOD', lineCode: 'LN-B', lineName: 'Module Line B', materialCode: 'MOD-72C', createdBy: 'P. Shah', createdTime: '2026-09-15 10:12', updatedBy: 'P. Shah', updatedTime: '2026-09-26 09:03' },
-  { id: 'std-003', no: 3, name: 'Final Visual Inspection Patrol', factoryCode: 'JAX-01', factoryName: 'Jacksonville Plant', workshopCode: 'QA', lineCode: 'LN-C', lineName: 'Module Line C', materialCode: 'MOD-54C', createdBy: 'A. Morgan', createdTime: '2026-09-18 13:05', updatedBy: 'A. Morgan', updatedTime: '2026-09-29 16:35' },
+import type { PatrolStandard } from '@/features/patrol-standards/model'
+
+export const standards: PatrolStandard[] = [
+  {
+    id: 'std-001', name: 'Module Assembly Line A Patrol', factoryCode: 'JAX-01', factoryName: 'Jacksonville Plant', workshopCode: 'MOD', lineCode: 'LN-A', lineName: 'Module Line A', materialCode: 'MOD-72C', createdBy: 'A. Morgan', createdTime: '2026-09-12 08:40', updatedBy: 'P. Shah', updatedTime: '2026-09-28 14:22',
+    inspectionItems: [
+      { id: 'item-001', processCode: 'EL-01', processName: 'Cell Stringing', itemCategory: 'Workmanship', inspectionItem: 'Cell alignment', inspectionContent: 'Verify cell spacing and string alignment', upperOperator: '', upperValue: '', lowerOperator: '', lowerValue: '', inspectionType: 'Visual', samplingPlan: '5 modules / shift', sampleCount: '5', photoRequirement: 'On abnormal', defectLevel: 'Major' },
+      { id: 'item-002', processCode: 'FR-03', processName: 'Framing', itemCategory: 'Dimension', inspectionItem: 'Frame diagonal', inspectionContent: 'Measure both frame diagonals', upperOperator: '≤', upperValue: '2', lowerOperator: '≥', lowerValue: '0', inspectionType: 'Numeric', samplingPlan: '3 modules / shift', sampleCount: '3', photoRequirement: 'Not required', defectLevel: 'Major' },
+    ],
+  },
+  {
+    id: 'std-002', name: 'Lamination Process Patrol', factoryCode: 'JAX-01', factoryName: 'Jacksonville Plant', workshopCode: 'MOD', lineCode: 'LN-B', lineName: 'Module Line B', materialCode: 'MOD-72C', createdBy: 'P. Shah', createdTime: '2026-09-15 10:12', updatedBy: 'P. Shah', updatedTime: '2026-09-26 09:03',
+    inspectionItems: [
+      { id: 'item-003', processCode: 'LM-02', processName: 'Lamination', itemCategory: 'Process parameter', inspectionItem: 'Temperature', inspectionContent: 'Verify actual cycle temperature', upperOperator: '≤', upperValue: '155', lowerOperator: '≥', lowerValue: '145', inspectionType: 'Numeric', samplingPlan: '5 modules / shift', sampleCount: '5', photoRequirement: 'On abnormal', defectLevel: 'Critical' },
+    ],
+  },
+  {
+    id: 'std-003', name: 'Final Visual Inspection Patrol', factoryCode: 'JAX-01', factoryName: 'Jacksonville Plant', workshopCode: 'QA', lineCode: 'LN-C', lineName: 'Module Line C', materialCode: 'MOD-54C', createdBy: 'A. Morgan', createdTime: '2026-09-18 13:05', updatedBy: 'A. Morgan', updatedTime: '2026-09-29 16:35',
+    inspectionItems: [
+      { id: 'item-004', processCode: 'FI-01', processName: 'Final Inspection', itemCategory: 'Appearance', inspectionItem: 'Surface condition', inspectionContent: 'Check glass and frame for visible defects', upperOperator: '', upperValue: '', lowerOperator: '', lowerValue: '', inspectionType: 'Visual', samplingPlan: '100%', sampleCount: '1', photoRequirement: 'On abnormal', defectLevel: 'Minor' },
+    ],
+  },
 ]
 
 export const plans = [

@@ -35,5 +35,19 @@ describe('language preference persistence', () => {
       tasks: 'Patrol Tasks',
       records: 'Completed Patrol Records',
     })
+    expect(zhCN.field).toMatchObject({
+      standardName: '巡检标准名称',
+      inspectionItem: '巡检项目',
+      inspectionContent: '巡检内容',
+      samplingPlan: '抽样方案',
+      defectLevel: '缺陷等级',
+    })
+    expect(en.field).toMatchObject({
+      standardName: 'Patrol Standard Name',
+      inspectionItem: 'Inspection Item',
+      inspectionContent: 'Inspection Content',
+      samplingPlan: 'Sampling Plan',
+      defectLevel: 'Defect Level',
+    })
   })
 })

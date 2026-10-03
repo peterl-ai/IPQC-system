@@ -16,3 +16,7 @@ export function buildPatrolStandardRequiredRules(
     standardName: [{ required: true, whitespace: true, message: messages.standardName }],
   }
 }
+
+export function isXlsxFileName(fileName: string): boolean {
+  return /\.xlsx$/i.test(fileName.trim())
+}
