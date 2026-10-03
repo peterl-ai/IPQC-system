@@ -142,4 +142,32 @@ See `docs/04_ARCHITECTURE.md`, `docs/05_DATA_MODEL_DRAFT.md`, and `docs/09_FILE_
 
 Do not ask an agent to build the entire product in one prompt. Keep each PR phase-scoped with acceptance criteria and tests.
 
-The first coding task is **Phase 1A — Web Foundation using mock data only**.
+The current Phase 1C slice makes **Patrol Standards Management** persistent. Patrol Plans, Patrol Tasks, Completed Records, and User Management remain mock frontend modules; no Phase 1D workflow is implemented.
+
+## Phase 1C local development
+
+Prerequisites: .NET 10 SDK and Node.js/npm. From the repository root:
+
+```powershell
+dotnet restore api/JaxPower.Ipqc.slnx
+dotnet tool restore
+cd api/JaxPower.Ipqc.Api
+dotnet tool run dotnet-ef database update
+dotnet run
+```
+
+The development API listens at `http://127.0.0.1:5050`; OpenAPI JSON is at `http://127.0.0.1:5050/openapi/v1.json`. In another terminal:
+
+```powershell
+cd web
+npm ci
+npm run dev
+```
+
+Open `http://localhost:5173/standards`. Vite proxies `/api` to the local API. `VITE_API_BASE_URL` can override the API base path if needed. The development database is `api/JaxPower.Ipqc.Api/ipqc-dev.db` (ignored by Git). The migration is `InitialPatrolStandards`; the repo-local `dotnet-ef` tool is pinned in `dotnet-tools.json`. The backend solution includes an HTTP/SQLite integration test project; run `dotnet test api/JaxPower.Ipqc.slnx`.
+
+For a PostgreSQL deployment, set `Database__Provider=Postgres` and `ConnectionStrings__Ipqc` via environment or secret configuration, then apply the migration with `dotnet tool run dotnet-ef database update` from the API project directory. Never commit a real connection string. Production requires PostgreSQL, HTTPS at the hosting/reverse-proxy boundary, and a future authentication/RBAC integration before Patrol Standards endpoints can be enabled. The API deliberately fails closed outside Development; the `X-Dev-Role` header (`admin` or `pqe`) is a **development-only** test identity, not production authentication. The browser role switcher is also development-only. Audit actor values are temporary server-side development role labels; real user identity remains an open decision.
+
+The server uses [ClosedXML 0.105.0](https://www.nuget.org/packages/ClosedXML/0.105.0) for `.xlsx` template/import/export. ClosedXML is [MIT-licensed](https://github.com/ClosedXML/ClosedXML/blob/develop/LICENSE), suitable for internal commercial use with its license notice retained in dependency distributions. Excel processing is server-side; imports accept one template-shaped sheet, up to 1,000 inspection items and a configurable maximum upload size (`Excel__MaxUploadBytes`, default 5 MiB). Export downloads the selected Patrol Standard. Excel import/export is not available for the other mock modules.
+
+Known Phase 1C limitations: no production authentication/identity provider yet; no PostgreSQL server integration test in this repository (the provider SQL is generated and checked, while automated relational tests use SQLite); no real plans/tasks/scheduler/Android/report or Material Verification backend; no inspection photo/file storage. Local HTTP is for development only. UI mock data outside Patrol Standards does not persist.

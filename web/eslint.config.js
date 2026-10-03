@@ -13,6 +13,7 @@ export default tseslint.config(
     languageOptions: {
       parser: vueParser,
       parserOptions: { parser: tseslint.parser, extraFileExtensions: ['.vue'] },
+      globals: { crypto: 'readonly', Blob: 'readonly', URL: 'readonly', document: 'readonly', setTimeout: 'readonly' },
     },
   },
   {

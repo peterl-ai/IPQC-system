@@ -9,10 +9,10 @@
             <a-input v-model:value="pendingFilters.name" allow-clear :placeholder="t('filter.placeholder', { field: t('filter.standardName') })" />
           </a-form-item>
           <a-form-item :label="t('filter.factory')">
-            <a-select v-model:value="pendingFilters.factory" allow-clear :placeholder="t('filter.select', { field: t('filter.factory') })" :options="factoryOptions" />
+            <a-input v-model:value="pendingFilters.factory" allow-clear :placeholder="t('filter.placeholder', { field: t('filter.factory') })" />
           </a-form-item>
           <a-form-item :label="t('filter.line')">
-            <a-select v-model:value="pendingFilters.line" allow-clear :placeholder="t('filter.select', { field: t('filter.line') })" :options="lineOptions" />
+            <a-input v-model:value="pendingFilters.line" allow-clear :placeholder="t('filter.placeholder', { field: t('filter.line') })" />
           </a-form-item>
         </a-form>
         <div class="filter-actions">
@@ -23,17 +23,16 @@
 
       <div class="table-toolbar standards-toolbar">
         <div>
-          <a-button type="primary" @click="openNew"><PlusOutlined />{{ t('action.new') }}</a-button>
-          <a-button @click="openSelectedForEdit"><SaveOutlined />{{ t('action.save') }}</a-button>
-          <a-button @click="openSelectedCopy"><CopyOutlined />{{ t('action.copy') }}</a-button>
+          <a-button type="primary" :disabled="busy" @click="openNew"><PlusOutlined />{{ t('action.new') }}</a-button>
+          <a-button :disabled="busy" @click="openSelectedForEdit"><SaveOutlined />{{ t('action.save') }}</a-button>
+          <a-button :disabled="busy" @click="openSelectedCopy"><CopyOutlined />{{ t('action.copy') }}</a-button>
         </div>
         <div>
-          <span v-if="selectedImportFile" class="selected-file">{{ t('editor.selectedFile', { file: selectedImportFile }) }}</span>
-          <a-button @click="showExportMessage"><ExportOutlined />{{ t('action.export') }}</a-button>
-          <a-upload accept=".xlsx" :before-upload="selectImportFile" :show-upload-list="false">
-            <a-button><ImportOutlined />{{ t('action.import') }}</a-button>
+          <a-button :disabled="busy" @click="exportSelected"><ExportOutlined />{{ t('action.export') }}</a-button>
+          <a-upload accept=".xlsx" :before-upload="importFile" :show-upload-list="false">
+            <a-button :disabled="busy"><ImportOutlined />{{ t('action.import') }}</a-button>
           </a-upload>
-          <a-button @click="showTemplateMessage"><DownloadOutlined />{{ t('action.template') }}</a-button>
+          <a-button :disabled="busy" @click="downloadTemplate"><DownloadOutlined />{{ t('action.template') }}</a-button>
         </div>
       </div>
 
@@ -41,13 +40,14 @@
         row-key="id"
         size="small"
         :columns="columns"
-        :data-source="filteredStandards"
+        :data-source="standards"
+        :loading="loading"
         :row-selection="rowSelection"
         :scroll="{ x: 1900 }"
         :pagination="pagination"
       >
         <template #bodyCell="{ column, record, index }">
-          <template v-if="column.key === 'no'">{{ index + 1 }}</template>
+          <template v-if="column.key === 'no'">{{ (currentPage - 1) * pageSize + index + 1 }}</template>
           <template v-else-if="column.key === 'actions'">
             <a-space size="small">
               <a-button type="link" size="small" @click="openEdit(record)">{{ t('common.edit') }}</a-button>
@@ -68,8 +68,6 @@
     </div>
 
     <a-drawer v-model:open="editorOpen" :title="editorTitle" width="min(1180px, 94vw)" class="editor-drawer" :mask-closable="false">
-      <a-alert type="info" show-icon :message="t('editor.nonPersistent')" />
-
       <h3 class="section-title">{{ t('editor.header') }}</h3>
       <a-form ref="editorFormRef" :model="editorForm" :rules="editorRules" layout="vertical" class="editor-form">
         <a-form-item :label="t('field.factoryCode')"><a-input v-model:value="editorForm.factoryCode" /></a-form-item>
@@ -104,7 +102,7 @@
 
       <template #footer>
         <a-space>
-          <a-button type="primary" @click="saveEditor">{{ t('action.save') }}</a-button>
+          <a-button type="primary" :loading="busy" @click="saveEditor">{{ t('action.save') }}</a-button>
           <a-button @click="editorOpen = false">{{ t('common.cancel') }}</a-button>
         </a-space>
       </template>
@@ -132,37 +130,36 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, reactive, ref } from 'vue'
+import { computed, nextTick, onMounted, reactive, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { message, type FormInstance, type TableColumnsType, type UploadProps } from 'ant-design-vue'
 import { CopyOutlined, DownloadOutlined, ExportOutlined, ImportOutlined, PlusOutlined, ReloadOutlined, SaveOutlined, SearchOutlined } from '@ant-design/icons-vue'
 import PageHeader from '@/components/PageHeader.vue'
-import { standards as seedStandards } from '@/services/mockData'
-import { mockSession } from '@/services/mockSession'
 import {
-  copyMockPatrolStandard,
-  createMockPatrolStandard,
-  deleteMockPatrolStandard,
   emptyPatrolStandardDraft,
   emptyPatrolStandardItem,
   isInspectionItemEmpty,
   toPatrolStandardDraft,
-  updateMockPatrolStandard,
-  type PatrolStandard,
   type PatrolStandardDraft,
   type PatrolStandardItem,
+  type PatrolStandardSummary,
 } from './model'
+import { ApiError, patrolStandardsApi } from './api'
 import { buildPatrolStandardRequiredRules, isXlsxFileName } from './validation'
 
-type EditorMode = 'new' | 'edit' | 'copy'
+type EditorMode = 'new' | 'edit'
 type EditorForm = Omit<PatrolStandardDraft, 'name' | 'inspectionItems'> & { standardName: string }
 
-const { t } = useI18n()
-const standards = ref<PatrolStandard[]>(seedStandards.map((standard) => ({ ...standard, inspectionItems: standard.inspectionItems.map((item) => ({ ...item })) })))
+const { t, locale } = useI18n()
+const standards = ref<PatrolStandardSummary[]>([])
 const selectedRowKeys = ref<string[]>([])
-const selectedImportFile = ref('')
-const pendingFilters = reactive({ name: '', factory: undefined as string | undefined, line: undefined as string | undefined })
-const activeFilters = reactive({ name: '', factory: undefined as string | undefined, line: undefined as string | undefined })
+const pendingFilters = reactive({ name: '', factory: '', line: '' })
+const activeFilters = reactive({ name: '', factory: '', line: '' })
+const currentPage = ref(1)
+const pageSize = ref(10)
+const total = ref(0)
+const loading = ref(false)
+const busy = ref(false)
 
 const editorOpen = ref(false)
 const editorMode = ref<EditorMode>('new')
@@ -182,27 +179,20 @@ const editorItems = ref<PatrolStandardItem[]>([])
 const itemEditorOpen = ref(false)
 const itemEditorIndex = ref<number | null>(null)
 const itemForm = reactive<PatrolStandardItem>(emptyPatrolStandardItem(''))
-let mockSequence = 100
 
 const editorRules = computed(() => buildPatrolStandardRequiredRules({
   lineName: t('editor.validation.lineName'),
   standardName: t('editor.validation.standardName'),
 }))
-const editorTitle = computed(() => t(editorMode.value === 'new' ? 'editor.createTitle' : editorMode.value === 'copy' ? 'editor.copyTitle' : 'editor.editTitle'))
-const factoryOptions = computed(() => uniqueOptions(standards.value.map((standard) => standard.factoryCode)))
-const lineOptions = computed(() => uniqueOptions(standards.value.map((standard) => standard.lineCode)))
-const filteredStandards = computed(() => standards.value.filter((standard) => {
-  const nameMatches = standard.name.toLocaleLowerCase().includes(activeFilters.name.trim().toLocaleLowerCase())
-  const factoryMatches = !activeFilters.factory || standard.factoryCode === activeFilters.factory
-  const lineMatches = !activeFilters.line || standard.lineCode === activeFilters.line
-  return nameMatches && factoryMatches && lineMatches
-}))
+const editorTitle = computed(() => t(editorMode.value === 'new' ? 'editor.createTitle' : 'editor.editTitle'))
 const rowSelection = computed(() => ({
   type: 'radio' as const,
   selectedRowKeys: selectedRowKeys.value,
   onChange: (keys: (string | number)[]) => { selectedRowKeys.value = keys.map(String) },
 }))
-const pagination = computed(() => ({ pageSize: 10, showSizeChanger: true, showTotal: (total: number) => `${total}` }))
+const pagination = computed(() => ({ current: currentPage.value, pageSize: pageSize.value, total: total.value,
+  showSizeChanger: true, showTotal: (count: number) => `${count}`,
+  onChange: (page: number, size: number) => { currentPage.value = page; pageSize.value = size; selectedRowKeys.value = []; void loadStandards() } }))
 const column = (title: string, dataIndex: string, width = 140) => ({ title: t(title), dataIndex, key: dataIndex, width, ellipsis: true })
 const columns = computed<TableColumnsType>(() => [
   { title: t('field.no'), key: 'no', width: 70 },
@@ -222,22 +212,34 @@ const detailColumns = computed<TableColumnsType>(() => [
   { title: t('common.actions'), key: 'actions', fixed: 'right', width: 310 },
 ])
 
-function uniqueOptions(values: string[]) {
-  return [...new Set(values.filter(Boolean))].map((value) => ({ value, label: value }))
-}
-
 function applyFilters() {
   Object.assign(activeFilters, pendingFilters)
   selectedRowKeys.value = []
+  currentPage.value = 1
+  void loadStandards()
 }
 
 function resetFilters() {
-  Object.assign(pendingFilters, { name: '', factory: undefined, line: undefined })
+  Object.assign(pendingFilters, { name: '', factory: '', line: '' })
   Object.assign(activeFilters, pendingFilters)
   selectedRowKeys.value = []
+  currentPage.value = 1
+  void loadStandards()
 }
 
-function selectedStandard(): PatrolStandard | undefined {
+async function loadStandards() {
+  loading.value = true
+  try {
+    const result = await patrolStandardsApi.list({ ...activeFilters, page: currentPage.value, pageSize: pageSize.value })
+    standards.value = result.items
+    total.value = result.total
+  } catch (error) { showError(error) }
+  finally { loading.value = false }
+}
+
+onMounted(() => { void loadStandards() })
+
+function selectedStandard(): PatrolStandardSummary | undefined {
   return standards.value.find((standard) => standard.id === selectedRowKeys.value[0])
 }
 
@@ -247,27 +249,34 @@ function openSelectedForEdit() {
   openEdit(standard)
 }
 
-function openSelectedCopy() {
+async function openSelectedCopy() {
+  if (busy.value) return
   const standard = selectedStandard()
   if (!standard) return void message.warning(t('editor.selectRecord'))
-  openCopy(standard)
+  busy.value = true
+  try {
+    const copy = await patrolStandardsApi.copy(standard.id, t('editor.copiedName', { name: standard.name }))
+    selectedRowKeys.value = [copy.id]
+    message.success(t('editor.copied'))
+    await loadStandards()
+    await openEdit(copy)
+  } catch (error) { showError(error) }
+  finally { busy.value = false }
 }
 
 async function openNew() {
   await openEditor('new', emptyPatrolStandardDraft())
 }
 
-async function openEdit(standard: PatrolStandard) {
+async function openEdit(standard: PatrolStandardSummary) {
   selectedRowKeys.value = [standard.id]
-  editingId.value = standard.id
-  await openEditor('edit', toPatrolStandardDraft(standard))
-}
-
-async function openCopy(standard: PatrolStandard) {
-  const draft = copyMockPatrolStandard(standard, () => nextId('item'))
-  draft.name = t('editor.copiedName', { name: draft.name })
-  editingId.value = null
-  await openEditor('copy', draft)
+  busy.value = true
+  try {
+    const fresh = await patrolStandardsApi.get(standard.id)
+    editingId.value = fresh.id
+    await openEditor('edit', toPatrolStandardDraft(fresh))
+  } catch (error) { showError(error) }
+  finally { busy.value = false }
 }
 
 async function openEditor(mode: EditorMode, draft: PatrolStandardDraft) {
@@ -289,9 +298,12 @@ async function openEditor(mode: EditorMode, draft: PatrolStandardDraft) {
 }
 
 async function saveEditor() {
+  if (busy.value) return
+  busy.value = true
   try {
     await editorFormRef.value?.validate()
   } catch {
+    busy.value = false
     return
   }
   const draft: PatrolStandardDraft = {
@@ -304,25 +316,31 @@ async function saveEditor() {
     materialCode: editorForm.materialCode.trim(),
     inspectionItems: editorItems.value.map((item) => ({ ...item })),
   }
-  const audit = { user: mockSession.userName.value, time: mockTime() }
-  if (editorMode.value === 'edit' && editingId.value) {
-    standards.value = updateMockPatrolStandard(standards.value, editingId.value, draft, audit)
-  } else {
-    standards.value = createMockPatrolStandard(standards.value, draft, { ...audit, id: nextId('std') })
-  }
-  message.success(t('editor.mockSaved'))
-  editorOpen.value = false
+  try {
+    if (editorMode.value === 'edit' && editingId.value) await patrolStandardsApi.update(editingId.value, draft)
+    else await patrolStandardsApi.create(draft)
+    message.success(t('editor.saved'))
+    editorOpen.value = false
+    await loadStandards()
+  } catch (error) { showError(error) }
+  finally { busy.value = false }
 }
 
-function removeStandard(id: string) {
-  standards.value = deleteMockPatrolStandard(standards.value, id)
-  if (selectedRowKeys.value.includes(id)) selectedRowKeys.value = []
-  message.success(t('editor.deleted'))
+async function removeStandard(id: string) {
+  if (busy.value) return
+  busy.value = true
+  try {
+    await patrolStandardsApi.remove(id)
+    if (selectedRowKeys.value.includes(id)) selectedRowKeys.value = []
+    message.success(t('editor.deleted'))
+    await loadStandards()
+  } catch (error) { showError(error) }
+  finally { busy.value = false }
 }
 
 function openNewItem() {
   itemEditorIndex.value = null
-  Object.assign(itemForm, emptyPatrolStandardItem(nextId('item')))
+  Object.assign(itemForm, emptyPatrolStandardItem(`local:${crypto.randomUUID()}`))
   itemEditorOpen.value = true
 }
 
@@ -357,32 +375,58 @@ function moveItem(index: number, offset: -1 | 1) {
   editorItems.value.splice(target, 0, item)
 }
 
-const selectImportFile: UploadProps['beforeUpload'] = (file) => {
+const importFile: UploadProps['beforeUpload'] = (file) => {
   if (!isXlsxFileName(file.name)) {
     message.error(t('editor.invalidImportFile'))
     return false
   }
-  selectedImportFile.value = file.name
-  message.info(t('editor.importDeferred', { file: file.name }))
+  if (busy.value) return false
+  busy.value = true
+  void patrolStandardsApi.import(file).then(async () => {
+    message.success(t('editor.imported'))
+    currentPage.value = 1
+    await loadStandards()
+  }).catch(showError).finally(() => { busy.value = false })
   return false
 }
 
-function showExportMessage() {
-  message.info(t('editor.exportDeferred'))
+async function exportSelected() {
+  const standard = selectedStandard()
+  if (!standard) return void message.warning(t('editor.selectRecord'))
+  busy.value = true
+  try { download(await patrolStandardsApi.export(standard.id), 'patrol-standard.xlsx') }
+  catch (error) { showError(error) }
+  finally { busy.value = false }
 }
 
-function showTemplateMessage() {
-  message.info(t('editor.templateDeferred'))
+async function downloadTemplate() {
+  busy.value = true
+  try { download(await patrolStandardsApi.template(), 'patrol-standard-template.xlsx') }
+  catch (error) { showError(error) }
+  finally { busy.value = false }
 }
 
-function nextId(prefix: string): string {
-  mockSequence += 1
-  return `${prefix}-mock-${mockSequence}`
+function download(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = filename
+  link.click()
+  setTimeout(() => URL.revokeObjectURL(url), 1000)
 }
 
-function mockTime(): string {
-  const date = new Date()
-  const pad = (value: number) => String(value).padStart(2, '0')
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`
+function showError(error: unknown) {
+  if (!(error instanceof ApiError)) return void message.error(t('editor.unexpectedError'))
+  if (error.status === 0 || error.status === 503) return void message.error(t('editor.apiUnavailable'))
+  if (error.status === 403) return void message.error(t('editor.forbidden'))
+  if (error.status === 404) return void message.error(t('editor.notFound'))
+  if (error.status === 400) {
+    if (locale.value === 'en') return void message.error(error.message)
+    if (error.errors?.LineName) return void message.error(t('editor.validation.lineName'))
+    if (error.errors?.PatrolStandardName) return void message.error(t('editor.validation.standardName'))
+    if (error.errors?.file) return void message.error(t('editor.invalidWorkbook'))
+    return void message.error(t('editor.validationFailed'))
+  }
+  message.error(t('editor.unexpectedError'))
 }
 </script>

@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="JaxPower.Ipqc.Api.Tests/JaxPower.Ipqc.Api.Tests.csproj" />
+  <Project Path="JaxPower.Ipqc.Api/JaxPower.Ipqc.Api.csproj" />
+</Solution>
