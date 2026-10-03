@@ -79,6 +79,10 @@ button, input, textarea, select { font: inherit; }
 .section-title { margin: 24px 0 12px; color: #213746; font-size: 14px; font-weight: 700; }
 .section-title-row { display: flex; align-items: center; justify-content: space-between; }
 .section-title-row .section-title { margin-bottom: 12px; }
+.standards-toolbar > div:last-child { align-items: center; }
+.selected-file { max-width: 260px; overflow: hidden; color: var(--ink-600); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.item-editor-form { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0 16px; padding-top: 8px; }
+.item-editor-form .item-editor-wide { grid-column: span 2; }
 .modal-help { margin: 0 0 18px; color: var(--ink-600); }
 .photo-placeholder { color: #82919c; font-size: 11px; }
 

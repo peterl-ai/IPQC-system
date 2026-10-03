@@ -9,7 +9,7 @@ export default {
   role: { admin: 'Admin', pqe: 'PQE', ipqa: 'IPQA' },
   common: {
     search: 'Search', reset: 'Reset', actions: 'Actions', details: 'Details', close: 'Close',
-    cancel: 'Cancel', confirm: 'Confirm', edit: 'Edit', active: 'Active', inactive: 'Inactive',
+    cancel: 'Cancel', confirm: 'Confirm', edit: 'Edit', delete: 'Delete', active: 'Active', inactive: 'Inactive',
     enabled: 'Enabled', disabled: 'Disabled', all: 'All', noData: 'No records found',
     mockNotice: 'Mock data only — changes are not persisted.', required: 'Required',
   },
@@ -36,6 +36,7 @@ export default {
   action: {
     new: 'New', save: 'Save', copy: 'Copy', export: 'Export', import: 'Import', template: 'Download Template',
     approve: 'Approve', reject: 'Reject', preview: 'Preview Report', download: 'Download Report', addUser: 'Add User',
+    moveUp: 'Move up', moveDown: 'Move down',
   },
   field: {
     no: 'No.', standardName: 'Patrol Standard Name', factoryCode: 'Factory Code', factoryName: 'Factory Name',
@@ -61,8 +62,15 @@ export default {
     attention: 'Attention', returned: 'Returned for correction',
   },
   editor: {
-    title: 'Patrol Standard Editor', header: 'Standard Information', detail: 'Inspection Detail Skeleton',
-    addItem: 'Add inspection item', nonPersistent: 'Editor shell only; data is not persisted.', mockSaved: 'Mock validation passed. No data was persisted.',
+    title: 'Patrol Standard Editor', createTitle: 'New Patrol Standard', editTitle: 'Edit Patrol Standard', copyTitle: 'Copy Patrol Standard',
+    header: 'Standard Information', detail: 'Inspection Items', addItem: 'Add inspection item', editItem: 'Edit inspection item',
+    nonPersistent: 'Mock data only. Changes reset when the browser is refreshed.', mockSaved: 'Patrol standard saved to mock data.',
+    selectRecord: 'Select a patrol standard first.', copiedName: '{name} (Copy)', emptyItem: 'Enter at least one inspection item value.',
+    deleteTitle: 'Delete patrol standard', deleteConfirm: 'Are you sure you want to delete this patrol standard?', deleted: 'Patrol standard deleted from mock data.',
+    exportDeferred: 'Excel export will be connected to the backend in a later phase.',
+    importDeferred: 'Selected {file}. Excel parsing will be connected in a later phase.',
+    templateDeferred: 'Excel template download will be connected to the backend in a later phase.',
+    selectedFile: 'Selected file: {file}',
     validation: { lineName: 'Line Name is required.', standardName: 'Patrol Standard Name is required.' },
   },
   task: { rejectTitle: 'Reject Patrol Task', rejectHelp: 'A reason is required before a task can be returned to IPQA.', reasonPlaceholder: 'Enter the correction or re-inspection reason' },
