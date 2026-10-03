@@ -152,7 +152,7 @@ import {
   type PatrolStandardDraft,
   type PatrolStandardItem,
 } from './model'
-import { buildPatrolStandardRequiredRules } from './validation'
+import { buildPatrolStandardRequiredRules, isXlsxFileName } from './validation'
 
 type EditorMode = 'new' | 'edit' | 'copy'
 type EditorForm = Omit<PatrolStandardDraft, 'name' | 'inspectionItems'> & { standardName: string }
@@ -228,11 +228,13 @@ function uniqueOptions(values: string[]) {
 
 function applyFilters() {
   Object.assign(activeFilters, pendingFilters)
+  selectedRowKeys.value = []
 }
 
 function resetFilters() {
   Object.assign(pendingFilters, { name: '', factory: undefined, line: undefined })
   Object.assign(activeFilters, pendingFilters)
+  selectedRowKeys.value = []
 }
 
 function selectedStandard(): PatrolStandard | undefined {
@@ -256,12 +258,13 @@ async function openNew() {
 }
 
 async function openEdit(standard: PatrolStandard) {
+  selectedRowKeys.value = [standard.id]
   editingId.value = standard.id
   await openEditor('edit', toPatrolStandardDraft(standard))
 }
 
 async function openCopy(standard: PatrolStandard) {
-  const draft = copyMockPatrolStandard(standard)
+  const draft = copyMockPatrolStandard(standard, () => nextId('item'))
   draft.name = t('editor.copiedName', { name: draft.name })
   editingId.value = null
   await openEditor('copy', draft)
@@ -355,6 +358,10 @@ function moveItem(index: number, offset: -1 | 1) {
 }
 
 const selectImportFile: UploadProps['beforeUpload'] = (file) => {
+  if (!isXlsxFileName(file.name)) {
+    message.error(t('editor.invalidImportFile'))
+    return false
+  }
   selectedImportFile.value = file.name
   message.info(t('editor.importDeferred', { file: file.name }))
   return false

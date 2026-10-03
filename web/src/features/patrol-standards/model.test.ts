@@ -23,7 +23,10 @@ const source: PatrolStandard = {
   createdTime: '2026-10-01 08:00',
   updatedBy: 'Creator',
   updatedTime: '2026-10-01 08:00',
-  inspectionItems: [{ ...emptyPatrolStandardItem('item-1'), inspectionItem: 'Temperature' }],
+  inspectionItems: [
+    { ...emptyPatrolStandardItem('item-1'), inspectionItem: 'Temperature' },
+    { ...emptyPatrolStandardItem('item-2'), inspectionItem: 'Pressure' },
+  ],
 }
 
 describe('Patrol Standard mock state operations', () => {
@@ -48,17 +51,24 @@ describe('Patrol Standard mock state operations', () => {
     expect(updated[0]).toMatchObject({ id: 'std-1', name: 'Updated standard', createdBy: 'Creator', updatedBy: 'Editor' })
   })
 
-  it('copies header and detail values without overwriting the source', () => {
-    const draft = copyMockPatrolStandard(source)
-    draft.name = 'Copied standard'
-    draft.inspectionItems[0]!.inspectionItem = 'Pressure'
+  it('copies header/detail values into new aggregate and item identities without changing the source', () => {
+    const originalSource = structuredClone(source)
+    const copiedItemIds = ['copy-item-1', 'copy-item-2']
+    const draft = copyMockPatrolStandard(source, () => copiedItemIds.shift()!)
     const copied = createMockPatrolStandard([source], draft, { id: 'std-2', user: 'Mock User', time: '2026-10-02 11:00' })
 
     expect(copied).toHaveLength(2)
-    expect(copied[0]).toEqual(source)
-    expect(copied[1]).toMatchObject({ id: 'std-2', name: 'Copied standard' })
-    expect(copied[1]!.inspectionItems[0]!.inspectionItem).toBe('Pressure')
-    expect(copied[0]!.inspectionItems[0]!.inspectionItem).toBe('Temperature')
+    expect(copied[0]).toEqual(originalSource)
+    expect(source).toEqual(originalSource)
+    expect(copied[1]).toMatchObject({ id: 'std-2', name: source.name, lineName: source.lineName })
+    expect(copied[1]!.id).not.toBe(source.id)
+    expect(copied[1]!.inspectionItems.map((item) => ({ ...item, id: '' }))).toEqual(
+      source.inspectionItems.map((item) => ({ ...item, id: '' })),
+    )
+    expect(copied[1]!.inspectionItems.map((item) => item.id)).toEqual(['copy-item-1', 'copy-item-2'])
+    copied[1]!.inspectionItems.forEach((item, index) => {
+      expect(item.id).not.toBe(source.inspectionItems[index]!.id)
+    })
   })
 
   it('deletes only the selected standard', () => {

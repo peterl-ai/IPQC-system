@@ -69,6 +69,7 @@ export default {
     deleteTitle: 'Delete patrol standard', deleteConfirm: 'Are you sure you want to delete this patrol standard?', deleted: 'Patrol standard deleted from mock data.',
     exportDeferred: 'Excel export will be connected to the backend in a later phase.',
     importDeferred: 'Selected {file}. Excel parsing will be connected in a later phase.',
+    invalidImportFile: 'Select a valid .xlsx file.',
     templateDeferred: 'Excel template download will be connected to the backend in a later phase.',
     selectedFile: 'Selected file: {file}',
     validation: { lineName: 'Line Name is required.', standardName: 'Patrol Standard Name is required.' },

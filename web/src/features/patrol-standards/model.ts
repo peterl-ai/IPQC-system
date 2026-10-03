@@ -125,8 +125,18 @@ export function updateMockPatrolStandard(
     : standard)
 }
 
-export function copyMockPatrolStandard(source: PatrolStandard): PatrolStandardDraft {
-  return toPatrolStandardDraft(source)
+export function copyMockPatrolStandard(
+  source: PatrolStandard,
+  createItemId: () => string,
+): PatrolStandardDraft {
+  const draft = toPatrolStandardDraft(source)
+  return {
+    ...draft,
+    inspectionItems: draft.inspectionItems.map((item) => ({
+      ...item,
+      id: createItemId(),
+    })),
+  }
 }
 
 export function deleteMockPatrolStandard(
