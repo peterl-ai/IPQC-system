@@ -4,7 +4,8 @@ public sealed record ItemInput(
     string? ProcessCode, string? ProcessName, string? InspectionItemCategory, string? InspectionItem,
     string? InspectionContent, string? UpperLimitOperator, string? UpperLimitValue,
     string? LowerLimitOperator, string? LowerLimitValue, string? InspectionType,
-    string? SamplingPlan, string? SampleCount, string? PhotoRequirement, string? DefectLevel);
+    string? SamplingPlan, string? SampleCount, string? PhotoRequirement, string? DefectLevel,
+    Guid? Id = null);
 
 public sealed record StandardInput(
     string? PatrolStandardName, string? FactoryCode, string? FactoryName, string? WorkshopCode,
@@ -21,5 +22,10 @@ public sealed record StandardOutput(
     string LineCode, string LineName, string MaterialCode, string CreatedBy, DateTime CreatedAtUtc,
     string UpdatedBy, DateTime UpdatedAtUtc, List<ItemOutput> InspectionItems);
 
-public sealed record PagedStandards(List<StandardOutput> Items, int Page, int PageSize, int Total);
+public sealed record StandardSummary(
+    Guid Id, string PatrolStandardName, string FactoryCode, string FactoryName, string WorkshopCode,
+    string LineCode, string LineName, string MaterialCode, string CreatedBy, DateTime CreatedAtUtc,
+    string UpdatedBy, DateTime UpdatedAtUtc);
+
+public sealed record PagedStandards(List<StandardSummary> Items, int Page, int PageSize, int Total);
 public sealed record CopyInput(string? PatrolStandardName);

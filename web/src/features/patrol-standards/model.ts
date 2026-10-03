@@ -32,6 +32,8 @@ export interface PatrolStandard {
   inspectionItems: PatrolStandardItem[]
 }
 
+export type PatrolStandardSummary = Omit<PatrolStandard, 'inspectionItems'>
+
 export type PatrolStandardDraft = Omit<
   PatrolStandard,
   'id' | 'createdBy' | 'createdTime' | 'updatedBy' | 'updatedTime'

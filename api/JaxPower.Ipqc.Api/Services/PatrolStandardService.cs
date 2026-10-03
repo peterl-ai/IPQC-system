@@ -47,8 +47,12 @@ public sealed class PatrolStandardService(IpqcDbContext db, TimeProvider clock)
         if (!string.IsNullOrWhiteSpace(lineCode)) query = query.Where(x => x.LineCode == lineCode.Trim());
         var total = await query.CountAsync(ct);
         var rows = await query.OrderBy(x => x.PatrolStandardName).ThenBy(x => x.Id)
-            .Skip((page - 1) * pageSize).Take(pageSize).Include(x => x.InspectionItems).ToListAsync(ct);
-        return new PagedStandards(rows.Select(ToOutput).ToList(), page, pageSize, total);
+            .Skip((page - 1) * pageSize).Take(pageSize)
+            .Select(x => new StandardSummary(x.Id, x.PatrolStandardName, x.FactoryCode, x.FactoryName,
+                x.WorkshopCode, x.LineCode, x.LineName, x.MaterialCode, x.CreatedBy, x.CreatedAtUtc,
+                x.UpdatedBy, x.UpdatedAtUtc))
+            .ToListAsync(ct);
+        return new PagedStandards(rows, page, pageSize, total);
     }
 
     public async Task<StandardOutput?> GetAsync(Guid id, CancellationToken ct)
@@ -78,12 +82,30 @@ public sealed class PatrolStandardService(IpqcDbContext db, TimeProvider clock)
         ApplyHeader(row, input);
         row.UpdatedBy = actor;
         row.UpdatedAtUtc = clock.GetUtcNow().UtcDateTime;
-        db.PatrolStandardItems.RemoveRange(row.InspectionItems);
-        await db.SaveChangesAsync(ct);
-        db.ChangeTracker.Clear();
-        var items = BuildItems(input.InspectionItems);
-        foreach (var item in items) item.PatrolStandardId = id;
-        db.PatrolStandardItems.AddRange(items);
+        var existingById = row.InspectionItems.ToDictionary(x => x.Id);
+        // Move existing rows out of the submitted sequence range inside the transaction first.
+        // This avoids transient unique-index collisions when two retained items swap positions.
+        for (var index = 0; index < row.InspectionItems.Count; index++)
+            row.InspectionItems[index].SequenceNo = int.MaxValue - index;
+        if (row.InspectionItems.Count > 0) await db.SaveChangesAsync(ct);
+
+        var retainedIds = new HashSet<Guid>();
+        var submitted = input.InspectionItems ?? [];
+        for (var index = 0; index < submitted.Count; index++)
+        {
+            var itemInput = submitted[index];
+            if (itemInput.Id is { } itemId && existingById.TryGetValue(itemId, out var existing) && retainedIds.Add(itemId))
+            {
+                ApplyItem(existing, itemInput, index + 1);
+                continue;
+            }
+
+            var added = new PatrolStandardItem { Id = Guid.NewGuid(), PatrolStandardId = id };
+            ApplyItem(added, itemInput, index + 1);
+            row.InspectionItems.Add(added);
+            db.PatrolStandardItems.Add(added);
+        }
+        db.PatrolStandardItems.RemoveRange(existingById.Values.Where(x => !retainedIds.Contains(x.Id)));
         await db.SaveChangesAsync(ct);
         await tx.CommitAsync(ct);
         return await GetAsync(id, ct);
@@ -114,15 +136,31 @@ public sealed class PatrolStandardService(IpqcDbContext db, TimeProvider clock)
     }
 
     private static List<PatrolStandardItem> BuildItems(List<ItemInput>? items) =>
-        (items ?? []).Select((x, i) => new PatrolStandardItem {
-            Id = Guid.NewGuid(), SequenceNo = i + 1, ProcessCode = Clean(x.ProcessCode), ProcessName = Clean(x.ProcessName),
-            InspectionItemCategory = Clean(x.InspectionItemCategory), InspectionItem = Clean(x.InspectionItem),
-            InspectionContent = Clean(x.InspectionContent), UpperLimitOperator = Clean(x.UpperLimitOperator),
-            UpperLimitValue = Clean(x.UpperLimitValue), LowerLimitOperator = Clean(x.LowerLimitOperator),
-            LowerLimitValue = Clean(x.LowerLimitValue), InspectionType = Clean(x.InspectionType),
-            SamplingPlan = Clean(x.SamplingPlan), SampleCount = Clean(x.SampleCount),
-            PhotoRequirement = Clean(x.PhotoRequirement), DefectLevel = Clean(x.DefectLevel),
+        (items ?? []).Select((x, i) =>
+        {
+            var item = new PatrolStandardItem { Id = Guid.NewGuid() };
+            ApplyItem(item, x, i + 1);
+            return item;
         }).ToList();
+
+    private static void ApplyItem(PatrolStandardItem item, ItemInput input, int sequenceNo)
+    {
+        item.SequenceNo = sequenceNo;
+        item.ProcessCode = Clean(input.ProcessCode);
+        item.ProcessName = Clean(input.ProcessName);
+        item.InspectionItemCategory = Clean(input.InspectionItemCategory);
+        item.InspectionItem = Clean(input.InspectionItem);
+        item.InspectionContent = Clean(input.InspectionContent);
+        item.UpperLimitOperator = Clean(input.UpperLimitOperator);
+        item.UpperLimitValue = Clean(input.UpperLimitValue);
+        item.LowerLimitOperator = Clean(input.LowerLimitOperator);
+        item.LowerLimitValue = Clean(input.LowerLimitValue);
+        item.InspectionType = Clean(input.InspectionType);
+        item.SamplingPlan = Clean(input.SamplingPlan);
+        item.SampleCount = Clean(input.SampleCount);
+        item.PhotoRequirement = Clean(input.PhotoRequirement);
+        item.DefectLevel = Clean(input.DefectLevel);
+    }
 
     private static void ApplyHeader(PatrolStandard row, StandardInput input)
     {

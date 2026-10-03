@@ -140,9 +140,9 @@ import {
   emptyPatrolStandardItem,
   isInspectionItemEmpty,
   toPatrolStandardDraft,
-  type PatrolStandard,
   type PatrolStandardDraft,
   type PatrolStandardItem,
+  type PatrolStandardSummary,
 } from './model'
 import { ApiError, patrolStandardsApi } from './api'
 import { buildPatrolStandardRequiredRules, isXlsxFileName } from './validation'
@@ -151,7 +151,7 @@ type EditorMode = 'new' | 'edit'
 type EditorForm = Omit<PatrolStandardDraft, 'name' | 'inspectionItems'> & { standardName: string }
 
 const { t, locale } = useI18n()
-const standards = ref<PatrolStandard[]>([])
+const standards = ref<PatrolStandardSummary[]>([])
 const selectedRowKeys = ref<string[]>([])
 const pendingFilters = reactive({ name: '', factory: '', line: '' })
 const activeFilters = reactive({ name: '', factory: '', line: '' })
@@ -239,7 +239,7 @@ async function loadStandards() {
 
 onMounted(() => { void loadStandards() })
 
-function selectedStandard(): PatrolStandard | undefined {
+function selectedStandard(): PatrolStandardSummary | undefined {
   return standards.value.find((standard) => standard.id === selectedRowKeys.value[0])
 }
 
@@ -268,7 +268,7 @@ async function openNew() {
   await openEditor('new', emptyPatrolStandardDraft())
 }
 
-async function openEdit(standard: PatrolStandard) {
+async function openEdit(standard: PatrolStandardSummary) {
   selectedRowKeys.value = [standard.id]
   busy.value = true
   try {
@@ -340,7 +340,7 @@ async function removeStandard(id: string) {
 
 function openNewItem() {
   itemEditorIndex.value = null
-  Object.assign(itemForm, emptyPatrolStandardItem(crypto.randomUUID()))
+  Object.assign(itemForm, emptyPatrolStandardItem(`local:${crypto.randomUUID()}`))
   itemEditorOpen.value = true
 }
 

@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Http.Json;
+using System.Text.Json;
 using ClosedXML.Excel;
 using JaxPower.Ipqc.Api.Contracts;
 using JaxPower.Ipqc.Api.Data;
@@ -28,35 +29,99 @@ public sealed class PatrolStandardsApiTests
     {
         await using var app = await TestApp.CreateAsync();
         var client = app.Client;
-        var created = await Create(client, Draft());
+        var createInput = Draft();
+        var clientClaimedItemId = Guid.NewGuid();
+        createInput.InspectionItems![0] = createInput.InspectionItems[0] with { Id = clientClaimedItemId };
+        var created = await Create(client, createInput);
         Assert.NotEqual(Guid.Empty, created.Id);
         Assert.Single(created.InspectionItems);
+        Assert.NotEqual(clientClaimedItemId, created.InspectionItems[0].Id);
         Assert.Equal(1, created.InspectionItems[0].SequenceNo);
         Assert.Equal("admin", created.CreatedBy);
         Assert.Equal(DateTimeKind.Utc, created.CreatedAtUtc.Kind);
         var got = await client.GetFromJsonAsync<StandardOutput>($"/api/patrol-standards/{created.Id}");
         Assert.Equal("Standard A", got!.PatrolStandardName);
+        Assert.Equal(created.InspectionItems.Select(x => x.Id), got.InspectionItems.Select(x => x.Id));
+        Assert.Equal([1], got.InspectionItems.Select(x => x.SequenceNo).ToArray());
 
         await Create(client, Draft("Standard B", "Line 2", 2));
-        var filtered = await client.GetFromJsonAsync<PagedStandards>("/api/patrol-standards?standardName=Standard%20A&factoryCode=F1&lineCode=L1");
+        var filteredResponse = await client.GetAsync("/api/patrol-standards?standardName=Standard%20A&factoryCode=F1&lineCode=L1");
+        var filteredJson = JsonDocument.Parse(await filteredResponse.Content.ReadAsStringAsync());
+        Assert.False(filteredJson.RootElement.GetProperty("items")[0].TryGetProperty("inspectionItems", out _));
+        var filtered = await filteredResponse.Content.ReadFromJsonAsync<PagedStandards>();
         Assert.Single(filtered!.Items);
         var page = await client.GetFromJsonAsync<PagedStandards>("/api/patrol-standards?page=2&pageSize=1");
         Assert.Equal(2, page!.Total);
         Assert.Single(page.Items);
         Assert.Equal(2, page.Page);
 
-        var update = await client.PutAsJsonAsync($"/api/patrol-standards/{created.Id}", Draft("Updated", items: 2));
+        var updateInput = Draft("Updated", items: 2);
+        updateInput.InspectionItems![0] = updateInput.InspectionItems[0] with { Id = created.InspectionItems[0].Id };
+        var update = await client.PutAsJsonAsync($"/api/patrol-standards/{created.Id}", updateInput);
         Assert.True(update.IsSuccessStatusCode, await update.Content.ReadAsStringAsync());
         var updated = await update.Content.ReadFromJsonAsync<StandardOutput>();
         Assert.Equal("Updated", updated!.PatrolStandardName);
         Assert.Equal(2, updated.InspectionItems.Count);
         Assert.Equal([1, 2], updated.InspectionItems.Select(x => x.SequenceNo).ToArray());
+        Assert.Equal(created.InspectionItems[0].Id, updated.InspectionItems[0].Id);
+        Assert.NotEqual(Guid.Empty, updated.InspectionItems[1].Id);
         Assert.Equal(created.CreatedAtUtc, updated.CreatedAtUtc);
         Assert.Equal(HttpStatusCode.NoContent, (await client.DeleteAsync($"/api/patrol-standards/{created.Id}")).StatusCode);
         Assert.Equal(HttpStatusCode.NotFound, (await client.GetAsync($"/api/patrol-standards/{created.Id}")).StatusCode);
         using var scope = app.Factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<IpqcDbContext>();
         Assert.Equal(0, await db.PatrolStandardItems.CountAsync(x => x.PatrolStandardId == created.Id));
+    }
+
+    [Fact]
+    public async Task Update_preserves_edits_reorders_adds_and_removes_item_identity()
+    {
+        await using var app = await TestApp.CreateAsync();
+        var created = await Create(app.Client, Draft(items: 2));
+        var firstId = created.InspectionItems[0].Id;
+        var secondId = created.InspectionItems[1].Id;
+
+        var unchanged = await Update(app.Client, created.Id, ToInput(created));
+        Assert.Equal([firstId, secondId], unchanged.InspectionItems.Select(x => x.Id).ToArray());
+
+        var reorderedInput = ToInput(unchanged);
+        reorderedInput.InspectionItems!.Reverse();
+        reorderedInput.InspectionItems[0] = reorderedInput.InspectionItems[0] with { ProcessName = "Edited process" };
+        reorderedInput.InspectionItems.Add(Draft(items: 1).InspectionItems![0] with { Id = Guid.NewGuid(), ProcessCode = "NEW" });
+        var reordered = await Update(app.Client, created.Id, reorderedInput);
+        Assert.Equal([secondId, firstId], reordered.InspectionItems.Take(2).Select(x => x.Id).ToArray());
+        Assert.Equal([1, 2, 3], reordered.InspectionItems.Select(x => x.SequenceNo).ToArray());
+        Assert.Equal("Edited process", reordered.InspectionItems[0].ProcessName);
+        Assert.NotEqual(reorderedInput.InspectionItems[2].Id, reordered.InspectionItems[2].Id);
+        Assert.DoesNotContain(reordered.InspectionItems[2].Id, new[] { firstId, secondId });
+
+        var removeInput = ToInput(reordered) with { InspectionItems = [ToInput(reordered.InspectionItems[0])] };
+        var removed = await Update(app.Client, created.Id, removeInput);
+        Assert.Single(removed.InspectionItems);
+        Assert.Equal(secondId, removed.InspectionItems[0].Id);
+        using var scope = app.Factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<IpqcDbContext>();
+        Assert.False(await db.PatrolStandardItems.AnyAsync(x => x.Id == firstId));
+        Assert.Equal(1, await db.PatrolStandardItems.CountAsync(x => x.PatrolStandardId == created.Id));
+    }
+
+    [Fact]
+    public async Task Update_cannot_hijack_an_item_from_another_standard()
+    {
+        await using var app = await TestApp.CreateAsync();
+        var target = await Create(app.Client, Draft("Target"));
+        var other = await Create(app.Client, Draft("Other"));
+        var malicious = ToInput(target);
+        malicious.InspectionItems![0] = malicious.InspectionItems[0] with {
+            Id = other.InspectionItems[0].Id, ProcessCode = "ATTEMPTED-HIJACK"
+        };
+
+        var updated = await Update(app.Client, target.Id, malicious);
+        Assert.NotEqual(other.InspectionItems[0].Id, updated.InspectionItems[0].Id);
+        Assert.NotEqual(target.InspectionItems[0].Id, updated.InspectionItems[0].Id);
+        var untouched = await app.Client.GetFromJsonAsync<StandardOutput>($"/api/patrol-standards/{other.Id}");
+        Assert.Equal(other.InspectionItems[0].Id, untouched!.InspectionItems[0].Id);
+        Assert.Equal(other.InspectionItems[0].ProcessCode, untouched.InspectionItems[0].ProcessCode);
     }
 
     [Theory]
@@ -182,6 +247,24 @@ public sealed class PatrolStandardsApiTests
         result.EnsureSuccessStatusCode();
         return (await result.Content.ReadFromJsonAsync<StandardOutput>())!;
     }
+
+    private static async Task<StandardOutput> Update(HttpClient client, Guid id, StandardInput input)
+    {
+        var result = await client.PutAsJsonAsync($"/api/patrol-standards/{id}", input);
+        Assert.True(result.IsSuccessStatusCode, await result.Content.ReadAsStringAsync());
+        return (await result.Content.ReadFromJsonAsync<StandardOutput>())!;
+    }
+
+    private static StandardInput ToInput(StandardOutput standard) => new(
+        standard.PatrolStandardName, standard.FactoryCode, standard.FactoryName, standard.WorkshopCode,
+        standard.LineCode, standard.LineName, standard.MaterialCode,
+        standard.InspectionItems.Select(ToInput).ToList());
+
+    private static ItemInput ToInput(ItemOutput item) => new(
+        item.ProcessCode, item.ProcessName, item.InspectionItemCategory, item.InspectionItem,
+        item.InspectionContent, item.UpperLimitOperator, item.UpperLimitValue, item.LowerLimitOperator,
+        item.LowerLimitValue, item.InspectionType, item.SamplingPlan, item.SampleCount,
+        item.PhotoRequirement, item.DefectLevel, item.Id);
 
     private static Task<HttpResponseMessage> Import(HttpClient client, string name, byte[] bytes)
     {
