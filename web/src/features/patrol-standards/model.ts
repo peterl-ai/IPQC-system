@@ -37,12 +37,6 @@ export type PatrolStandardDraft = Omit<
   'id' | 'createdBy' | 'createdTime' | 'updatedBy' | 'updatedTime'
 >
 
-export interface MockAuditContext {
-  id: string
-  user: string
-  time: string
-}
-
 export function emptyPatrolStandardDraft(): PatrolStandardDraft {
   return {
     name: '',
@@ -87,63 +81,6 @@ export function toPatrolStandardDraft(standard: PatrolStandard): PatrolStandardD
     materialCode: standard.materialCode,
     inspectionItems: standard.inspectionItems.map((item) => ({ ...item })),
   }
-}
-
-export function createMockPatrolStandard(
-  standards: readonly PatrolStandard[],
-  draft: PatrolStandardDraft,
-  audit: MockAuditContext,
-): PatrolStandard[] {
-  return [
-    ...standards,
-    {
-      ...draft,
-      inspectionItems: draft.inspectionItems.map((item) => ({ ...item })),
-      id: audit.id,
-      createdBy: audit.user,
-      createdTime: audit.time,
-      updatedBy: audit.user,
-      updatedTime: audit.time,
-    },
-  ]
-}
-
-export function updateMockPatrolStandard(
-  standards: readonly PatrolStandard[],
-  id: string,
-  draft: PatrolStandardDraft,
-  audit: Omit<MockAuditContext, 'id'>,
-): PatrolStandard[] {
-  return standards.map((standard) => standard.id === id
-    ? {
-        ...standard,
-        ...draft,
-        inspectionItems: draft.inspectionItems.map((item) => ({ ...item })),
-        updatedBy: audit.user,
-        updatedTime: audit.time,
-      }
-    : standard)
-}
-
-export function copyMockPatrolStandard(
-  source: PatrolStandard,
-  createItemId: () => string,
-): PatrolStandardDraft {
-  const draft = toPatrolStandardDraft(source)
-  return {
-    ...draft,
-    inspectionItems: draft.inspectionItems.map((item) => ({
-      ...item,
-      id: createItemId(),
-    })),
-  }
-}
-
-export function deleteMockPatrolStandard(
-  standards: readonly PatrolStandard[],
-  id: string,
-): PatrolStandard[] {
-  return standards.filter((standard) => standard.id !== id)
 }
 
 export function isInspectionItemEmpty(item: PatrolStandardItem): boolean {

@@ -45,3 +45,4 @@ reference/private/
 # Local review / handoff artifacts
 /pr*.diff
 /project_handoff_*.md
+/.playwright-cli/

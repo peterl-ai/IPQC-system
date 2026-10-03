@@ -1,5 +1,5 @@
 export default {
-  product: { name: 'JAX Power IPQC', environment: 'Web foundation · Mock data' },
+  product: { name: 'JAX Power IPQC', environment: 'Patrol Standards · Local API' },
   nav: {
     home: 'Home', ipqc: 'IPQC', linePatrol: 'Line Patrol', standards: 'Patrol Standards',
     plans: 'Patrol Plans', tasks: 'Patrol Tasks', records: 'Completed Patrol Records',
@@ -11,7 +11,7 @@ export default {
     search: 'Search', reset: 'Reset', actions: 'Actions', details: 'Details', close: 'Close',
     cancel: 'Cancel', confirm: 'Confirm', edit: 'Edit', delete: 'Delete', active: 'Active', inactive: 'Inactive',
     enabled: 'Enabled', disabled: 'Disabled', all: 'All', noData: 'No records found',
-    mockNotice: 'Mock data only — changes are not persisted.', required: 'Required',
+    mockNotice: 'Patrol Standards are saved; other modules remain mock data.', required: 'Required',
   },
   home: {
     eyebrow: 'QUALITY OPERATIONS', title: 'Line Patrol, built for the factory floor.',
@@ -65,8 +65,11 @@ export default {
     title: 'Patrol Standard Editor', createTitle: 'New Patrol Standard', editTitle: 'Edit Patrol Standard', copyTitle: 'Copy Patrol Standard',
     header: 'Standard Information', detail: 'Inspection Items', addItem: 'Add inspection item', editItem: 'Edit inspection item',
     nonPersistent: 'Mock data only. Changes reset when the browser is refreshed.', mockSaved: 'Patrol standard saved to mock data.',
+    saved: 'Patrol standard saved.', copied: 'Patrol standard copied.', imported: 'Patrol standard imported.', unexpectedError: 'An unexpected error occurred.',
+    apiUnavailable: 'Patrol Standards API is unavailable.', forbidden: 'You do not have access to Patrol Standards.', notFound: 'Patrol standard not found.',
+    invalidWorkbook: 'The workbook is invalid or does not match the Patrol Standard template.', validationFailed: 'Please correct the invalid fields.',
     selectRecord: 'Select a patrol standard first.', copiedName: '{name} (Copy)', emptyItem: 'Enter at least one inspection item value.',
-    deleteTitle: 'Delete patrol standard', deleteConfirm: 'Are you sure you want to delete this patrol standard?', deleted: 'Patrol standard deleted from mock data.',
+    deleteTitle: 'Delete patrol standard', deleteConfirm: 'Are you sure you want to delete this patrol standard?', deleted: 'Patrol standard deleted.',
     exportDeferred: 'Excel export will be connected to the backend in a later phase.',
     importDeferred: 'Selected {file}. Excel parsing will be connected in a later phase.',
     invalidImportFile: 'Select a valid .xlsx file.',
