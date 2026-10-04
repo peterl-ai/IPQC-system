@@ -119,7 +119,7 @@
         <a-form-item :label="t('field.upperValue')"><a-input v-model:value="itemForm.upperValue" /></a-form-item>
         <a-form-item :label="t('field.lowerOperator')"><a-input v-model:value="itemForm.lowerOperator" /></a-form-item>
         <a-form-item :label="t('field.lowerValue')"><a-input v-model:value="itemForm.lowerValue" /></a-form-item>
-        <a-form-item :label="t('field.inspectionType')"><a-input v-model:value="itemForm.inspectionType" /></a-form-item>
+        <a-form-item :label="t('field.inspectionType')"><a-select v-model:value="itemForm.inspectionType" allow-clear :options="[{ value: 'Qualitative', label: t('task.type.Qualitative') }, { value: 'Quantitative', label: t('task.type.Quantitative') }]" /></a-form-item>
         <a-form-item :label="t('field.samplingPlan')"><a-input v-model:value="itemForm.samplingPlan" /></a-form-item>
         <a-form-item :label="t('field.sampleCount')"><a-input v-model:value="itemForm.sampleCount" /></a-form-item>
         <a-form-item :label="t('field.photoRequirement')"><a-input v-model:value="itemForm.photoRequirement" /></a-form-item>

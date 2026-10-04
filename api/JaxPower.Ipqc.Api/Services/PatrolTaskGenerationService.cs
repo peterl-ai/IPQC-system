@@ -15,6 +15,8 @@ public sealed class PatrolTaskGenerationService(IpqcDbContext db, TimeProvider c
         var window = Math.Clamp(configuration.GetValue("Scheduler:CatchUpWindowHours", 24), 1, 168);
         var earliest = now.AddHours(-window);
         var plans = await db.PatrolPlans.AsNoTracking().Include(x => x.Assignees)
+            .Include(x => x.PatrolStandard).ThenInclude(x => x.InspectionItems)
+            .AsSplitQuery()
             .Where(x => x.IsEnabled && x.EffectiveStartUtc <= now &&
                 (x.EffectiveEndUtc == null || x.EffectiveEndUtc >= earliest))
             .OrderBy(x => x.Id)
@@ -41,7 +43,27 @@ public sealed class PatrolTaskGenerationService(IpqcDbContext db, TimeProvider c
                     var task = new PatrolTask { Id = id, TaskNo = $"PT-{id:N}".ToUpperInvariant(),
                         PatrolPlanId = plan.Id, PatrolStandardId = plan.PatrolStandardId,
                         AssignedInspectorKey = assignee.AssigneeKey, ScheduledOccurrenceUtc = occurrence,
-                        GeneratedAtUtc = now, CreatedAtUtc = now, UpdatedAtUtc = now };
+                        GeneratedAtUtc = now, CreatedAtUtc = now, UpdatedAtUtc = now,
+                        PlanNoSnapshot = plan.PlanNo, PlanNameSnapshot = plan.PlanName,
+                        StandardNameSnapshot = plan.PatrolStandard.PatrolStandardName,
+                        FactoryCodeSnapshot = plan.FactoryCode.Length > 0 ? plan.FactoryCode : plan.PatrolStandard.FactoryCode,
+                        FactoryNameSnapshot = plan.FactoryName.Length > 0 ? plan.FactoryName : plan.PatrolStandard.FactoryName,
+                        WorkshopCodeSnapshot = plan.PatrolStandard.WorkshopCode,
+                        LineCodeSnapshot = plan.LineCode.Length > 0 ? plan.LineCode : plan.PatrolStandard.LineCode,
+                        LineNameSnapshot = plan.LineName.Length > 0 ? plan.LineName : plan.PatrolStandard.LineName,
+                        MaterialCodeSnapshot = plan.PatrolStandard.MaterialCode,
+                        SourceStandardUpdatedAtUtc = plan.PatrolStandard.UpdatedAtUtc,
+                        Items = plan.PatrolStandard.InspectionItems.OrderBy(x => x.SequenceNo).Select(x => new PatrolTaskItem
+                        {
+                            Id = Guid.NewGuid(), SourcePatrolStandardItemId = x.Id, SequenceNo = x.SequenceNo,
+                            ProcessCode = x.ProcessCode, ProcessName = x.ProcessName,
+                            InspectionItemCategory = x.InspectionItemCategory, InspectionItem = x.InspectionItem,
+                            InspectionContent = x.InspectionContent, UpperLimitOperator = x.UpperLimitOperator,
+                            UpperLimitValue = x.UpperLimitValue, LowerLimitOperator = x.LowerLimitOperator,
+                            LowerLimitValue = x.LowerLimitValue, InspectionType = x.InspectionType,
+                            SamplingPlan = x.SamplingPlan, SampleCount = x.SampleCount,
+                            PhotoRequirement = x.PhotoRequirement, DefectLevel = x.DefectLevel
+                        }).ToList() };
                     db.PatrolTasks.Add(task);
                     try
                     {
@@ -51,7 +73,7 @@ public sealed class PatrolTaskGenerationService(IpqcDbContext db, TimeProvider c
                     catch (DbUpdateException ex) when (IsOccurrenceUniqueViolation(ex))
                     {
                         // A competing worker won this occurrence; the database unique key is authoritative.
-                        db.Entry(task).State = EntityState.Detached;
+                        db.ChangeTracker.Clear();
                     }
                 }
             }
@@ -75,9 +97,8 @@ public sealed class PatrolTaskGenerationService(IpqcDbContext db, TimeProvider c
 
     private void DetachPendingTasks(Guid planId)
     {
-        foreach (var entry in db.ChangeTracker.Entries<PatrolTask>()
-                     .Where(x => x.State == EntityState.Added && x.Entity.PatrolPlanId == planId).ToList())
-            entry.State = EntityState.Detached;
+        // The scheduler only tracks its newly added task graphs; clear all pending children too.
+        db.ChangeTracker.Clear();
     }
 
     private static bool IsOccurrenceUniqueViolation(DbUpdateException exception) =>

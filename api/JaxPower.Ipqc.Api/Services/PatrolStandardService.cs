@@ -25,6 +25,9 @@ public sealed class PatrolStandardService(IpqcDbContext db, TimeProvider clock)
         {
             if (ItemValues(items[i]).All(string.IsNullOrWhiteSpace)) errors[$"InspectionItems[{i}]"] = ["An inspection item must contain at least one value."];
             if (ItemValues(items[i]).Any(v => v?.Length > 2000)) errors[$"InspectionItems[{i}]"] = ["Each inspection item value must be 2000 characters or fewer."];
+            if (!string.IsNullOrWhiteSpace(items[i].InspectionType) &&
+                InspectionJudgmentService.CanonicalType(items[i].InspectionType) is null)
+                errors[$"InspectionItems[{i}].InspectionType"] = ["Use Qualitative or Quantitative."];
         }
         return errors;
 
@@ -155,7 +158,7 @@ public sealed class PatrolStandardService(IpqcDbContext db, TimeProvider clock)
         item.UpperLimitValue = Clean(input.UpperLimitValue);
         item.LowerLimitOperator = Clean(input.LowerLimitOperator);
         item.LowerLimitValue = Clean(input.LowerLimitValue);
-        item.InspectionType = Clean(input.InspectionType);
+        item.InspectionType = InspectionJudgmentService.CanonicalType(input.InspectionType) ?? "";
         item.SamplingPlan = Clean(input.SamplingPlan);
         item.SampleCount = Clean(input.SampleCount);
         item.PhotoRequirement = Clean(input.PhotoRequirement);
