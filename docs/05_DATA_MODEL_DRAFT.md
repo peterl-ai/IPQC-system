@@ -97,7 +97,7 @@ Phase 1D persists a stable development `AssigneeKey` instead of `UserId`; the pr
 - CreatedAtUtc
 - UpdatedAtUtc
 
-Phase 1D persists only the generated task shell: `Id`, `TaskNo`, `PatrolPlanId`, `PatrolStandardId`, `AssignedInspectorKey`, `ScheduledOccurrenceUtc`, `GeneratedAtUtc`, `GenerationSource`, `Status=PendingInspection`, `CreatedAtUtc`, and `UpdatedAtUtc`. The remaining draft task fields and child entities belong to later phases. `(PatrolPlanId, ScheduledOccurrenceUtc)` is unique.
+Phase 1D persisted task shells. Phase 1E adds immutable Plan/Standard header snapshots and ordered item definition snapshots at generation, plus mutable Shift, result, status, timestamps, and current revision. `(PatrolPlanId, ScheduledOccurrenceUtc)` remains unique. Pre-1E local shells have null snapshot headers and are not eligible for submission; development data should be reset rather than backfilled with the current Standard.
 
 Suggested status state values:
 - PendingInspection
@@ -106,46 +106,19 @@ Suggested status state values:
 - Rejected
 - Completed
 
-Resubmission can transition `Rejected -> InProgress/PendingApproval` while preserving review/revision history.
+Resubmission transitions `Rejected -> PendingApproval`; draft correction may retain `Rejected` for the IPQA re-inspection queue.
 
-### PatrolTaskItem
-- Id
-- PatrolTaskId
-- StandardItemId
-- SequenceNo
-- InspectionValueText
-- InspectionValueNumeric
-- InspectionResult
-- ReinspectionResult
-- InspectedAtUtc
-- AbnormalCode
-- AbnormalType
-- AbnormalReason
-- AbnormalDescription
-- UpdatedAtUtc
+### PatrolTaskItem / PatrolTaskItemSample
+- `PatrolTaskItem` freezes the full ordered Standard Item definition, including type, limits, sample count, and photo requirement. It also holds mutable N/A answer, current judgment, and optional execution metadata. `(PatrolTaskId, SequenceNo)` is unique.
+- `PatrolTaskItemSample` holds ordered current numeric value or qualitative judgment, calculated quantitative judgment, and server inspection time. `(PatrolTaskItemId, SequenceNo)` is unique. At most 50 samples are accepted per item.
 
 ## Approval / audit
 
+### PatrolTaskSubmission / SubmissionItem / SubmissionSample
+Each successful submit persists a numbered immutable revision with Shift, overall result, server identity/time, every item N/A/judgment/metadata, and ordered sample values/results. `(PatrolTaskId, RevisionNo)` and `(PatrolTaskSubmissionItemId, SequenceNo)` are unique. Current draft changes after rejection do not change earlier submissions.
+
 ### PatrolTaskReview
-Immutable review records:
-- Id
-- PatrolTaskId
-- RevisionNo
-- ReviewerUserId
-- Decision (`Approved`, `Rejected`)
-- Reason (required for rejection)
-- ReviewedAtUtc
-
-### PatrolTaskRevision
-Recommended if inspection edits must be fully auditable:
-- Id
-- PatrolTaskId
-- RevisionNo
-- SubmittedByUserId
-- SubmittedAtUtc
-- SnapshotJson or normalized revision relationship
-
-Whether to persist full item snapshots per revision can be finalized before backend implementation. At minimum, rejection and resubmission events must not overwrite audit history.
+Each approval or reasoned rejection stores the revision number, server-side reviewer identity, decision, optional/required reason, and review time. `(PatrolTaskId, RevisionNo)` is unique and protects competing decisions. Batch approval uses one transaction for all selected tasks. Development currently stores the role fixture as reviewer; persistent users are deferred to Phase 1G.
 
 ## Attachments
 

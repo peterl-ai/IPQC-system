@@ -42,14 +42,12 @@ Goal: establish Vue web shell using **mock data only**.
 - idempotency/duplicate prevention
 
 ## Phase 1E — Patrol Task Execution Contract + PQE Approval
-- task API/domain state machine
-- future Android-compatible DTO/API contract
-- submission
-- PQE approve
-- PQE reject with mandatory reason
-- return to IPQA
-- correction/reinspection + resubmission state support
-- audit/review history
+- task API/domain state machine and future Android-compatible execution contract
+- task-time Plan/Standard and ordered item snapshots
+- temporary draft save, Shift, N/A, qualitative and quantitative samples, server judgment
+- immutable submission revisions and item/sample history
+- PQE approve, batch approve, reasoned reject, and re-inspection/resubmission
+- persistent PQE web Task list/detail and review actions
 
 ## Phase 1F — Completed Records + Reporting
 - filters/pagination

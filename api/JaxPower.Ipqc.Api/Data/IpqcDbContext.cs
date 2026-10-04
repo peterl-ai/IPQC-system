@@ -10,6 +10,12 @@ public sealed class IpqcDbContext(DbContextOptions<IpqcDbContext> options) : DbC
     public DbSet<PatrolPlan> PatrolPlans => Set<PatrolPlan>();
     public DbSet<PatrolPlanAssignee> PatrolPlanAssignees => Set<PatrolPlanAssignee>();
     public DbSet<PatrolTask> PatrolTasks => Set<PatrolTask>();
+    public DbSet<PatrolTaskItem> PatrolTaskItems => Set<PatrolTaskItem>();
+    public DbSet<PatrolTaskItemSample> PatrolTaskItemSamples => Set<PatrolTaskItemSample>();
+    public DbSet<PatrolTaskSubmission> PatrolTaskSubmissions => Set<PatrolTaskSubmission>();
+    public DbSet<PatrolTaskSubmissionItem> PatrolTaskSubmissionItems => Set<PatrolTaskSubmissionItem>();
+    public DbSet<PatrolTaskSubmissionSample> PatrolTaskSubmissionSamples => Set<PatrolTaskSubmissionSample>();
+    public DbSet<PatrolTaskReview> PatrolTaskReviews => Set<PatrolTaskReview>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -68,5 +74,51 @@ public sealed class IpqcDbContext(DbContextOptions<IpqcDbContext> options) : DbC
         task.Property(x => x.Status).HasMaxLength(50).IsRequired();
         task.Property(x => x.GenerationSource).HasMaxLength(50).IsRequired();
         task.HasOne(x => x.PatrolStandard).WithMany().HasForeignKey(x => x.PatrolStandardId).OnDelete(DeleteBehavior.Restrict);
+        task.Property(x => x.PlanNoSnapshot).HasMaxLength(50);
+        task.Property(x => x.PlanNameSnapshot).HasMaxLength(200);
+        task.Property(x => x.StandardNameSnapshot).HasMaxLength(200);
+        task.Property(x => x.Shift).HasMaxLength(10);
+        task.Property(x => x.OverallInspectionResult).HasMaxLength(20);
+        task.HasIndex(x => new { x.Status, x.ScheduledOccurrenceUtc });
+
+        var taskItem = modelBuilder.Entity<PatrolTaskItem>();
+        taskItem.HasKey(x => x.Id);
+        taskItem.HasIndex(x => new { x.PatrolTaskId, x.SequenceNo }).IsUnique();
+        taskItem.HasOne(x => x.PatrolTask).WithMany(x => x.Items).HasForeignKey(x => x.PatrolTaskId).OnDelete(DeleteBehavior.Cascade);
+        foreach (var property in typeof(PatrolTaskItem).GetProperties().Where(p => p.PropertyType == typeof(string)))
+            taskItem.Property(property.Name).HasMaxLength(2000);
+
+        var sample = modelBuilder.Entity<PatrolTaskItemSample>();
+        sample.HasKey(x => x.Id);
+        sample.HasIndex(x => new { x.PatrolTaskItemId, x.SequenceNo }).IsUnique();
+        sample.HasOne(x => x.PatrolTaskItem).WithMany(x => x.Samples).HasForeignKey(x => x.PatrolTaskItemId).OnDelete(DeleteBehavior.Cascade);
+
+        var submission = modelBuilder.Entity<PatrolTaskSubmission>();
+        submission.HasKey(x => x.Id);
+        submission.HasIndex(x => new { x.PatrolTaskId, x.RevisionNo }).IsUnique();
+        submission.HasOne(x => x.PatrolTask).WithMany(x => x.Submissions).HasForeignKey(x => x.PatrolTaskId).OnDelete(DeleteBehavior.Cascade);
+        submission.Property(x => x.Shift).HasMaxLength(10);
+        submission.Property(x => x.OverallInspectionResult).HasMaxLength(20);
+        submission.Property(x => x.SubmittedBy).HasMaxLength(100);
+
+        var submissionItem = modelBuilder.Entity<PatrolTaskSubmissionItem>();
+        submissionItem.HasKey(x => x.Id);
+        submissionItem.HasIndex(x => new { x.PatrolTaskSubmissionId, x.SequenceNo }).IsUnique();
+        submissionItem.HasOne(x => x.PatrolTaskSubmission).WithMany(x => x.Items).HasForeignKey(x => x.PatrolTaskSubmissionId).OnDelete(DeleteBehavior.Cascade);
+        foreach (var property in typeof(PatrolTaskSubmissionItem).GetProperties().Where(p => p.PropertyType == typeof(string)))
+            submissionItem.Property(property.Name).HasMaxLength(2000);
+
+        var submissionSample = modelBuilder.Entity<PatrolTaskSubmissionSample>();
+        submissionSample.HasKey(x => x.Id);
+        submissionSample.HasIndex(x => new { x.PatrolTaskSubmissionItemId, x.SequenceNo }).IsUnique();
+        submissionSample.HasOne(x => x.PatrolTaskSubmissionItem).WithMany(x => x.Samples).HasForeignKey(x => x.PatrolTaskSubmissionItemId).OnDelete(DeleteBehavior.Cascade);
+
+        var review = modelBuilder.Entity<PatrolTaskReview>();
+        review.HasKey(x => x.Id);
+        review.HasIndex(x => new { x.PatrolTaskId, x.RevisionNo }).IsUnique();
+        review.HasOne(x => x.PatrolTask).WithMany(x => x.Reviews).HasForeignKey(x => x.PatrolTaskId).OnDelete(DeleteBehavior.Cascade);
+        review.Property(x => x.Reviewer).HasMaxLength(100);
+        review.Property(x => x.Decision).HasMaxLength(20);
+        review.Property(x => x.Reason).HasMaxLength(2000);
     }
 }

@@ -142,7 +142,7 @@ See `docs/04_ARCHITECTURE.md`, `docs/05_DATA_MODEL_DRAFT.md`, and `docs/09_FILE_
 
 Do not ask an agent to build the entire product in one prompt. Keep each PR phase-scoped with acceptance criteria and tests.
 
-Phase 1C made **Patrol Standards Management** persistent. Phase 1D adds persistent Patrol Plans and server-generated task shells. Patrol Task execution, Completed Records, and User Management remain later-phase modules.
+Phase 1C made **Patrol Standards Management** persistent. Phase 1D added Patrol Plans and server scheduling. Phase 1E adds task snapshots, assigned-IPQA execution APIs, immutable submissions, and PQE task review. Completed Records, reports, Android UI, and User Management remain later-phase modules.
 
 ## Phase 1C local development
 
@@ -170,4 +170,10 @@ For a PostgreSQL deployment, set `Database__Provider=Postgres` and `ConnectionSt
 
 The server uses [ClosedXML 0.105.0](https://www.nuget.org/packages/ClosedXML/0.105.0) for `.xlsx` template/import/export. ClosedXML is [MIT-licensed](https://github.com/ClosedXML/ClosedXML/blob/develop/LICENSE), suitable for internal commercial use with its license notice retained in dependency distributions. Excel processing is server-side; imports accept one template-shaped sheet, up to 1,000 inspection items and a configurable maximum upload size (`Excel__MaxUploadBytes`, default 5 MiB). Export downloads the selected Patrol Standard. Excel import/export is not available for the other mock modules.
 
-Known limitations: no production authentication/identity provider yet; no PostgreSQL server integration test in this repository (the provider SQL is generated and checked, while automated relational tests use SQLite); no Patrol Task execution/approval, Android, report, or Material Verification backend; no inspection photo/file storage. Local HTTP is for development only. UI mock data outside Patrol Standards and Patrol Plans does not persist. The scheduler defaults to a 60-second poll and 24-hour catch-up window; see `docs/04_ARCHITECTURE.md` for recurrence, DST, and task-shell rules.
+Known limitations: no production authentication/identity provider yet; no PostgreSQL server integration test in this repository (provider SQL is generated and checked, while automated relational tests use SQLite); no Android UI, Completed Records/reporting, or Material Verification backend; no inspection photo/file storage. Local HTTP is for development only. User Management and Completed Records UI still use mock data. The scheduler defaults to a 60-second poll and 24-hour catch-up window; see `docs/04_ARCHITECTURE.md` for recurrence, DST, snapshots, and workflow rules.
+
+### Phase 1E local development
+
+Apply the new `Phase1ETaskExecutionApproval` migration before running the Phase 1E API. Phase 1D development databases may contain task shells without generation-time snapshots. These rows remain distinguishable by null snapshot fields and cannot be submitted. Reset disposable local development task data or use a fresh database; do not reconstruct historical snapshots from today's Standard. Preserve any local data you need before a reset.
+
+In Development, assigned IPQA API requests use `X-Dev-Role: ipqa` and `X-Dev-Assignee-Key: dev-ipqa-1` or `dev-ipqa-2`. This fixture is for future Android API testing; the IPQA web route remains blocked. Admin/PQE can list and review tasks in the web app. Production task endpoints fail closed until Phase 1G authentication is integrated.
