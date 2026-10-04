@@ -1,5 +1,6 @@
 using JaxPower.Ipqc.Api.Contracts;
 using JaxPower.Ipqc.Api.Data;
+using JaxPower.Ipqc.Api.Endpoints;
 using JaxPower.Ipqc.Api.Services;
 using Microsoft.EntityFrameworkCore;
 
@@ -8,6 +9,9 @@ builder.Services.AddProblemDetails();
 builder.Services.AddOpenApi();
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddScoped<PatrolStandardService>();
+builder.Services.AddScoped<PatrolPlanService>();
+builder.Services.AddScoped<PatrolTaskGenerationService>();
+builder.Services.AddHostedService<PatrolSchedulerBackgroundService>();
 builder.Services.AddSingleton<PatrolStandardExcel>();
 var provider = builder.Configuration["Database:Provider"] ?? "Sqlite";
 var connection = builder.Configuration.GetConnectionString("Ipqc") ?? throw new InvalidOperationException("ConnectionStrings:Ipqc is required.");
@@ -35,7 +39,9 @@ if (!app.Environment.IsDevelopment()) app.UseExceptionHandler();
 // In Development the role header is a test fixture, never a production identity.
 app.Use(async (context, next) =>
 {
-    if (!context.Request.Path.StartsWithSegments("/api/patrol-standards")) { await next(); return; }
+    var standards = context.Request.Path.StartsWithSegments("/api/patrol-standards");
+    var plans = context.Request.Path.StartsWithSegments("/api/patrol-plans");
+    if (!standards && !plans) { await next(); return; }
     if (!app.Environment.IsDevelopment())
     {
         await Results.Problem(statusCode: StatusCodes.Status503ServiceUnavailable,
@@ -46,7 +52,7 @@ app.Use(async (context, next) =>
     if (role is not ("admin" or "pqe"))
     {
         await Results.Problem(statusCode: StatusCodes.Status403Forbidden,
-            title: "Patrol Standards require Admin or PQE.").ExecuteAsync(context);
+            title: "Patrol Standards and Plans require Admin or PQE.").ExecuteAsync(context);
         return;
     }
     await next();
@@ -78,8 +84,12 @@ group.MapPut("/{id:guid}", async (Guid id, StandardInput input, PatrolStandardSe
     return await service.UpdateAsync(id, input, http.Request.Headers["X-Dev-Role"].ToString(), ct) is { } row
         ? Results.Ok(row) : Results.Problem(statusCode: 404, title: "Patrol Standard not found.");
 });
-group.MapDelete("/{id:guid}", async (Guid id, PatrolStandardService service, CancellationToken ct) =>
-    await service.DeleteAsync(id, ct) ? Results.NoContent() : Results.Problem(statusCode: 404, title: "Patrol Standard not found."));
+group.MapDelete("/{id:guid}", async (Guid id, PatrolStandardService service, IpqcDbContext db, CancellationToken ct) =>
+{
+    if (await db.PatrolPlans.AnyAsync(x => x.PatrolStandardId == id, ct) || await db.PatrolTasks.AnyAsync(x => x.PatrolStandardId == id, ct))
+        return Results.Problem(statusCode: 409, title: "Patrol Standard is referenced by a plan or task.");
+    return await service.DeleteAsync(id, ct) ? Results.NoContent() : Results.Problem(statusCode: 404, title: "Patrol Standard not found.");
+});
 group.MapPost("/{id:guid}/copy", async (Guid id, CopyInput? input, PatrolStandardService service, HttpContext http, CancellationToken ct) =>
 {
     if (input?.PatrolStandardName is { } name && (string.IsNullOrWhiteSpace(name) || name.Length > 200))
@@ -112,6 +122,8 @@ group.MapPost("/import", async (IFormFile file, PatrolStandardExcel excel, Patro
     var row = await service.CreateAsync(input, http.Request.Headers["X-Dev-Role"].ToString(), ct);
     return Results.Created($"/api/patrol-standards/{row.Id}", row);
 }).DisableAntiforgery();
+
+app.MapPatrolPlans();
 
 app.Run();
 

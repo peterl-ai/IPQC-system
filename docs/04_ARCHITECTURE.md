@@ -75,7 +75,16 @@ Requirements:
 - prevent duplicate tasks for the same plan/scheduled occurrence
 - audit generation timestamp/source
 
-A unique key such as `(PatrolPlanId, ScheduledOccurrenceUtc)` should be considered.
+Phase 1D enforces a unique key on `(PatrolPlanId, ScheduledOccurrenceUtc)`.
+
+### Phase 1D scheduler contract
+- Plans store a normalized structured schedule: Every N Hours (1–168), Daily times, or Weekly weekdays/times. The web editor uses plant-local wall-clock values; the API converts them using the persisted `America/New_York` IANA timezone.
+- The ASP.NET Core `BackgroundService` polls every 60 seconds by default. Its independently testable generation service evaluates due occurrences in a configurable 24-hour catch-up window. It never pre-generates future tasks.
+- Every N Hours is anchored to the plan's effective start wall-clock time. Spring-forward nonexistent local times are skipped; fall-back ambiguous times use the earlier UTC instant once.
+- The effective start and optional effective end are inclusive. `GenerationNotBeforeUtc` is exclusive. A schedule-affecting edit or re-enable advances that boundary, so the new definition cannot create historical tasks or backfill a disabled period. Generated tasks are not changed by later plan edits or disabling.
+- One enabled plan has exactly one active execution assignee. One due occurrence creates one task. A unique database index on `(PatrolPlanId, ScheduledOccurrenceUtc)` is the final concurrency guard; duplicate insert races are handled as an idempotent outcome.
+- Task shells contain `PendingInspection`, the selected standard ID, assignee key, scheduled UTC occurrence, generated UTC timestamp, and `Scheduler` generation source. Inspection values, review history, and immutable standard/item snapshots belong to Phase 1E.
+- Until Phase 1G, assignees use stable development keys `dev-ipqa-1` and `dev-ipqa-2`; these are fixtures, not production user identities. A blank Plan No. receives `PLN-` plus a server GUID; Task No. uses `PT-` plus a server GUID. These are implementation identifiers, not approved business numbering formats.
 
 ## Time handling
 - Persist timestamps in UTC.

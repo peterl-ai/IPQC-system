@@ -50,4 +50,11 @@ describe('language preference persistence', () => {
       defectLevel: 'Defect Level',
     })
   })
+  it('has bilingual keys for the Patrol Plan recurrence editor', () => {
+    for (const key of ['everyNHours', 'daily', 'weekly', 'times', 'weekdays', 'assigneeRequired', 'enableConfirm', 'disableConfirm'] as const) {
+      expect(en.plan[key]).toBeTruthy()
+      expect(zhCN.plan[key]).toBeTruthy()
+    }
+    expect(Object.keys(en.plan.day)).toEqual(Object.keys(zhCN.plan.day))
+  })
 })

@@ -142,7 +142,7 @@ See `docs/04_ARCHITECTURE.md`, `docs/05_DATA_MODEL_DRAFT.md`, and `docs/09_FILE_
 
 Do not ask an agent to build the entire product in one prompt. Keep each PR phase-scoped with acceptance criteria and tests.
 
-The current Phase 1C slice makes **Patrol Standards Management** persistent. Patrol Plans, Patrol Tasks, Completed Records, and User Management remain mock frontend modules; no Phase 1D workflow is implemented.
+Phase 1C made **Patrol Standards Management** persistent. Phase 1D adds persistent Patrol Plans and server-generated task shells. Patrol Task execution, Completed Records, and User Management remain later-phase modules.
 
 ## Phase 1C local development
 
@@ -170,4 +170,4 @@ For a PostgreSQL deployment, set `Database__Provider=Postgres` and `ConnectionSt
 
 The server uses [ClosedXML 0.105.0](https://www.nuget.org/packages/ClosedXML/0.105.0) for `.xlsx` template/import/export. ClosedXML is [MIT-licensed](https://github.com/ClosedXML/ClosedXML/blob/develop/LICENSE), suitable for internal commercial use with its license notice retained in dependency distributions. Excel processing is server-side; imports accept one template-shaped sheet, up to 1,000 inspection items and a configurable maximum upload size (`Excel__MaxUploadBytes`, default 5 MiB). Export downloads the selected Patrol Standard. Excel import/export is not available for the other mock modules.
 
-Known Phase 1C limitations: no production authentication/identity provider yet; no PostgreSQL server integration test in this repository (the provider SQL is generated and checked, while automated relational tests use SQLite); no real plans/tasks/scheduler/Android/report or Material Verification backend; no inspection photo/file storage. Local HTTP is for development only. UI mock data outside Patrol Standards does not persist.
+Known limitations: no production authentication/identity provider yet; no PostgreSQL server integration test in this repository (the provider SQL is generated and checked, while automated relational tests use SQLite); no Patrol Task execution/approval, Android, report, or Material Verification backend; no inspection photo/file storage. Local HTTP is for development only. UI mock data outside Patrol Standards and Patrol Plans does not persist. The scheduler defaults to a 60-second poll and 24-hour catch-up window; see `docs/04_ARCHITECTURE.md` for recurrence, DST, and task-shell rules.

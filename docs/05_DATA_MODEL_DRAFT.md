@@ -65,6 +65,7 @@ This is a domain draft, not a final migration/schema script.
 - EffectiveEndUtc
 - ScheduleExpression / ScheduleDefinition
 - TimeZoneId
+- GenerationNotBeforeUtc (exclusive boundary after creation/edit/re-enable)
 - CreatedByUserId
 - CreatedAtUtc
 - UpdatedAtUtc
@@ -74,6 +75,8 @@ This is a domain draft, not a final migration/schema script.
 - PatrolPlanId
 - UserId (IPQA)
 - IsActive
+
+Phase 1D persists a stable development `AssigneeKey` instead of `UserId`; the production user relationship is deferred to Phase 1G. Enabled plans require one active assignee.
 
 ## Patrol Task
 
@@ -93,6 +96,8 @@ This is a domain draft, not a final migration/schema script.
 - CurrentRevisionNo
 - CreatedAtUtc
 - UpdatedAtUtc
+
+Phase 1D persists only the generated task shell: `Id`, `TaskNo`, `PatrolPlanId`, `PatrolStandardId`, `AssignedInspectorKey`, `ScheduledOccurrenceUtc`, `GeneratedAtUtc`, `GenerationSource`, `Status=PendingInspection`, `CreatedAtUtc`, and `UpdatedAtUtc`. The remaining draft task fields and child entities belong to later phases. `(PatrolPlanId, ScheduledOccurrenceUtc)` is unique.
 
 Suggested status state values:
 - PendingInspection
