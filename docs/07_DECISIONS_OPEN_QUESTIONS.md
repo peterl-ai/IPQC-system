@@ -34,6 +34,13 @@
    - SMB/network share behind API
    - S3-compatible/MinIO
 4. File retention policy and maximum image size/count.
-5. Exact schedule editor UX (cron-like vs business-friendly recurrence form).
-6. Whether all submitted inspection values require full immutable revision snapshots or only review/action audit history.
-7. Whether Excel download must exactly match legacy GQMS layout or only preserve required report content.
+5. Whether all submitted inspection values require full immutable revision snapshots or only review/action audit history.
+6. Whether Excel download must exactly match legacy GQMS layout or only preserve required report content.
+
+## Phase 1D decisions and remaining questions
+- PQE uses a business-friendly recurrence form (Every N Hours, Daily, Weekly); shift, holiday, and monthly scheduling are deferred.
+- The Jacksonville plant timezone is `America/New_York`. Scheduling uses local wall-clock time and UTC persistence; spring gaps are skipped and fall overlaps choose the earlier UTC instant.
+- The scheduler catches up at most 24 hours by default and does not backfill disabled intervals or reinterpret past time after plan edits.
+- Exactly one active IPQA execution assignee per enabled plan; rotation and batch reassignment are deferred.
+- Generated task shells retain their selected standard ID and assignee. Whether to snapshot standard item content and submitted inspection revisions remains a Phase 1E audit decision.
+- Plan No. and Task No. formats are technical GUID-based conventions until a business numbering requirement is approved.

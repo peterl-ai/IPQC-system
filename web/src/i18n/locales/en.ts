@@ -1,5 +1,5 @@
 export default {
-  product: { name: 'JAX Power IPQC', environment: 'Patrol Standards · Local API' },
+  product: { name: 'JAX Power IPQC', environment: 'Line Patrol · Local API' },
   nav: {
     home: 'Home', ipqc: 'IPQC', linePatrol: 'Line Patrol', standards: 'Patrol Standards',
     plans: 'Patrol Plans', tasks: 'Patrol Tasks', records: 'Completed Patrol Records',
@@ -11,7 +11,7 @@ export default {
     search: 'Search', reset: 'Reset', actions: 'Actions', details: 'Details', close: 'Close',
     cancel: 'Cancel', confirm: 'Confirm', edit: 'Edit', delete: 'Delete', active: 'Active', inactive: 'Inactive',
     enabled: 'Enabled', disabled: 'Disabled', all: 'All', noData: 'No records found',
-    mockNotice: 'Patrol Standards are saved; other modules remain mock data.', required: 'Required',
+    mockNotice: 'Patrol Standards and Plans are saved; later modules remain mock data.', required: 'Required',
   },
   home: {
     eyebrow: 'QUALITY OPERATIONS', title: 'Line Patrol, built for the factory floor.',
@@ -76,6 +76,19 @@ export default {
     templateDeferred: 'Excel template download will be connected to the backend in a later phase.',
     selectedFile: 'Selected file: {file}',
     validation: { lineName: 'Line Name is required.', standardName: 'Patrol Standard Name is required.' },
+  },
+  plan: {
+    createTitle: 'New Patrol Plan', editTitle: 'Edit Patrol Plan', information: 'Plan Information', scheduleSection: 'Schedule',
+    autoNumber: 'Generated if left blank', timezone: 'Plant timezone', frequency: 'Frequency', intervalHours: 'Every N hours',
+    everyNHours: 'Every N Hours', daily: 'Daily', weekly: 'Weekly', weekdays: 'Weekdays', times: 'Times',
+    addTime: 'Add time', removeTime: 'Remove', enable: 'Enable', disable: 'Disable',
+    enableConfirm: 'Enable this plan?', disableConfirm: 'Disable this plan?', deleteConfirm: 'Delete this plan? Generated task history prevents deletion.',
+    everyHoursSummary: 'Every {count} hours', saved: 'Patrol plan saved.', apiUnavailable: 'Patrol Plans API is unavailable.',
+    loadFailed: 'Could not load the patrol plan.', saveFailed: 'Could not save the patrol plan.',
+    nameRequired: 'Plan Name is required.', standardRequired: 'Select a Patrol Standard.', startRequired: 'Effective Start is required.',
+    endAfterStart: 'Effective End must be later than Effective Start.', assigneeRequired: 'Select an IPQA assignee.',
+    intervalRequired: 'Enter an interval from 1 to 168 hours.', timesRequired: 'Add at least one valid time.', daysRequired: 'Select at least one weekday.',
+    day: { Monday: 'Mon', Tuesday: 'Tue', Wednesday: 'Wed', Thursday: 'Thu', Friday: 'Fri', Saturday: 'Sat', Sunday: 'Sun' },
   },
   task: { rejectTitle: 'Reject Patrol Task', rejectHelp: 'A reason is required before a task can be returned to IPQA.', reasonPlaceholder: 'Enter the correction or re-inspection reason' },
   record: { detailTitle: 'Patrol Record Details', basic: 'Basic Information', inspection: 'Inspection Details', previewTitle: 'Patrol Report Preview', previewNote: 'HTML preview shell · Excel generation is deferred to a backend reporting phase.', reportTitle: 'IN-PROCESS QUALITY INSPECTION REPORT', photoPlaceholder: 'No mock image', documentNo: 'Document No.', reportStatus: 'Approved record' },
