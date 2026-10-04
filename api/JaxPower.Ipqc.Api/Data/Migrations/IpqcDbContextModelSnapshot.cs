@@ -423,6 +423,9 @@ namespace JaxPower.Ipqc.Api.Data.Migrations
                         .HasMaxLength(2000)
                         .HasColumnType("TEXT");
 
+                    b.Property<DateTime?>("InspectedAtUtc")
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("InspectionContent")
                         .IsRequired()
                         .HasMaxLength(2000)
@@ -644,6 +647,9 @@ namespace JaxPower.Ipqc.Api.Data.Migrations
 
                     b.Property<string>("AbnormalType")
                         .HasMaxLength(2000)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("InspectedAtUtc")
                         .HasColumnType("TEXT");
 
                     b.Property<bool>("IsNa")

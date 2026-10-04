@@ -93,6 +93,7 @@ public sealed class PatrolTaskItem
     public string DefectLevel { get; set; } = "";
     public bool? IsNa { get; set; }
     public string? JudgmentResult { get; set; }
+    public DateTime? InspectedAtUtc { get; set; }
     public string? MachineCode { get; set; }
     public string? Series { get; set; }
     public string? Mold { get; set; }
@@ -135,6 +136,7 @@ public sealed class PatrolTaskSubmissionItem
     public int SequenceNo { get; set; }
     public bool IsNa { get; set; }
     public string JudgmentResult { get; set; } = "";
+    public DateTime InspectedAtUtc { get; set; }
     public string? MachineCode { get; set; }
     public string? Series { get; set; }
     public string? Mold { get; set; }

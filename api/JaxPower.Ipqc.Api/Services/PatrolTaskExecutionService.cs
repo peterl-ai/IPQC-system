@@ -57,14 +57,14 @@ public sealed class PatrolTaskExecutionService(IpqcDbContext db, TimeProvider cl
                 x.InspectionItemCategory, x.InspectionItem, x.InspectionContent,
                 x.UpperLimitOperator, x.UpperLimitValue, x.LowerLimitOperator, x.LowerLimitValue,
                 x.InspectionType, x.SamplingPlan, x.SampleCount, x.PhotoRequirement, x.DefectLevel,
-                x.IsNa, x.JudgmentResult, x.MachineCode, x.Series, x.Mold, x.AbnormalType,
+                x.IsNa, x.JudgmentResult, x.InspectedAtUtc, x.MachineCode, x.Series, x.Mold, x.AbnormalType,
                 x.AbnormalCause, x.Remarks, x.Samples.OrderBy(s => s.SequenceNo)
                     .Select(s => new TaskSampleOutput(s.Id, s.SequenceNo, s.InspectionValue,
                         s.JudgmentResult, s.InspectedAtUtc)).ToList())).ToList(),
             task.Submissions.OrderBy(x => x.RevisionNo).Select(x => new SubmissionOutput(x.RevisionNo,
                 x.Shift, x.OverallInspectionResult, x.SubmittedBy, x.SubmittedAtUtc,
                 x.Items.OrderBy(i => i.SequenceNo).Select(i => new SubmissionItemOutput(i.PatrolTaskItemId,
-                    i.SequenceNo, i.IsNa, i.JudgmentResult, i.MachineCode, i.Series, i.Mold,
+                    i.SequenceNo, i.IsNa, i.JudgmentResult, i.InspectedAtUtc, i.MachineCode, i.Series, i.Mold,
                     i.AbnormalType, i.AbnormalCause, i.Remarks, i.Samples.OrderBy(s => s.SequenceNo)
                         .Select(s => new SubmissionSampleOutput(s.SequenceNo, s.InspectionValue,
                             s.JudgmentResult, s.InspectedAtUtc)).ToList())).ToList(),
@@ -83,6 +83,7 @@ public sealed class PatrolTaskExecutionService(IpqcDbContext db, TimeProvider cl
         foreach (var draft in input.Items ?? [])
         {
             var item = task.Items.Single(x => x.Id == draft.Id);
+            var previousIsNa = item.IsNa;
             item.IsNa = draft.IsNa;
             item.MachineCode = draft.MachineCode?.Trim();
             item.Series = draft.Series?.Trim();
@@ -103,17 +104,35 @@ public sealed class PatrolTaskExecutionService(IpqcDbContext db, TimeProvider cl
                     db.PatrolTaskItemSamples.Add(sample);
                 }
                 var inspectionType = InspectionJudgmentService.CanonicalType(item.InspectionType);
-                sample.InspectionValue = inspectionType == "Quantitative" ? source.InspectionValue : null;
-                sample.JudgmentResult = inspectionType == "Qualitative" ? source.JudgmentResult : null;
-                sample.InspectedAtUtc = sample.InspectionValue is not null || sample.JudgmentResult is not null ? now : null;
+                var inspectionValue = inspectionType == "Quantitative" ? source.InspectionValue : null;
+                var sampleJudgment = inspectionType == "Qualitative" ? source.JudgmentResult : null;
+                var inputChanged = inspectionType == "Quantitative"
+                    ? sample.InspectionValue != inspectionValue
+                    : sample.JudgmentResult != sampleJudgment;
+                sample.InspectionValue = inspectionValue;
+                sample.JudgmentResult = sampleJudgment;
+                if (inputChanged)
+                    sample.InspectedAtUtc = inspectionValue is not null || sampleJudgment is not null ? now : null;
             }
             foreach (var old in item.Samples.Where(x => x.SequenceNo > submittedSamples.Count).ToList())
             {
                 item.Samples.Remove(old);
                 db.PatrolTaskItemSamples.Remove(old);
             }
+            judgment.Calculate(task, strict: false);
+            if (item.IsNa == true)
+            {
+                if (previousIsNa != true) item.InspectedAtUtc = now;
+            }
+            else
+            {
+                item.InspectedAtUtc = item.JudgmentResult is null ? null : item.Samples
+                    .Where(x => x.InspectedAtUtc is not null)
+                    .Select(x => x.InspectedAtUtc)
+                    .OrderByDescending(x => x)
+                    .FirstOrDefault();
+            }
         }
-        judgment.Calculate(task, strict: false);
         try
         {
             await using var tx = await db.Database.BeginTransactionAsync(ct);
@@ -143,6 +162,8 @@ public sealed class PatrolTaskExecutionService(IpqcDbContext db, TimeProvider cl
         if (task.PlanNoSnapshot is null || task.StandardNameSnapshot is null)
             throw new TaskWorkflowException("This development Task predates snapshots; reset local development task data.");
         var errors = judgment.Calculate(task, strict: true);
+        foreach (var item in task.Items.Where(x => x.JudgmentResult is not null && x.InspectedAtUtc is null))
+            errors[$"Items[{item.SequenceNo}].InspectedAtUtc"] = ["The completed item has no inspection time; save its current inspection again."];
         if (errors.Count > 0) throw new TaskValidationException(errors);
         var now = clock.GetUtcNow().UtcDateTime;
         var revision = task.CurrentRevisionNo + 1;
@@ -154,7 +175,7 @@ public sealed class PatrolTaskExecutionService(IpqcDbContext db, TimeProvider cl
             Items = task.Items.OrderBy(x => x.SequenceNo).Select(x => new PatrolTaskSubmissionItem
             {
                 Id = Guid.NewGuid(), PatrolTaskItemId = x.Id, SequenceNo = x.SequenceNo,
-                IsNa = x.IsNa!.Value, JudgmentResult = x.JudgmentResult!,
+                IsNa = x.IsNa!.Value, JudgmentResult = x.JudgmentResult!, InspectedAtUtc = x.InspectedAtUtc!.Value,
                 MachineCode = x.MachineCode, Series = x.Series, Mold = x.Mold,
                 AbnormalType = x.AbnormalType, AbnormalCause = x.AbnormalCause, Remarks = x.Remarks,
                 Samples = x.IsNa == true ? [] : x.Samples.OrderBy(s => s.SequenceNo)

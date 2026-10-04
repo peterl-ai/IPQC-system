@@ -43,6 +43,7 @@ export interface TaskItem {
   photoRequirement: string
   isNa: boolean | null
   judgmentResult: string | null
+  inspectedAtUtc: string | null
   remarks: string | null
   samples: TaskSample[]
 }
@@ -52,6 +53,7 @@ export interface SubmissionItem {
   sequenceNo: number
   isNa: boolean
   judgmentResult: string
+  inspectedAtUtc: string
   remarks: string | null
   samples: SubmissionSample[]
 }

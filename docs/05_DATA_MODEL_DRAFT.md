@@ -109,13 +109,13 @@ Suggested status state values:
 Resubmission transitions `Rejected -> PendingApproval`; draft correction may retain `Rejected` for the IPQA re-inspection queue.
 
 ### PatrolTaskItem / PatrolTaskItemSample
-- `PatrolTaskItem` freezes the full ordered Standard Item definition, including type, limits, sample count, and photo requirement. It also holds mutable N/A answer, current judgment, and optional execution metadata. `(PatrolTaskId, SequenceNo)` is unique.
-- `PatrolTaskItemSample` holds ordered current numeric value or qualitative judgment, calculated quantitative judgment, and server inspection time. `(PatrolTaskItemId, SequenceNo)` is unique. At most 50 samples are accepted per item.
+- `PatrolTaskItem` freezes the full ordered Standard Item definition, including type, limits, sample count, and photo requirement. It also holds mutable N/A answer, current judgment, item completion time, and optional execution metadata. N/A decisions receive an item completion time even though they have no samples. `(PatrolTaskId, SequenceNo)` is unique.
+- `PatrolTaskItemSample` holds ordered current numeric value or qualitative judgment, calculated quantitative judgment, and server inspection time. Identical temporary saves preserve that time; changing or clearing the effective input updates or clears it. `(PatrolTaskItemId, SequenceNo)` is unique. At most 50 samples are accepted per item.
 
 ## Approval / audit
 
 ### PatrolTaskSubmission / SubmissionItem / SubmissionSample
-Each successful submit persists a numbered immutable revision with Shift, overall result, server identity/time, every item N/A/judgment/metadata, and ordered sample values/results. `(PatrolTaskId, RevisionNo)` and `(PatrolTaskSubmissionItemId, SequenceNo)` are unique. Current draft changes after rejection do not change earlier submissions.
+Each successful submit persists a numbered immutable revision with Shift, overall result, server identity/time, every item N/A/judgment/inspection-time/metadata, and ordered sample values/results/times. `(PatrolTaskId, RevisionNo)` and `(PatrolTaskSubmissionItemId, SequenceNo)` are unique. Current draft changes after rejection do not change earlier submissions.
 
 ### PatrolTaskReview
 Each approval or reasoned rejection stores the revision number, server-side reviewer identity, decision, optional/required reason, and review time. `(PatrolTaskId, RevisionNo)` is unique and protects competing decisions. Batch approval uses one transaction for all selected tasks. Development currently stores the role fixture as reviewer; persistent users are deferred to Phase 1G.

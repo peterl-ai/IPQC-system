@@ -79,7 +79,7 @@
                 <a-descriptions-item :label="t('field.sampleCount')">{{ item.sampleCount }}</a-descriptions-item>
                 <a-descriptions-item :label="t('task.isNa')">{{ naLabel(item.isNa) }}</a-descriptions-item>
                 <a-descriptions-item :label="t('task.judgment')">{{ resultLabel(item.judgmentResult) }}</a-descriptions-item>
-                <a-descriptions-item :label="t('field.inspectionTime')">{{ plantDate(item.samples[0]?.inspectedAtUtc) }}</a-descriptions-item>
+                <a-descriptions-item :label="t('field.inspectionTime')">{{ plantDate(item.inspectedAtUtc) }}</a-descriptions-item>
                 <a-descriptions-item :label="t('task.remarks')">{{ item.remarks }}</a-descriptions-item>
               </a-descriptions>
               <div v-for="sample in item.samples" :key="sample.id" class="sample-line">{{ t('task.sample') }} {{ sample.sequenceNo }} · {{ sample.inspectionValue ?? '—' }} · {{ resultLabel(sample.judgmentResult) }}</div>
@@ -91,7 +91,7 @@
             <a-timeline-item v-for="submission in detail.submissions" :key="submission.revisionNo">
               <strong>{{ t('task.revision') }} {{ submission.revisionNo }}</strong> · {{ submission.submittedBy }} · {{ plantDate(submission.submittedAtUtc) }} · {{ resultLabel(submission.overallInspectionResult) }}
               <div v-for="item in submission.items" :key="item.patrolTaskItemId" class="history-item">
-                {{ item.sequenceNo }}. {{ itemName(item.patrolTaskItemId) }} · {{ resultLabel(item.judgmentResult) }}
+                {{ item.sequenceNo }}. {{ itemName(item.patrolTaskItemId) }} · {{ resultLabel(item.judgmentResult) }} · {{ t('field.inspectionTime') }}: {{ plantDate(item.inspectedAtUtc) }}
                 <span v-for="sample in item.samples" :key="sample.sequenceNo"> · {{ t('task.sample') }} {{ sample.sequenceNo }}: {{ sample.inspectionValue ?? '—' }} / {{ resultLabel(sample.judgmentResult) }}</span>
               </div>
               <div v-if="submission.review" class="review-line">{{ reviewLabel(submission.review.decision) }} · {{ submission.review.reviewer }} · {{ plantDate(submission.review.reviewedAtUtc) }}<span v-if="submission.review.reason"> · {{ t('field.rejectReason') }}: {{ submission.review.reason }}</span></div>
@@ -158,7 +158,12 @@ const columns = computed<TableColumnsType>(() => [
   c('field.line', 'lineNameSnapshot'), { title: t('field.shift'), key: 'shift', width: 100 },
   { title: t('common.actions'), key: 'actions', fixed: 'right', width: 240 },
 ])
-function plantDate(value?: string | null) { return value ? new Intl.DateTimeFormat('sv-SE', { timeZone: 'America/New_York', dateStyle: 'short', timeStyle: 'short' }).format(new Date(value)) : '—' }
+function plantDate(value?: string | null) {
+  return value ? new Intl.DateTimeFormat('sv-SE', {
+    timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false,
+  }).format(new Date(value)) : '—'
+}
 function statusLabel(value: string) { return t(`task.status.${value}`) }
 function resultLabel(value?: string | null) { return value ? t(`task.result.${value}`) : '—' }
 function shiftLabel(value?: string | null) { return value ? t(`task.shift.${value}`) : '—' }

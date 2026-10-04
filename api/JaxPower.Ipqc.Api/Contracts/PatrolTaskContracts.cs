@@ -19,11 +19,11 @@ public sealed record TaskItemOutput(Guid Id, Guid SourcePatrolStandardItemId, in
     string ProcessName, string InspectionItemCategory, string InspectionItem, string InspectionContent,
     string UpperLimitOperator, string UpperLimitValue, string LowerLimitOperator, string LowerLimitValue,
     string InspectionType, string SamplingPlan, string SampleCount, string PhotoRequirement, string DefectLevel,
-    bool? IsNa, string? JudgmentResult, string? MachineCode, string? Series, string? Mold,
+    bool? IsNa, string? JudgmentResult, DateTime? InspectedAtUtc, string? MachineCode, string? Series, string? Mold,
     string? AbnormalType, string? AbnormalCause, string? Remarks, List<TaskSampleOutput> Samples);
 public sealed record SubmissionSampleOutput(int SequenceNo, decimal? InspectionValue, string JudgmentResult, DateTime? InspectedAtUtc);
 public sealed record SubmissionItemOutput(Guid PatrolTaskItemId, int SequenceNo, bool IsNa, string JudgmentResult,
-    string? MachineCode, string? Series, string? Mold, string? AbnormalType, string? AbnormalCause,
+    DateTime InspectedAtUtc, string? MachineCode, string? Series, string? Mold, string? AbnormalType, string? AbnormalCause,
     string? Remarks, List<SubmissionSampleOutput> Samples);
 public sealed record ReviewOutput(int RevisionNo, string Reviewer, string Decision, string? Reason, DateTime ReviewedAtUtc);
 public sealed record SubmissionOutput(int RevisionNo, string Shift, string OverallInspectionResult,

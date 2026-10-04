@@ -170,6 +170,99 @@ public sealed class PatrolTaskWorkflowTests
     }
 
     [Fact]
+    public async Task Inspection_times_are_stable_complete_and_frozen_per_revision()
+    {
+        await using var app = await Fixture.CreateAsync();
+        var standard = await app.StandardAsync("Audit Standard",
+            [Item("Visual"), Item("Measure", "Quantitative", "1", ">=", "3", "<=", "6"), Item("Not applicable")]);
+        await app.PlanAsync(standard.Id);
+        await app.GenerateAsync();
+        var task = await app.DetailAsync((await app.TasksAsync()).Single().Id);
+        var qualitative = task.Items[0].Id;
+        var quantitative = task.Items[1].Id;
+        var na = task.Items[2].Id;
+
+        app.Clock.Now = new DateTimeOffset(2026, 10, 3, 12, 10, 0, TimeSpan.Zero);
+        var firstInspection = app.Clock.Now.UtcDateTime;
+        var initial = new TaskDraftInput("Day",
+        [
+            new TaskItemDraft(qualitative, false, [new TaskSampleDraft(null, "OK")]),
+            new TaskItemDraft(quantitative, false, [new TaskSampleDraft(4.5m, null)]),
+            new TaskItemDraft(na, true, [])
+        ]);
+        Assert.Equal(HttpStatusCode.OK, (await app.Ipqa.PutAsJsonAsync($"/api/patrol-tasks/{task.Summary.Id}/draft", initial)).StatusCode);
+        task = await app.DetailAsync(task.Summary.Id);
+        Assert.Equal(firstInspection, task.Items[0].InspectedAtUtc);
+        Assert.Equal(firstInspection, task.Items[1].InspectedAtUtc);
+        Assert.Equal(firstInspection, task.Items[2].InspectedAtUtc);
+        Assert.Equal(firstInspection, task.Items[0].Samples.Single().InspectedAtUtc);
+        Assert.Equal(firstInspection, task.Items[1].Samples.Single().InspectedAtUtc);
+        Assert.Empty(task.Items[2].Samples);
+
+        app.Clock.Now = new DateTimeOffset(2026, 10, 3, 12, 20, 0, TimeSpan.Zero);
+        Assert.Equal(HttpStatusCode.OK, (await app.Ipqa.PutAsJsonAsync($"/api/patrol-tasks/{task.Summary.Id}/draft", initial)).StatusCode);
+        task = await app.DetailAsync(task.Summary.Id);
+        Assert.All(task.Items, item => Assert.Equal(firstInspection, item.InspectedAtUtc));
+        Assert.Equal(firstInspection, task.Items[0].Samples.Single().InspectedAtUtc);
+        Assert.Equal(firstInspection, task.Items[1].Samples.Single().InspectedAtUtc);
+
+        app.Clock.Now = new DateTimeOffset(2026, 10, 3, 12, 30, 0, TimeSpan.Zero);
+        Assert.Equal(HttpStatusCode.OK, (await app.Ipqa.PutAsJsonAsync($"/api/patrol-tasks/{task.Summary.Id}/draft",
+            new TaskDraftInput(null, [new TaskItemDraft(quantitative, false, [new TaskSampleDraft(null, null)])]))).StatusCode);
+        task = await app.DetailAsync(task.Summary.Id);
+        Assert.Null(task.Items[1].InspectedAtUtc);
+        Assert.Null(task.Items[1].Samples.Single().InspectedAtUtc);
+
+        app.Clock.Now = new DateTimeOffset(2026, 10, 3, 12, 40, 0, TimeSpan.Zero);
+        var restoredAt = app.Clock.Now.UtcDateTime;
+        Assert.Equal(HttpStatusCode.OK, (await app.Ipqa.PutAsJsonAsync($"/api/patrol-tasks/{task.Summary.Id}/draft",
+            new TaskDraftInput(null, [new TaskItemDraft(quantitative, false, [new TaskSampleDraft(4.5m, null)])]))).StatusCode);
+        task = await app.DetailAsync(task.Summary.Id);
+        Assert.Equal(restoredAt, task.Items[1].InspectedAtUtc);
+        Assert.Equal(restoredAt, task.Items[1].Samples.Single().InspectedAtUtc);
+
+        app.Clock.Now = new DateTimeOffset(2026, 10, 3, 12, 50, 0, TimeSpan.Zero);
+        var revisionOneInspection = app.Clock.Now.UtcDateTime;
+        Assert.Equal(HttpStatusCode.OK, (await app.Ipqa.PutAsJsonAsync($"/api/patrol-tasks/{task.Summary.Id}/draft",
+            new TaskDraftInput(null,
+            [
+                new TaskItemDraft(qualitative, false, [new TaskSampleDraft(null, "NG")]),
+                new TaskItemDraft(quantitative, false, [new TaskSampleDraft(5m, null)]),
+                new TaskItemDraft(na, true, [])
+            ]))).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await app.Ipqa.PostAsync($"/api/patrol-tasks/{task.Summary.Id}/submit", null)).StatusCode);
+        task = await app.DetailAsync(task.Summary.Id);
+        Assert.Equal(revisionOneInspection, task.Submissions[0].Items[0].InspectedAtUtc);
+        Assert.Equal(revisionOneInspection, task.Submissions[0].Items[0].Samples.Single().InspectedAtUtc);
+        Assert.Equal(revisionOneInspection, task.Submissions[0].Items[1].InspectedAtUtc);
+        Assert.Equal(revisionOneInspection, task.Submissions[0].Items[1].Samples.Single().InspectedAtUtc);
+        Assert.Equal(firstInspection, task.Submissions[0].Items[2].InspectedAtUtc);
+        Assert.Empty(task.Submissions[0].Items[2].Samples);
+
+        Assert.Equal(HttpStatusCode.NoContent, (await app.Pqe.PostAsJsonAsync($"/api/patrol-tasks/{task.Summary.Id}/reject",
+            new RejectTaskInput("Reinspect"))).StatusCode);
+        app.Clock.Now = new DateTimeOffset(2026, 10, 3, 13, 0, 0, TimeSpan.Zero);
+        var revisionTwoInspection = app.Clock.Now.UtcDateTime;
+        Assert.Equal(HttpStatusCode.OK, (await app.Ipqa.PutAsJsonAsync($"/api/patrol-tasks/{task.Summary.Id}/draft",
+            new TaskDraftInput(null,
+            [
+                new TaskItemDraft(qualitative, false, [new TaskSampleDraft(null, "OK")]),
+                new TaskItemDraft(quantitative, false, [new TaskSampleDraft(4m, null)])
+            ]))).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await app.Ipqa.PostAsync($"/api/patrol-tasks/{task.Summary.Id}/submit", null)).StatusCode);
+        task = await app.DetailAsync(task.Summary.Id);
+        Assert.Equal(2, task.Submissions.Count);
+        Assert.Equal(revisionOneInspection, task.Submissions[0].Items[0].InspectedAtUtc);
+        Assert.Equal(revisionOneInspection, task.Submissions[0].Items[0].Samples.Single().InspectedAtUtc);
+        Assert.Equal(revisionOneInspection, task.Submissions[0].Items[1].InspectedAtUtc);
+        Assert.Equal(revisionOneInspection, task.Submissions[0].Items[1].Samples.Single().InspectedAtUtc);
+        Assert.Equal(revisionTwoInspection, task.Submissions[1].Items[0].InspectedAtUtc);
+        Assert.Equal(revisionTwoInspection, task.Submissions[1].Items[0].Samples.Single().InspectedAtUtc);
+        Assert.Equal(revisionTwoInspection, task.Submissions[1].Items[1].InspectedAtUtc);
+        Assert.Equal(revisionTwoInspection, task.Submissions[1].Items[1].Samples.Single().InspectedAtUtc);
+    }
+
+    [Fact]
     public async Task Sample_count_qualitative_and_na_rules_are_enforced()
     {
         await using var app = await Fixture.CreateAsync();
