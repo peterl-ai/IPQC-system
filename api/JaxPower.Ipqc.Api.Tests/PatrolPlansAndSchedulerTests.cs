@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Http.Json;
+using System.Text.Json;
 using JaxPower.Ipqc.Api.Contracts;
 using JaxPower.Ipqc.Api.Data;
 using JaxPower.Ipqc.Api.Domain;
@@ -9,6 +10,7 @@ using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -176,6 +178,76 @@ public sealed class PatrolPlansAndSchedulerTests
     }
 
     [Fact]
+    public async Task Database_plan_number_violation_is_translated_for_race_handling()
+    {
+        const string planNo = "PLAN-RACE-001";
+        await using var app = await TestApp.CreateAsync(new PlanNoRaceInterceptor(planNo));
+        var standard = await app.StandardAsync();
+        var response = await app.Client.PostAsJsonAsync("/api/patrol-plans", Draft(standard) with { PlanNo = planNo });
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        using var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.Equal("Plan No. is already in use.",
+            body.RootElement.GetProperty("errors").GetProperty("PlanNo")[0].GetString());
+
+        using var scope = app.Factory.Services.CreateScope();
+        Assert.Equal(1, await scope.ServiceProvider.GetRequiredService<IpqcDbContext>()
+            .PatrolPlans.CountAsync(x => x.PlanNo == planNo));
+    }
+
+    [Fact]
+    public async Task Corrupt_plan_does_not_prevent_later_valid_plan_generation()
+    {
+        await using var app = await TestApp.CreateAsync();
+        var standard = await app.StandardAsync();
+        var corruptPlanId = Guid.Parse("00000000-0000-0000-0000-000000000001");
+        using (var scope = app.Factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<IpqcDbContext>();
+            db.PatrolPlans.Add(new PatrolPlan
+            {
+                Id = corruptPlanId,
+                PlanNo = "CORRUPT-001",
+                PlanName = "Corrupt schedule",
+                PatrolStandardId = standard,
+                FactoryCode = "F1",
+                FactoryName = "Factory",
+                LineCode = "L1",
+                LineName = "Line A",
+                IsEnabled = true,
+                EffectiveStartUtc = InitialUtc,
+                ScheduleDefinition = "{not-json",
+                TimeZoneId = PatrolSchedule.PlantTimeZone,
+                GenerationNotBeforeUtc = InitialUtc.AddTicks(-1),
+                CreatedBy = "test",
+                CreatedAtUtc = InitialUtc,
+                UpdatedBy = "test",
+                UpdatedAtUtc = InitialUtc,
+                Assignees =
+                [
+                    new PatrolPlanAssignee
+                    {
+                        Id = Guid.NewGuid(),
+                        AssigneeKey = "dev-ipqa-1",
+                        IsActive = true
+                    }
+                ]
+            });
+            await db.SaveChangesAsync();
+        }
+
+        var validPlan = await app.CreateAsync(Draft(standard));
+        app.Clock.Now = new DateTimeOffset(2026, 10, 3, 14, 0, 0, TimeSpan.Zero);
+        Assert.Equal(2, await app.GenerateAsync());
+
+        using var verificationScope = app.Factory.Services.CreateScope();
+        var tasks = await verificationScope.ServiceProvider.GetRequiredService<IpqcDbContext>()
+            .PatrolTasks.AsNoTracking().ToListAsync();
+        Assert.Equal(2, tasks.Count);
+        Assert.All(tasks, task => Assert.Equal(validPlan.Id, task.PatrolPlanId));
+        Assert.DoesNotContain(tasks, task => task.PatrolPlanId == corruptPlanId);
+    }
+
+    [Fact]
     public async Task Overlapping_generation_passes_produce_one_task_per_occurrence()
     {
         await using var app = await TestApp.CreateAsync();
@@ -225,13 +297,54 @@ public sealed class PatrolPlansAndSchedulerTests
         public override DateTimeOffset GetUtcNow() => Now;
     }
 
+    private sealed class PlanNoRaceInterceptor(string planNo) : SaveChangesInterceptor
+    {
+        private int triggered;
+
+        public override async ValueTask<InterceptionResult<int>> SavingChangesAsync(DbContextEventData eventData,
+            InterceptionResult<int> result, CancellationToken cancellationToken = default)
+        {
+            var pending = eventData.Context?.ChangeTracker.Entries<PatrolPlan>()
+                .SingleOrDefault(x => x.State == EntityState.Added && x.Entity.PlanNo == planNo)?.Entity;
+            if (pending is null || Interlocked.Exchange(ref triggered, 1) != 0) return result;
+
+            var options = new DbContextOptionsBuilder<IpqcDbContext>()
+                .UseSqlite(eventData.Context!.Database.GetConnectionString())
+                .Options;
+            await using var competingDb = new IpqcDbContext(options);
+            competingDb.PatrolPlans.Add(new PatrolPlan
+            {
+                Id = Guid.NewGuid(),
+                PlanNo = pending.PlanNo,
+                PlanName = "Competing request",
+                PatrolStandardId = pending.PatrolStandardId,
+                FactoryCode = pending.FactoryCode,
+                FactoryName = pending.FactoryName,
+                LineCode = pending.LineCode,
+                LineName = pending.LineName,
+                IsEnabled = false,
+                EffectiveStartUtc = pending.EffectiveStartUtc,
+                EffectiveEndUtc = pending.EffectiveEndUtc,
+                ScheduleDefinition = pending.ScheduleDefinition,
+                TimeZoneId = pending.TimeZoneId,
+                GenerationNotBeforeUtc = pending.GenerationNotBeforeUtc,
+                CreatedBy = "competing-request",
+                CreatedAtUtc = pending.CreatedAtUtc,
+                UpdatedBy = "competing-request",
+                UpdatedAtUtc = pending.UpdatedAtUtc
+            });
+            await competingDb.SaveChangesAsync(cancellationToken);
+            return result;
+        }
+    }
+
     private sealed class TestApp(WebApplicationFactory<Program> factory, HttpClient client, ManualClock clock, string dbPath) : IAsyncDisposable
     {
         public WebApplicationFactory<Program> Factory { get; } = factory;
         public HttpClient Client { get; } = client;
         public ManualClock Clock { get; } = clock;
 
-        public static async Task<TestApp> CreateAsync()
+        public static async Task<TestApp> CreateAsync(SaveChangesInterceptor? interceptor = null)
         {
             var path = Path.Combine(Path.GetTempPath(), $"ipqc-plan-{Guid.NewGuid():N}.db");
             var clock = new ManualClock();
@@ -245,7 +358,11 @@ public sealed class PatrolPlansAndSchedulerTests
                     services.RemoveAll<DbContextOptions<IpqcDbContext>>();
                     services.RemoveAll<TimeProvider>();
                     services.AddSingleton<TimeProvider>(clock);
-                    services.AddDbContext<IpqcDbContext>(options => options.UseSqlite($"Data Source={path}"));
+                    services.AddDbContext<IpqcDbContext>(options =>
+                    {
+                        options.UseSqlite($"Data Source={path}");
+                        if (interceptor is not null) options.AddInterceptors(interceptor);
+                    });
                 });
             });
             using var scope = factory.Services.CreateScope();

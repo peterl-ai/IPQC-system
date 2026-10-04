@@ -1,7 +1,9 @@
 using JaxPower.Ipqc.Api.Contracts;
 using JaxPower.Ipqc.Api.Data;
 using JaxPower.Ipqc.Api.Domain;
+using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Npgsql;
 
 namespace JaxPower.Ipqc.Api.Services;
 
@@ -89,7 +91,7 @@ public sealed class PatrolPlanService(IpqcDbContext db, TimeProvider clock)
             GenerationNotBeforeUtc = now.AddTicks(-1) };
         Apply(row, input, start, end, now, actor);
         db.PatrolPlans.Add(row);
-        await db.SaveChangesAsync(ct);
+        await SaveChangesAsync(ct);
         return (await GetAsync(row.Id, ct))!;
     }
 
@@ -106,7 +108,7 @@ public sealed class PatrolPlanService(IpqcDbContext db, TimeProvider clock)
             (!row.IsEnabled && input.IsEnabled))
             row.GenerationNotBeforeUtc = now;
         Apply(row, input, start, end, now, actor);
-        await db.SaveChangesAsync(ct);
+        await SaveChangesAsync(ct);
         return await GetAsync(id, ct);
     }
 
@@ -161,6 +163,30 @@ public sealed class PatrolPlanService(IpqcDbContext db, TimeProvider clock)
         }
     }
 
+    private async Task SaveChangesAsync(CancellationToken ct)
+    {
+        try
+        {
+            await db.SaveChangesAsync(ct);
+        }
+        catch (DbUpdateException ex) when (IsPlanNoUniqueViolation(ex))
+        {
+            throw new DuplicatePlanNoException(ex);
+        }
+    }
+
+    private static bool IsPlanNoUniqueViolation(DbUpdateException exception) =>
+        exception.InnerException is SqliteException
+        {
+            SqliteErrorCode: 19,
+            SqliteExtendedErrorCode: 2067
+        } sqlite && sqlite.Message.Contains("PatrolPlans.PlanNo", StringComparison.OrdinalIgnoreCase) ||
+        exception.InnerException is PostgresException
+        {
+            SqlState: PostgresErrorCodes.UniqueViolation,
+            ConstraintName: "IX_PatrolPlans_PlanNo"
+        };
+
     private static PlanSummary Summary(PatrolPlan row, string standardName, string? assignee)
     {
         var zone = TimeZoneInfo.FindSystemTimeZoneById(row.TimeZoneId);
@@ -180,3 +206,6 @@ public sealed class PatrolPlanService(IpqcDbContext db, TimeProvider clock)
             DateTime.SpecifyKind(row.CreatedAtUtc, DateTimeKind.Utc), row.UpdatedBy, summary.UpdatedAtUtc);
     }
 }
+
+public sealed class DuplicatePlanNoException(Exception innerException)
+    : Exception("Plan No. is already in use.", innerException);

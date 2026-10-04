@@ -32,8 +32,15 @@ public static class PatrolPlanEndpoints
             if (!string.IsNullOrWhiteSpace(input.PlanNo) && await db.PatrolPlans.AnyAsync(x => x.PlanNo == input.PlanNo.Trim(), ct))
                 errors["PlanNo"] = ["Plan No. is already in use."];
             if (errors.Count > 0) return Results.ValidationProblem(errors);
-            var row = await service.CreateAsync(input, start, end, http.Request.Headers["X-Dev-Role"].ToString(), ct);
-            return Results.Created($"/api/patrol-plans/{row.Id}", row);
+            try
+            {
+                var row = await service.CreateAsync(input, start, end, http.Request.Headers["X-Dev-Role"].ToString(), ct);
+                return Results.Created($"/api/patrol-plans/{row.Id}", row);
+            }
+            catch (DuplicatePlanNoException)
+            {
+                return DuplicatePlanNo();
+            }
         });
         group.MapPut("/{id:guid}", async (Guid id, PlanInput input, PatrolPlanService service, IpqcDbContext db, HttpContext http, CancellationToken ct) =>
         {
@@ -44,8 +51,15 @@ public static class PatrolPlanEndpoints
             if (!string.IsNullOrWhiteSpace(input.PlanNo) && await db.PatrolPlans.AnyAsync(x => x.PlanNo == input.PlanNo.Trim() && x.Id != id, ct))
                 errors["PlanNo"] = ["Plan No. is already in use."];
             if (errors.Count > 0) return Results.ValidationProblem(errors);
-            return await service.UpdateAsync(id, input, start, end, http.Request.Headers["X-Dev-Role"].ToString(), ct) is { } row
-                ? Results.Ok(row) : Results.Problem(statusCode: 404, title: "Patrol Plan not found.");
+            try
+            {
+                return await service.UpdateAsync(id, input, start, end, http.Request.Headers["X-Dev-Role"].ToString(), ct) is { } row
+                    ? Results.Ok(row) : Results.Problem(statusCode: 404, title: "Patrol Plan not found.");
+            }
+            catch (DuplicatePlanNoException)
+            {
+                return DuplicatePlanNo();
+            }
         });
         group.MapPost("/{id:guid}/enable", async (Guid id, PatrolPlanService service, HttpContext http, CancellationToken ct) =>
         {
@@ -67,4 +81,7 @@ public static class PatrolPlanEndpoints
                 _ => Results.Problem(statusCode: 404, title: "Patrol Plan not found.")
             });
     }
+
+    private static IResult DuplicatePlanNo() => Results.ValidationProblem(
+        new Dictionary<string, string[]> { ["PlanNo"] = ["Plan No. is already in use."] });
 }
