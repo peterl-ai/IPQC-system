@@ -108,6 +108,8 @@ Suggested status state values:
 
 Resubmission transitions `Rejected -> PendingApproval`; draft correction may retain `Rejected` for the IPQA re-inspection queue.
 
+Phase 1F adds an index on `(Status, CompletedAtUtc)` for the read-only Completed Records ledger. A completed record is the existing task plus its final approved immutable submission and review; no separate Completed Record table is created.
+
 ### PatrolTaskItem / PatrolTaskItemSample
 - `PatrolTaskItem` freezes the full ordered Standard Item definition, including type, limits, sample count, and photo requirement. It also holds mutable N/A answer, current judgment, item completion time, and optional execution metadata. N/A decisions receive an item completion time even though they have no samples. `(PatrolTaskId, SequenceNo)` is unique.
 - `PatrolTaskItemSample` holds ordered current numeric value or qualitative judgment, calculated quantitative judgment, and server inspection time. Identical temporary saves preserve that time; changing or clearing the effective input updates or clears it. `(PatrolTaskItemId, SequenceNo)` is unique. At most 50 samples are accepted per item.

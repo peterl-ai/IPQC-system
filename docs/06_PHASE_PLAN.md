@@ -52,9 +52,10 @@ Goal: establish Vue web shell using **mock data only**.
 ## Phase 1F — Completed Records + Reporting
 - filters/pagination
 - details page
-- attachment/photo display
 - HTML/modal report preview
 - Excel `.xlsx` download
+
+Implemented as a read-only view of Completed tasks and their final approved immutable submissions. Photo display remains deferred with the attachment workflow; no Phase 1E image data exists to report.
 
 ## Phase 1G — User Management + Production RBAC
 - persistent users/roles

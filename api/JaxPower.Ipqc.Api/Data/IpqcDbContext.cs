@@ -80,6 +80,7 @@ public sealed class IpqcDbContext(DbContextOptions<IpqcDbContext> options) : DbC
         task.Property(x => x.Shift).HasMaxLength(10);
         task.Property(x => x.OverallInspectionResult).HasMaxLength(20);
         task.HasIndex(x => new { x.Status, x.ScheduledOccurrenceUtc });
+        task.HasIndex(x => new { x.Status, x.CompletedAtUtc });
 
         var taskItem = modelBuilder.Entity<PatrolTaskItem>();
         taskItem.HasKey(x => x.Id);

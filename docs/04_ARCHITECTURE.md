@@ -98,10 +98,13 @@ Phase 1D enforces a unique key on `(PatrolPlanId, ScheduledOccurrenceUtc)`.
 - Display in plant-local timezone.
 - Schedule definitions must explicitly record the plant timezone.
 
-## Reports
-- Browser preview rendered as HTML/modal.
-- Excel file generated server-side.
-- Prefer `.xlsx` for the new system.
+## Completed records and reports (Phase 1F)
+- A Completed Record is a `PatrolTask` with `Status = Completed`; no duplicate transactional record table exists.
+- The read-only report service requires `CurrentRevisionNo`, its matching immutable submission, and its matching Approved review. Missing final workflow data returns HTTP 409. Definition fields come from task-time item snapshots; results and inspection timestamps come from the final immutable submission. Earlier rejected revisions and reasons remain visible in history.
+- The paginated list projects header fields without loading item/submission graphs. A `(Status, CompletedAtUtc)` index supports history queries.
+- Plant-local completed-date filters and report times use `America/New_York`, with UTC persistence and DST-aware conversion.
+- Web preview is HTML over the report DTO. ClosedXML generates a two-sheet `.xlsx` from that same DTO (`Inspection Report`, `Revision History`), with business strings written as text.
+- Admin, PQE, and IPQA can read/export Completed Records in Development. Production remains fail closed until Phase 1G authentication.
 
 ## Legacy migration
 None. Jinko GQMS remains the system used for historical lookup before JAX IPQC go-live.
