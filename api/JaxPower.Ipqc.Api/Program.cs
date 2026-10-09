@@ -14,6 +14,8 @@ builder.Services.AddScoped<PatrolTaskGenerationService>();
 builder.Services.AddScoped<InspectionJudgmentService>();
 builder.Services.AddScoped<PatrolTaskExecutionService>();
 builder.Services.AddScoped<PatrolTaskReviewService>();
+builder.Services.AddScoped<CompletedPatrolRecordService>();
+builder.Services.AddSingleton<CompletedPatrolReportExcel>();
 builder.Services.AddHostedService<PatrolSchedulerBackgroundService>();
 builder.Services.AddSingleton<PatrolStandardExcel>();
 var provider = builder.Configuration["Database:Provider"] ?? "Sqlite";
@@ -45,7 +47,8 @@ app.Use(async (context, next) =>
     var standards = context.Request.Path.StartsWithSegments("/api/patrol-standards");
     var plans = context.Request.Path.StartsWithSegments("/api/patrol-plans");
     var tasks = context.Request.Path.StartsWithSegments("/api/patrol-tasks");
-    if (!standards && !plans && !tasks) { await next(); return; }
+    var records = context.Request.Path.StartsWithSegments("/api/completed-patrol-records");
+    if (!standards && !plans && !tasks && !records) { await next(); return; }
     if (!app.Environment.IsDevelopment())
     {
         await Results.Problem(statusCode: StatusCodes.Status503ServiceUnavailable,
@@ -53,7 +56,7 @@ app.Use(async (context, next) =>
         return;
     }
     var role = context.Request.Headers["X-Dev-Role"].ToString();
-    if (role is not ("admin" or "pqe") && !(tasks && role == "ipqa"))
+    if (role is not ("admin" or "pqe") && !((tasks || records) && role == "ipqa"))
     {
         await Results.Problem(statusCode: StatusCodes.Status403Forbidden,
             title: "Patrol Standards and Plans require Admin or PQE.").ExecuteAsync(context);
@@ -129,6 +132,7 @@ group.MapPost("/import", async (IFormFile file, PatrolStandardExcel excel, Patro
 
 app.MapPatrolPlans();
 app.MapPatrolTasks();
+app.MapCompletedPatrolRecords();
 
 app.Run();
 

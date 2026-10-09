@@ -3,7 +3,7 @@ export default {
   nav: { home: '首页', ipqc: 'IPQC', linePatrol: '人工巡检', standards: '巡检标准管理', plans: '人工巡检计划', tasks: '人工巡检任务', records: '已完成巡检台账', system: '系统管理', users: '用户管理' },
   header: { language: '语言', role: '模拟角色', logout: '退出登录', user: '当前用户' },
   role: { admin: '管理员', pqe: 'PQE', ipqa: 'IPQA' },
-  common: { search: '查询', reset: '重置', actions: '操作', details: '详情', close: '关闭', cancel: '取消', confirm: '确认', edit: '编辑', delete: '删除', active: '启用', inactive: '停用', enabled: '已启用', disabled: '已停用', all: '全部', noData: '暂无记录', mockNotice: '标准、计划和任务审核已持久化；报表及用户仍使用模拟数据。', required: '必填' },
+  common: { search: '查询', reset: '重置', actions: '操作', details: '详情', close: '关闭', cancel: '取消', confirm: '确认', edit: '编辑', delete: '删除', active: '启用', inactive: '停用', enabled: '已启用', disabled: '已停用', all: '全部', noData: '暂无记录', mockNotice: '人工巡检记录已持久化；用户管理仍使用模拟数据。', required: '必填' },
   home: { eyebrow: '质量运营', title: '面向工厂现场的人工巡检。', description: '在一个专注的工作空间中配置标准与计划、审核人工巡检任务并查询已完成的质量记录。', enter: '打开巡检标准管理', scope: 'Phase 1A 基础版', scopeText: '本版本建立双语 Web 外壳、基于角色的导航以及模拟业务页面。', workflow: '人工巡检工作区', workflowText: '从标准定义到计划排程、任务审核以及完成记录查询。', step1: '定义标准', step2: '配置计划', step3: '审核任务', step4: '查询记录' },
   page: { standards: { title: '巡检标准管理', subtitle: '为每条生产线定义可复用的检验要求。' }, plans: { title: '人工巡检计划', subtitle: '配置标准生成指定人工巡检任务的时间。' }, tasks: { title: '人工巡检任务', subtitle: '审核等待 PQE 处理的人工巡检提交。' }, records: { title: '已完成巡检台账', subtitle: '查询已完成的人工巡检并获取报告。' }, users: { title: '用户管理', subtitle: '管理模拟平台用户及访问角色。' } },
   filter: { standardName: '巡检标准名称', factory: '工厂', line: '产线', taskNo: '任务编号', completionTime: '完成时间', inspector: '巡检员', status: '状态', planName: '计划名称', keyword: '员工编号或姓名', placeholder: '请输入{field}', select: '请选择{field}' },
@@ -37,7 +37,7 @@ export default {
     shift: { Day: '白班', Night: '夜班' }, type: { Qualitative: '定性', Quantitative: '计量' },
     review: { Approved: 'PQE 已批准', Rejected: 'PQE 已驳回' },
   },
-  record: { detailTitle: '巡检记录详情', basic: '基本信息', inspection: '检验明细', previewTitle: '巡检报告预览', previewNote: 'HTML 预览框架 · Excel 生成将在后端报告阶段实现。', reportTitle: '制程质量检验报告', photoPlaceholder: '无模拟图片', documentNo: '文件编号', reportStatus: '已批准记录' },
+  record: { detailTitle: '巡检记录详情', basic: '基本信息', inspection: '检验明细', previewTitle: '巡检报告预览', reportTitle: 'JAX Power IPQC 巡检报告', completedFrom: '完成日期起', completedTo: '完成日期止', startedTime: '开始时间', machineCode: '设备编码', series: '系列', mold: '模具', finalApproval: '最终批准', loadFailed: '无法加载已完成巡检记录。', integrityConflict: '已完成的工作流记录不一致，请联系管理员。' },
   permission: { code: '403', title: '无访问权限', description: '当前模拟角色无权访问此页面。', back: '前往可访问页面' },
   notFound: { code: '404', title: '页面不存在', description: '请求的工作区不存在。', back: '返回首页' },
 }

@@ -11,7 +11,7 @@ export default {
     search: 'Search', reset: 'Reset', actions: 'Actions', details: 'Details', close: 'Close',
     cancel: 'Cancel', confirm: 'Confirm', edit: 'Edit', delete: 'Delete', active: 'Active', inactive: 'Inactive',
     enabled: 'Enabled', disabled: 'Disabled', all: 'All', noData: 'No records found',
-    mockNotice: 'Standards, Plans, and Task review are saved. Reports and users remain mock data.', required: 'Required',
+    mockNotice: 'Line Patrol records are saved. User Management remains mock data.', required: 'Required',
   },
   home: {
     eyebrow: 'QUALITY OPERATIONS', title: 'Line Patrol, built for the factory floor.',
@@ -103,7 +103,7 @@ export default {
     shift: { Day: 'Day', Night: 'Night' }, type: { Qualitative: 'Qualitative', Quantitative: 'Quantitative' },
     review: { Approved: 'PQE Approved', Rejected: 'PQE Rejected' },
   },
-  record: { detailTitle: 'Patrol Record Details', basic: 'Basic Information', inspection: 'Inspection Details', previewTitle: 'Patrol Report Preview', previewNote: 'HTML preview shell · Excel generation is deferred to a backend reporting phase.', reportTitle: 'IN-PROCESS QUALITY INSPECTION REPORT', photoPlaceholder: 'No mock image', documentNo: 'Document No.', reportStatus: 'Approved record' },
+  record: { detailTitle: 'Patrol Record Details', basic: 'Basic Information', inspection: 'Inspection Details', previewTitle: 'Patrol Report Preview', reportTitle: 'JAX Power IPQC Inspection Report', completedFrom: 'Completed From', completedTo: 'Completed To', startedTime: 'Started Time', machineCode: 'Machine Code', series: 'Series', mold: 'Mold', finalApproval: 'Final Approval', loadFailed: 'Could not load Completed Patrol Records.', integrityConflict: 'The completed workflow record is inconsistent. Contact an administrator.' },
   permission: { code: '403', title: 'No permission', description: 'Your current mock role cannot access this page.', back: 'Go to an allowed page' },
   notFound: { code: '404', title: 'Page not found', description: 'The requested workspace does not exist.', back: 'Return home' },
 }
