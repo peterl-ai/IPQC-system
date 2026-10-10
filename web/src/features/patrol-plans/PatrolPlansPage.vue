@@ -19,7 +19,7 @@
         <template #bodyCell="{ column, record }">
           <template v-if="column.key === 'isEnabled'"><StatusTag :tone="record.isEnabled ? 'success' : 'neutral'" :label="record.isEnabled ? t('common.enabled') : t('common.disabled')" /></template>
           <template v-else-if="column.key === 'schedule'">{{ scheduleText(record.schedule) }}</template>
-          <template v-else-if="column.key === 'assigneeKey'">{{ assigneeName(record.assigneeKey) }}</template>
+          <template v-else-if="column.key === 'assigneeUserId'">{{ assigneeName(record.assigneeUserId) }}</template>
           <template v-else-if="column.key === 'updatedAtUtc'">{{ plantDate(record.updatedAtUtc) }}</template>
           <template v-else-if="column.key === 'actions'">
             <a-space size="small">
@@ -43,7 +43,7 @@
         <a-form-item :label="t('field.factoryName')"><a-input v-model:value="draft.factoryName" /></a-form-item>
         <a-form-item :label="t('field.lineCode')"><a-input v-model:value="draft.lineCode" /></a-form-item>
         <a-form-item :label="t('field.lineName')"><a-input v-model:value="draft.lineName" /></a-form-item>
-        <a-form-item :label="t('field.assignedIpqa')" :required="draft.isEnabled"><a-select v-model:value="draft.assigneeKey" allow-clear :options="assigneeOptions" /></a-form-item>
+        <a-form-item :label="t('field.assignedIpqa')" :required="draft.isEnabled"><a-select v-model:value="draft.assigneeUserId" allow-clear :options="assigneeOptions" /></a-form-item>
         <a-form-item :label="t('common.enabled')"><a-switch v-model:checked="draft.isEnabled" /></a-form-item>
       </a-form>
       <h3 class="section-title">{{ t('plan.scheduleSection') }}</h3>
@@ -87,7 +87,7 @@ const editorOpen = ref(false)
 const editingId = ref<string | null>(null)
 const filters = reactive<{ planNo: string; planName: string; patrolStandardId?: string; factoryCode: string; lineCode: string; enabled?: boolean }>({ planNo: '', planName: '', factoryCode: '', lineCode: '' })
 const plantNow = () => new Intl.DateTimeFormat('sv-SE', { timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date()).replace(' ', 'T')
-const emptyDraft = (): PlanDraft => ({ planNo: '', planName: '', patrolStandardId: '', factoryCode: '', factoryName: '', lineCode: '', lineName: '', isEnabled: true, effectiveStartLocal: plantNow(), effectiveEndLocal: null, timeZoneId: 'America/New_York', schedule: { type: 'everyNHours', intervalHours: 2, times: null, daysOfWeek: null }, assigneeKey: null })
+const emptyDraft = (): PlanDraft => ({ planNo: '', planName: '', patrolStandardId: '', factoryCode: '', factoryName: '', lineCode: '', lineName: '', isEnabled: true, effectiveStartLocal: plantNow(), effectiveEndLocal: null, timeZoneId: 'America/New_York', schedule: { type: 'everyNHours', intervalHours: 2, times: null, daysOfWeek: null }, assigneeUserId: null })
 const draft = reactive<PlanDraft>(emptyDraft())
 const times = ref<string[]>(['08:00'])
 const weekdays = ref<string[]>(['Monday'])
@@ -96,17 +96,17 @@ const weekdayOptions = computed(() => weekdayNames.map((value) => ({ value, labe
 const frequencyOptions = computed(() => [{ value: 'everyNHours', label: t('plan.everyNHours') }, { value: 'daily', label: t('plan.daily') }, { value: 'weekly', label: t('plan.weekly') }])
 const statusOptions = computed(() => [{ value: true, label: t('common.enabled') }, { value: false, label: t('common.disabled') }])
 const standardOptions = computed(() => standards.value.map((x) => ({ value: x.id, label: x.patrolStandardName })))
-const assigneeOptions = computed(() => assignees.value.map((x) => ({ value: x.key, label: x.displayName })))
+const assigneeOptions = computed(() => assignees.value.map((x) => ({ value: x.id, label: `${x.displayName} (${x.username})` })))
 const pagination = computed(() => ({ current: page.value, pageSize: pageSize.value, total: total.value, showSizeChanger: true, onChange: changePage }))
 const c = (key: string, field: string, width = 155) => ({ title: t(key), dataIndex: field, key: field, width, ellipsis: true })
-const columns = computed<TableColumnsType>(() => [{ title: t('field.status'), key: 'isEnabled', width: 110 }, c('field.planNo', 'planNo'), c('field.planName', 'planName', 210), c('field.standard', 'patrolStandardName', 220), c('field.factory', 'factoryCode'), c('field.line', 'lineCode'), { title: t('field.schedule'), key: 'schedule', width: 215 }, c('field.effectiveStart', 'effectiveStartLocal', 170), c('field.effectiveEnd', 'effectiveEndLocal', 170), { title: t('field.assignedIpqa'), key: 'assigneeKey', width: 160 }, { title: t('field.updatedTime'), key: 'updatedAtUtc', width: 170 }, { title: t('common.actions'), key: 'actions', fixed: 'right', width: 235 }])
+const columns = computed<TableColumnsType>(() => [{ title: t('field.status'), key: 'isEnabled', width: 110 }, c('field.planNo', 'planNo'), c('field.planName', 'planName', 210), c('field.standard', 'patrolStandardName', 220), c('field.factory', 'factoryCode'), c('field.line', 'lineCode'), { title: t('field.schedule'), key: 'schedule', width: 215 }, c('field.effectiveStart', 'effectiveStartLocal', 170), c('field.effectiveEnd', 'effectiveEndLocal', 170), { title: t('field.assignedIpqa'), key: 'assigneeUserId', width: 160 }, { title: t('field.updatedTime'), key: 'updatedAtUtc', width: 170 }, { title: t('common.actions'), key: 'actions', fixed: 'right', width: 235 }])
 
 function scheduleText(schedule: ScheduleDefinition): string {
   if (schedule.type === 'everyNHours') return t('plan.everyHoursSummary', { count: schedule.intervalHours })
   const timeText = (schedule.times || []).join(', ')
   return schedule.type === 'daily' ? `${t('plan.daily')} · ${timeText}` : `${(schedule.daysOfWeek || []).map((day) => t(`plan.day.${day}`)).join(', ')} · ${timeText}`
 }
-function assigneeName(key: string | null) { return assignees.value.find((x) => x.key === key)?.displayName || key || '—' }
+function assigneeName(id: string | null) { return assignees.value.find((x) => x.id === id)?.displayName || id || '—' }
 function plantDate(value: string) { return new Intl.DateTimeFormat('sv-SE', { timeZone: 'America/New_York', dateStyle: 'short', timeStyle: 'short' }).format(new Date(value)) }
 async function load() { loading.value = true; error.value = ''; try { const data = await patrolPlansApi.list({ ...filters, page: page.value, pageSize: pageSize.value }); plans.value = data.items; total.value = data.total } catch { error.value = t('plan.apiUnavailable') } finally { loading.value = false } }
 function search() { page.value = 1; void load() }

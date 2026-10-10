@@ -8,20 +8,24 @@ import CompletedRecordsPage from '@/features/completed-records/CompletedRecordsP
 import UserManagementPage from '@/features/user-management/UserManagementPage.vue'
 import StatusPage from '@/features/system/StatusPage.vue'
 import { defaultRouteForRole, hasPermission } from '@/services/permissions'
-import { mockSession } from '@/services/mockSession'
+import { authSession } from '@/services/authSession'
+import LoginPage from '@/features/auth/LoginPage.vue'
+import ChangePasswordPage from '@/features/auth/ChangePasswordPage.vue'
 import type { Permission } from '@/types/auth'
 
-export function routeIsAuthorized(route: Pick<RouteLocationNormalized, 'meta'>, role = mockSession.role.value): boolean {
-  return hasPermission(role, route.meta.permission as Permission | undefined)
+export function routeIsAuthorized(route: Pick<RouteLocationNormalized, 'meta'>): boolean {
+  return hasPermission(authSession.user.value?.permissions ?? [], route.meta.permission as Permission | undefined)
 }
 
 export const router = createRouter({
   history: createWebHistory(),
   routes: [
+    { path: '/login', name: 'login', component: LoginPage },
+    { path: '/change-password', name: 'change-password', component: ChangePasswordPage },
     {
       path: '/',
       component: AppShell,
-      redirect: () => defaultRouteForRole(mockSession.role.value),
+      redirect: () => defaultRouteForRole(authSession.user.value?.role.toLowerCase() as import('@/types/auth').Role ?? 'admin'),
       children: [
         { path: 'home', name: 'home', component: HomePage, meta: { permission: 'home:view' } },
         { path: 'standards', name: 'standards', component: PatrolStandardsPage, meta: { permission: 'standards:view' } },
@@ -36,7 +40,15 @@ export const router = createRouter({
   ],
 })
 
-router.beforeEach((to) => {
+router.beforeEach(async (to) => {
+  await authSession.restore()
+  if (!authSession.authenticated.value && to.name !== 'login')
+    return { name: 'login', query: { from: to.fullPath } }
+  if (authSession.authenticated.value && authSession.user.value?.mustChangePassword &&
+      to.name !== 'change-password') return { name: 'change-password' }
+  if (authSession.authenticated.value && to.name === 'login')
+    return defaultRouteForRole(authSession.user.value!.role.toLowerCase() as import('@/types/auth').Role)
+  if (to.name === 'login' || to.name === 'change-password') return true
   if (to.name !== 'forbidden' && !routeIsAuthorized(to)) {
     return { name: 'forbidden', query: { from: to.fullPath } }
   }

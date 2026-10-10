@@ -2,15 +2,15 @@ import { describe, expect, it } from 'vitest'
 import type { PlanDraft } from './api'
 import { validatePlanDraft } from './validation'
 
-const draft = (): PlanDraft => ({ planNo: '', planName: 'Line A', patrolStandardId: 'standard-id', factoryCode: '', factoryName: '', lineCode: '', lineName: '', isEnabled: true, effectiveStartLocal: '2026-10-03T08:00', effectiveEndLocal: null, timeZoneId: 'America/New_York', schedule: { type: 'everyNHours', intervalHours: 2, times: null, daysOfWeek: null }, assigneeKey: 'dev-ipqa-1' })
+const draft = (): PlanDraft => ({ planNo: '', planName: 'Line A', patrolStandardId: 'standard-id', factoryCode: '', factoryName: '', lineCode: '', lineName: '', isEnabled: true, effectiveStartLocal: '2026-10-03T08:00', effectiveEndLocal: null, timeZoneId: 'America/New_York', schedule: { type: 'everyNHours', intervalHours: 2, times: null, daysOfWeek: null }, assigneeUserId: 'user-id' })
 
 describe('Patrol Plan editor validation', () => {
   it('requires name, persisted standard, start, and enabled assignee', () => {
     expect(validatePlanDraft({ ...draft(), planName: '  ' })).toBe('plan.nameRequired')
     expect(validatePlanDraft({ ...draft(), patrolStandardId: '' })).toBe('plan.standardRequired')
     expect(validatePlanDraft({ ...draft(), effectiveStartLocal: '' })).toBe('plan.startRequired')
-    expect(validatePlanDraft({ ...draft(), assigneeKey: null })).toBe('plan.assigneeRequired')
-    expect(validatePlanDraft({ ...draft(), isEnabled: false, assigneeKey: null })).toBeNull()
+    expect(validatePlanDraft({ ...draft(), assigneeUserId: null })).toBe('plan.assigneeRequired')
+    expect(validatePlanDraft({ ...draft(), isEnabled: false, assigneeUserId: null })).toBeNull()
   })
   it('validates effective range and all three frequency editors', () => {
     expect(validatePlanDraft({ ...draft(), effectiveEndLocal: '2026-10-03T08:00' })).toBe('plan.endAfterStart')

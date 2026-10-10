@@ -1,20 +1,20 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
-import { mockSession } from '@/services/mockSession'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { authSession } from '@/services/authSession'
 import { PlanApiError, patrolPlansApi, type PlanDraft } from './api'
 
-const draft: PlanDraft = { planNo: '', planName: 'Plan', patrolStandardId: 'standard-id', factoryCode: '', factoryName: '', lineCode: '', lineName: '', isEnabled: true, effectiveStartLocal: '2026-10-03T08:00', effectiveEndLocal: null, timeZoneId: 'America/New_York', schedule: { type: 'everyNHours', intervalHours: 2, times: null, daysOfWeek: null }, assigneeKey: 'dev-ipqa-1' }
+const draft: PlanDraft = { planNo: '', planName: 'Plan', patrolStandardId: 'standard-id', factoryCode: '', factoryName: '', lineCode: '', lineName: '', isEnabled: true, effectiveStartLocal: '2026-10-03T08:00', effectiveEndLocal: null, timeZoneId: 'America/New_York', schedule: { type: 'everyNHours', intervalHours: 2, times: null, daysOfWeek: null }, assigneeUserId: 'user-id' }
 const json = (data: unknown, status = 200) => new Response(JSON.stringify(data), { status })
 afterEach(() => vi.unstubAllGlobals())
+beforeEach(() => { authSession.initialized.value = true; authSession.accessToken.value = 'test-token' })
 
 describe('Patrol Plans API client', () => {
-  it('loads filtered pages through the API with development role', async () => {
-    mockSession.setRole('pqe')
+  it('loads filtered pages through the authenticated API', async () => {
     const fetch = vi.fn().mockResolvedValue(json({ items: [], total: 0, page: 2, pageSize: 5 }))
     vi.stubGlobal('fetch', fetch)
     await patrolPlansApi.list({ planName: 'Line A', patrolStandardId: 'standard-id', enabled: false, page: 2, pageSize: 5 })
     const query = new URL(fetch.mock.calls[0][0], 'http://localhost').searchParams
     expect(Object.fromEntries(query)).toMatchObject({ planName: 'Line A', patrolStandardId: 'standard-id', enabled: 'false', page: '2', pageSize: '5' })
-    expect((fetch.mock.calls[0][1].headers as Headers).get('X-Dev-Role')).toBe('pqe')
+    expect((fetch.mock.calls[0][1].headers as Headers).get('Authorization')).toBe('Bearer test-token')
   })
   it('uses persistent CRUD and explicit state endpoints', async () => {
     const fetch = vi.fn().mockImplementation(() => Promise.resolve(json({ id: 'plan-id', ...draft })))
@@ -38,12 +38,12 @@ describe('Patrol Plans API client', () => {
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('offline')))
     await expect(patrolPlansApi.get('plan-id')).rejects.toBeInstanceOf(PlanApiError)
   })
-  it('loads every persisted standard page for the selector and fixture assignees', async () => {
+  it('loads every persisted standard page and active IPQA users for the selector', async () => {
     const first = Array.from({ length: 100 }, (_, index) => ({ id: String(index), patrolStandardName: `S${index}` }))
-    const fetch = vi.fn().mockResolvedValueOnce(json({ items: first, total: 101 })).mockResolvedValueOnce(json({ items: [{ id: '100', patrolStandardName: 'S100' }], total: 101 })).mockResolvedValueOnce(json([{ key: 'dev-ipqa-1', displayName: 'Development IPQA 1' }]))
+    const fetch = vi.fn().mockResolvedValueOnce(json({ items: first, total: 101 })).mockResolvedValueOnce(json({ items: [{ id: '100', patrolStandardName: 'S100' }], total: 101 })).mockResolvedValueOnce(json([{ id: 'user-id', username: 'ipqa01', displayName: 'IPQA 01' }]))
     vi.stubGlobal('fetch', fetch)
     expect((await patrolPlansApi.standards()).length).toBe(101)
     expect(fetch.mock.calls[1][0]).toContain('page=2')
-    expect((await patrolPlansApi.assignees())[0].key).toBe('dev-ipqa-1')
+    expect((await patrolPlansApi.assignees())[0].id).toBe('user-id')
   })
 })

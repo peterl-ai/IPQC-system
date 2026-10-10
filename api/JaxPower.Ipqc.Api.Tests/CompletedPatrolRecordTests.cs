@@ -144,15 +144,12 @@ public sealed class CompletedPatrolRecordTests
         Assert.Equal(HttpStatusCode.NotFound, (await app.Admin.GetAsync($"/api/completed-patrol-records/{Guid.NewGuid()}")).StatusCode);
     }
 
-    private sealed class Fixture(WebApplicationFactory<Program> factory, string path) : IAsyncDisposable
+    private sealed class Fixture(WebApplicationFactory<Program> factory, string path,
+        HttpClient admin, HttpClient pqe, HttpClient ipqa) : IAsyncDisposable
     {
-        public HttpClient Admin { get; } = Client(factory, "admin");
-        public HttpClient Pqe { get; } = Client(factory, "pqe");
-        public HttpClient Ipqa { get; } = Client(factory, "ipqa");
-        private static HttpClient Client(WebApplicationFactory<Program> factory, string role)
-        {
-            var client = factory.CreateClient(); client.DefaultRequestHeaders.Add("X-Dev-Role", role); return client;
-        }
+        public HttpClient Admin { get; } = admin;
+        public HttpClient Pqe { get; } = pqe;
+        public HttpClient Ipqa { get; } = ipqa;
         public static async Task<Fixture> CreateAsync()
         {
             var path = Path.Combine(Path.GetTempPath(), $"ipqc-record-{Guid.NewGuid():N}.db");
@@ -169,7 +166,11 @@ public sealed class CompletedPatrolRecordTests
             });
             using var scope = factory.Services.CreateScope();
             await scope.ServiceProvider.GetRequiredService<IpqcDbContext>().Database.MigrateAsync();
-            return new Fixture(factory, path);
+            await TestAccounts.SeedAsync(factory);
+            return new Fixture(factory, path,
+                await TestAccounts.ClientAsync(factory, "admin"),
+                await TestAccounts.ClientAsync(factory, "pqe"),
+                await TestAccounts.ClientAsync(factory, "dev-ipqa-1"));
         }
         public async Task<Guid> SeedAsync(string status, string taskNo, DateTime completed,
             bool twoRevisions = false, bool missingReview = false, string overall = "Qualified")

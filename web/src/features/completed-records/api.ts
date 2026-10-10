@@ -1,4 +1,4 @@
-import { mockSession } from '@/services/mockSession'
+import { authFetch } from '@/services/authFetch'
 
 export interface CompletedRecordSummary {
   id: string; taskNo: string; completedAtUtc: string | null; scheduledOccurrenceUtc: string
@@ -44,7 +44,7 @@ const base = import.meta.env.VITE_API_BASE_URL || '/api'
 async function request(path: string): Promise<Response> {
   let response: Response
   try {
-    response = await fetch(`${base}${path}`, { headers: import.meta.env.DEV ? { 'X-Dev-Role': mockSession.role.value } : {} })
+    response = await authFetch(`${base}${path}`)
   } catch { throw new CompletedRecordApiError('API unavailable', 0) }
   if (!response.ok) {
     const body = await response.json().catch(() => ({})) as { title?: string; errors?: Record<string, string[]> }

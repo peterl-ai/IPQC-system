@@ -17,6 +17,76 @@ namespace JaxPower.Ipqc.Api.Data.Migrations
 #pragma warning disable 612, 618
             modelBuilder.HasAnnotation("ProductVersion", "10.0.12");
 
+            modelBuilder.Entity("JaxPower.Ipqc.Api.Domain.ApplicationUser", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("AuthVersion")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("CreatedBy")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("DisplayName")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("FailedLoginCount")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime?>("LockoutEndUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("MustChangePassword")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("NormalizedUsername")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("PasswordHash")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Role")
+                        .IsRequired()
+                        .HasMaxLength(10)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("UpdatedAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("UpdatedBy")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Username")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("NormalizedUsername")
+                        .IsUnique();
+
+                    b.ToTable("ApplicationUsers");
+                });
+
             modelBuilder.Entity("JaxPower.Ipqc.Api.Domain.PatrolPlan", b =>
                 {
                     b.Property<Guid>("Id")
@@ -122,9 +192,17 @@ namespace JaxPower.Ipqc.Api.Data.Migrations
                     b.Property<Guid>("PatrolPlanId")
                         .HasColumnType("TEXT");
 
+                    b.Property<Guid?>("UserId")
+                        .HasColumnType("TEXT");
+
                     b.HasKey("Id");
 
+                    b.HasIndex("UserId");
+
                     b.HasIndex("PatrolPlanId", "AssigneeKey")
+                        .IsUnique();
+
+                    b.HasIndex("PatrolPlanId", "UserId")
                         .IsUnique();
 
                     b.ToTable("PatrolPlanAssignees");
@@ -303,6 +381,9 @@ namespace JaxPower.Ipqc.Api.Data.Migrations
                         .HasMaxLength(100)
                         .HasColumnType("TEXT");
 
+                    b.Property<Guid?>("AssignedInspectorUserId")
+                        .HasColumnType("TEXT");
+
                     b.Property<DateTime?>("CompletedAtUtc")
                         .HasColumnType("TEXT");
 
@@ -390,6 +471,8 @@ namespace JaxPower.Ipqc.Api.Data.Migrations
                         .HasColumnType("TEXT");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("AssignedInspectorUserId");
 
                     b.HasIndex("PatrolStandardId");
 
@@ -725,6 +808,49 @@ namespace JaxPower.Ipqc.Api.Data.Migrations
                     b.ToTable("PatrolTaskSubmissionSamples");
                 });
 
+            modelBuilder.Entity("JaxPower.Ipqc.Api.Domain.RefreshTokenSession", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("AuthVersion")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("ExpiresAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("ReplacedBySessionId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("RevokedAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("TokenHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("UserAgent")
+                        .HasMaxLength(500)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TokenHash")
+                        .IsUnique();
+
+                    b.HasIndex("UserId", "RevokedAtUtc");
+
+                    b.ToTable("RefreshTokenSessions");
+                });
+
             modelBuilder.Entity("JaxPower.Ipqc.Api.Domain.PatrolPlan", b =>
                 {
                     b.HasOne("JaxPower.Ipqc.Api.Domain.PatrolStandard", "PatrolStandard")
@@ -744,7 +870,14 @@ namespace JaxPower.Ipqc.Api.Data.Migrations
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
+                    b.HasOne("JaxPower.Ipqc.Api.Domain.ApplicationUser", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.Navigation("PatrolPlan");
+
+                    b.Navigation("User");
                 });
 
             modelBuilder.Entity("JaxPower.Ipqc.Api.Domain.PatrolStandardItem", b =>
@@ -760,6 +893,11 @@ namespace JaxPower.Ipqc.Api.Data.Migrations
 
             modelBuilder.Entity("JaxPower.Ipqc.Api.Domain.PatrolTask", b =>
                 {
+                    b.HasOne("JaxPower.Ipqc.Api.Domain.ApplicationUser", "AssignedInspectorUser")
+                        .WithMany()
+                        .HasForeignKey("AssignedInspectorUserId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("JaxPower.Ipqc.Api.Domain.PatrolPlan", "PatrolPlan")
                         .WithMany("Tasks")
                         .HasForeignKey("PatrolPlanId")
@@ -771,6 +909,8 @@ namespace JaxPower.Ipqc.Api.Data.Migrations
                         .HasForeignKey("PatrolStandardId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
+
+                    b.Navigation("AssignedInspectorUser");
 
                     b.Navigation("PatrolPlan");
 
@@ -841,6 +981,22 @@ namespace JaxPower.Ipqc.Api.Data.Migrations
                         .IsRequired();
 
                     b.Navigation("PatrolTaskSubmissionItem");
+                });
+
+            modelBuilder.Entity("JaxPower.Ipqc.Api.Domain.RefreshTokenSession", b =>
+                {
+                    b.HasOne("JaxPower.Ipqc.Api.Domain.ApplicationUser", "User")
+                        .WithMany("RefreshSessions")
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("User");
+                });
+
+            modelBuilder.Entity("JaxPower.Ipqc.Api.Domain.ApplicationUser", b =>
+                {
+                    b.Navigation("RefreshSessions");
                 });
 
             modelBuilder.Entity("JaxPower.Ipqc.Api.Domain.PatrolPlan", b =>

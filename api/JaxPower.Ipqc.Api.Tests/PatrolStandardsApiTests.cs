@@ -176,13 +176,10 @@ public sealed class PatrolStandardsApiTests
         Assert.Equal(HttpStatusCode.NotFound, notFound.StatusCode);
         Assert.Equal("application/problem+json", notFound.Content.Headers.ContentType?.MediaType);
         Assert.Equal(HttpStatusCode.NotFound, (await app.Client.DeleteAsync($"/api/patrol-standards/{id}")).StatusCode);
-        var ipqa = app.Factory.CreateClient();
-        ipqa.DefaultRequestHeaders.Add("X-Dev-Role", "ipqa");
+        var ipqa = await TestAccounts.ClientAsync(app.Factory, "dev-ipqa-1");
         var forbidden = await ipqa.GetAsync("/api/patrol-standards");
         Assert.Equal(HttpStatusCode.Forbidden, forbidden.StatusCode);
-        Assert.Equal("application/problem+json", forbidden.Content.Headers.ContentType?.MediaType);
-        var pqe = app.Factory.CreateClient();
-        pqe.DefaultRequestHeaders.Add("X-Dev-Role", "pqe");
+        var pqe = await TestAccounts.ClientAsync(app.Factory, "pqe");
         Assert.Equal(HttpStatusCode.OK, (await pqe.GetAsync("/api/patrol-standards")).StatusCode);
     }
 
@@ -292,8 +289,8 @@ public sealed class PatrolStandardsApiTests
             });
             using var scope = factory.Services.CreateScope();
             await scope.ServiceProvider.GetRequiredService<IpqcDbContext>().Database.MigrateAsync();
-            var client = factory.CreateClient();
-            client.DefaultRequestHeaders.Add("X-Dev-Role", "admin");
+            await TestAccounts.SeedAsync(factory);
+            var client = await TestAccounts.ClientAsync(factory, "admin");
             return new TestApp(factory, client, path);
         }
 

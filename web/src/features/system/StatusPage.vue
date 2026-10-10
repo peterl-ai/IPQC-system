@@ -12,11 +12,11 @@ import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 import { defaultRouteForRole } from '@/services/permissions'
-import { mockSession } from '@/services/mockSession'
+import { authSession } from '@/services/authSession'
 
 const { t } = useI18n()
 const route = useRoute()
 const router = useRouter()
 const kind = computed(() => route.meta.status === 'notFound' ? 'notFound' : 'permission')
-function goBack() { router.push(defaultRouteForRole(mockSession.role.value)) }
+function goBack() { router.push(defaultRouteForRole(authSession.user.value?.role.toLowerCase() as import('@/types/auth').Role ?? 'admin')) }
 </script>

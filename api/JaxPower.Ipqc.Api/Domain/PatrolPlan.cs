@@ -31,6 +31,8 @@ public sealed class PatrolPlanAssignee
     public Guid PatrolPlanId { get; set; }
     public PatrolPlan PatrolPlan { get; set; } = null!;
     public string AssigneeKey { get; set; } = "";
+    public Guid? UserId { get; set; }
+    public ApplicationUser? User { get; set; }
     public bool IsActive { get; set; }
 }
 
@@ -43,6 +45,8 @@ public sealed class PatrolTask
     public Guid PatrolStandardId { get; set; }
     public PatrolStandard PatrolStandard { get; set; } = null!;
     public string AssignedInspectorKey { get; set; } = "";
+    public Guid? AssignedInspectorUserId { get; set; }
+    public ApplicationUser? AssignedInspectorUser { get; set; }
     public DateTime ScheduledOccurrenceUtc { get; set; }
     public DateTime GeneratedAtUtc { get; set; }
     public string GenerationSource { get; set; } = "Scheduler";

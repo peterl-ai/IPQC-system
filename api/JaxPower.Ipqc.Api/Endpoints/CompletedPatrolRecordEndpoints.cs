@@ -1,4 +1,5 @@
 using JaxPower.Ipqc.Api.Services;
+using JaxPower.Ipqc.Api.Security;
 
 namespace JaxPower.Ipqc.Api.Endpoints;
 
@@ -6,7 +7,8 @@ public static class CompletedPatrolRecordEndpoints
 {
     public static void MapCompletedPatrolRecords(this WebApplication app)
     {
-        var group = app.MapGroup("/api/completed-patrol-records");
+        var group = app.MapGroup("/api/completed-patrol-records")
+            .RequireAuthorization(IpqcPermissions.RecordsRead);
         group.MapGet("", async (string? taskNo, string? plan, string? standard, string? factory,
             string? line, string? inspector, string? shift, string? result, DateOnly? completedFrom,
             DateOnly? completedTo, int? page, int? pageSize, CompletedPatrolRecordService service,
@@ -40,7 +42,7 @@ public static class CompletedPatrolRecordEndpoints
                     $"IPQC-{safeTaskNo}.xlsx");
             }
             catch (CompletedRecordIntegrityException ex) { return Results.Problem(statusCode: 409, title: ex.Message); }
-        });
+        }).RequireAuthorization(IpqcPermissions.RecordsExport);
     }
 
     private static async Task<IResult> Report(Guid id, CompletedPatrolRecordService service, CancellationToken ct)

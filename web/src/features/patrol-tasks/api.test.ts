@@ -1,5 +1,5 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
-import { mockSession } from '@/services/mockSession'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { authSession } from '@/services/authSession'
 import en from '@/i18n/locales/en'
 import zhCN from '@/i18n/locales/zh-CN'
 import { canSelectForApproval, patrolTasksApi, TaskApiError, validRejectReason, type TaskSummary } from './api'
@@ -13,10 +13,10 @@ const task = (status: TaskSummary['status']): TaskSummary => ({
   shift: null, currentRevisionNo: 0,
 })
 afterEach(() => vi.unstubAllGlobals())
+beforeEach(() => { authSession.initialized.value = true; authSession.accessToken.value = 'test-token' })
 
 describe('Patrol Tasks API', () => {
   it('loads filtered pages and task detail from the persistent API', async () => {
-    mockSession.setRole('pqe')
     const fetch = vi.fn().mockResolvedValueOnce(response({ items: [task('PendingInspection')], total: 1, page: 2, pageSize: 5 }))
       .mockResolvedValueOnce(response({ summary: task('PendingInspection'), items: [], submissions: [] }))
     vi.stubGlobal('fetch', fetch)
@@ -24,7 +24,7 @@ describe('Patrol Tasks API', () => {
     expect(page.items[0].planNoSnapshot).toBe('P-1')
     const query = new URL(fetch.mock.calls[0][0], 'http://localhost').searchParams
     expect(Object.fromEntries(query)).toMatchObject({ taskNo: 'PT-1', status: 'Active', planId: 'plan-1', factory: 'Factory', page: '2', pageSize: '5' })
-    expect((fetch.mock.calls[0][1].headers as Record<string, string>)['X-Dev-Role']).toBe('pqe')
+    expect((fetch.mock.calls[0][1].headers as Headers).get('Authorization')).toBe('Bearer test-token')
     expect((await patrolTasksApi.get('task-1')).summary.standardNameSnapshot).toBe('Standard')
   })
   it('calls single approval, rejection, and batch approval endpoints', async () => {

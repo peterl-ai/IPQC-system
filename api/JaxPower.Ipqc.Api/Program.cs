@@ -2,12 +2,25 @@ using JaxPower.Ipqc.Api.Contracts;
 using JaxPower.Ipqc.Api.Data;
 using JaxPower.Ipqc.Api.Endpoints;
 using JaxPower.Ipqc.Api.Services;
+using JaxPower.Ipqc.Api.Security;
+using JaxPower.Ipqc.Api.Domain;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.Identity;
+using Microsoft.IdentityModel.Tokens;
+using System.Security.Claims;
+using System.Security.Cryptography;
+using System.Text;
+using System.Threading.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 
 var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddProblemDetails();
 builder.Services.AddOpenApi();
 builder.Services.AddSingleton(TimeProvider.System);
+builder.Services.AddSingleton(new AuthenticationClock(TimeProvider.System));
+builder.Services.AddScoped<IPasswordHasher<ApplicationUser>, PasswordHasher<ApplicationUser>>();
+builder.Services.AddScoped<LocalAuthService>();
+builder.Services.AddScoped<ApplicationUserService>();
 builder.Services.AddScoped<PatrolStandardService>();
 builder.Services.AddScoped<PatrolPlanService>();
 builder.Services.AddScoped<PatrolTaskGenerationService>();
@@ -18,6 +31,69 @@ builder.Services.AddScoped<CompletedPatrolRecordService>();
 builder.Services.AddSingleton<CompletedPatrolReportExcel>();
 builder.Services.AddHostedService<PatrolSchedulerBackgroundService>();
 builder.Services.AddSingleton<PatrolStandardExcel>();
+var keyText = builder.Configuration["Authentication:JwtSigningKey"];
+if (!builder.Environment.IsDevelopment() && !builder.Environment.IsEnvironment("Testing") &&
+    (string.IsNullOrWhiteSpace(keyText) || Encoding.UTF8.GetByteCount(keyText) < 32 ||
+     keyText.Contains("placeholder", StringComparison.OrdinalIgnoreCase) ||
+     keyText.Contains("change-me", StringComparison.OrdinalIgnoreCase)))
+    throw new InvalidOperationException("Configure a strong Authentication:JwtSigningKey secret before starting production.");
+var jwt = new JwtSettings { Key = string.IsNullOrWhiteSpace(keyText)
+    ? RandomNumberGenerator.GetBytes(64) : Encoding.UTF8.GetBytes(keyText),
+    AccessMinutes = builder.Configuration.GetValue("Authentication:AccessMinutes", 15),
+    RefreshDays = builder.Configuration.GetValue("Authentication:RefreshDays", 14) };
+if (jwt.AccessMinutes is < 1 or > 60 || jwt.RefreshDays is < 1 or > 14)
+    throw new InvalidOperationException("Authentication lifetimes are out of range.");
+builder.Services.AddSingleton(jwt);
+builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme).AddJwtBearer(options =>
+{
+    options.MapInboundClaims = false;
+    options.TokenValidationParameters = new TokenValidationParameters {
+        ValidateIssuer = true, ValidIssuer = jwt.Issuer,
+        ValidateAudience = true, ValidAudience = jwt.Audience,
+        ValidateIssuerSigningKey = true, IssuerSigningKey = new SymmetricSecurityKey(jwt.Key),
+        ValidateLifetime = false, ClockSkew = TimeSpan.FromSeconds(30)
+    };
+    options.Events = new JwtBearerEvents { OnTokenValidated = async context =>
+    {
+        var now = context.HttpContext.RequestServices.GetRequiredService<AuthenticationClock>().Clock.GetUtcNow().UtcDateTime;
+        if (context.SecurityToken.ValidFrom > now.AddSeconds(30) ||
+            context.SecurityToken.ValidTo <= now.AddSeconds(-30))
+        { context.Fail("Token expired or not yet valid."); return; }
+        var idText = context.Principal?.FindFirst("sub")?.Value;
+        var versionText = context.Principal?.FindFirst("auth_version")?.Value;
+        if (!Guid.TryParse(idText, out var id) || !int.TryParse(versionText, out var version))
+        { context.Fail("Invalid identity."); return; }
+        var db = context.HttpContext.RequestServices.GetRequiredService<IpqcDbContext>();
+        var user = await db.ApplicationUsers.AsNoTracking().SingleOrDefaultAsync(x => x.Id == id,
+            context.HttpContext.RequestAborted);
+        if (user is null || !user.IsActive || user.AuthVersion != version)
+        { context.Fail("Session revoked."); return; }
+        var identity = (ClaimsIdentity)context.Principal!.Identity!;
+        identity.AddClaim(new Claim(ClaimTypes.NameIdentifier, user.Id.ToString()));
+        identity.AddClaim(new Claim(ClaimTypes.Name, user.Username));
+        identity.AddClaim(new Claim(ClaimTypes.Role, user.Role));
+        identity.AddClaim(new Claim("must_change_password", user.MustChangePassword ? "true" : "false"));
+        if (!user.MustChangePassword)
+            foreach (var permission in IpqcPermissions.ForRole(user.Role))
+                identity.AddClaim(new Claim(IpqcPermissions.ClaimType, permission));
+    }};
+});
+builder.Services.AddAuthorization(options =>
+{
+    foreach (var permission in IpqcPermissions.All)
+        options.AddPolicy(permission, policy => policy.RequireAuthenticatedUser()
+            .RequireClaim(IpqcPermissions.ClaimType, permission));
+});
+builder.Services.AddRateLimiter(options =>
+{
+    options.AddPolicy("login", context => RateLimitPartition.GetFixedWindowLimiter(
+        context.Connection.RemoteIpAddress?.ToString() ?? "unknown", _ => new FixedWindowRateLimiterOptions {
+            PermitLimit = 20, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 }));
+    options.AddPolicy("refresh", context => RateLimitPartition.GetFixedWindowLimiter(
+        context.Connection.RemoteIpAddress?.ToString() ?? "unknown", _ => new FixedWindowRateLimiterOptions {
+            PermitLimit = 60, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 }));
+    options.RejectionStatusCode = 429;
+});
 var provider = builder.Configuration["Database:Provider"] ?? "Sqlite";
 var connection = builder.Configuration.GetConnectionString("Ipqc") ?? throw new InvalidOperationException("ConnectionStrings:Ipqc is required.");
 if (!builder.Environment.IsDevelopment() && !builder.Environment.IsEnvironment("Testing") &&
@@ -39,33 +115,14 @@ if (app.Environment.IsDevelopment())
     app.UseCors("LocalVite");
 }
 if (!app.Environment.IsDevelopment()) app.UseExceptionHandler();
+app.UseRateLimiter();
+app.UseAuthentication();
+app.UseAuthorization();
 
-// Phase 1C has no production authentication. Fail closed outside Development.
-// In Development the role header is a test fixture, never a production identity.
-app.Use(async (context, next) =>
-{
-    var standards = context.Request.Path.StartsWithSegments("/api/patrol-standards");
-    var plans = context.Request.Path.StartsWithSegments("/api/patrol-plans");
-    var tasks = context.Request.Path.StartsWithSegments("/api/patrol-tasks");
-    var records = context.Request.Path.StartsWithSegments("/api/completed-patrol-records");
-    if (!standards && !plans && !tasks && !records) { await next(); return; }
-    if (!app.Environment.IsDevelopment())
-    {
-        await Results.Problem(statusCode: StatusCodes.Status503ServiceUnavailable,
-            title: "Authentication integration is not configured.").ExecuteAsync(context);
-        return;
-    }
-    var role = context.Request.Headers["X-Dev-Role"].ToString();
-    if (role is not ("admin" or "pqe") && !((tasks || records) && role == "ipqa"))
-    {
-        await Results.Problem(statusCode: StatusCodes.Status403Forbidden,
-            title: "Patrol Standards and Plans require Admin or PQE.").ExecuteAsync(context);
-        return;
-    }
-    await next();
-});
+app.MapAuth();
+app.MapUsers();
 
-var group = app.MapGroup("/api/patrol-standards");
+var group = app.MapGroup("/api/patrol-standards").RequireAuthorization(IpqcPermissions.StandardsRead);
 group.MapGet("", async (string? standardName, string? factoryCode, string? lineCode, int? page, int? pageSize,
     PatrolStandardService service, CancellationToken ct) =>
 {
@@ -81,29 +138,29 @@ group.MapPost("", async (StandardInput input, PatrolStandardService service, Htt
 {
     var errors = PatrolStandardService.Validate(input);
     if (errors.Count > 0) return Results.ValidationProblem(errors);
-    var row = await service.CreateAsync(input, http.Request.Headers["X-Dev-Role"].ToString(), ct);
+    var row = await service.CreateAsync(input, IpqcPermissions.Username(http.User), ct);
     return Results.Created($"/api/patrol-standards/{row.Id}", row);
-});
+}).RequireAuthorization(IpqcPermissions.StandardsWrite);
 group.MapPut("/{id:guid}", async (Guid id, StandardInput input, PatrolStandardService service, HttpContext http, CancellationToken ct) =>
 {
     var errors = PatrolStandardService.Validate(input);
     if (errors.Count > 0) return Results.ValidationProblem(errors);
-    return await service.UpdateAsync(id, input, http.Request.Headers["X-Dev-Role"].ToString(), ct) is { } row
+    return await service.UpdateAsync(id, input, IpqcPermissions.Username(http.User), ct) is { } row
         ? Results.Ok(row) : Results.Problem(statusCode: 404, title: "Patrol Standard not found.");
-});
+}).RequireAuthorization(IpqcPermissions.StandardsWrite);
 group.MapDelete("/{id:guid}", async (Guid id, PatrolStandardService service, IpqcDbContext db, CancellationToken ct) =>
 {
     if (await db.PatrolPlans.AnyAsync(x => x.PatrolStandardId == id, ct) || await db.PatrolTasks.AnyAsync(x => x.PatrolStandardId == id, ct))
         return Results.Problem(statusCode: 409, title: "Patrol Standard is referenced by a plan or task.");
     return await service.DeleteAsync(id, ct) ? Results.NoContent() : Results.Problem(statusCode: 404, title: "Patrol Standard not found.");
-});
+}).RequireAuthorization(IpqcPermissions.StandardsWrite);
 group.MapPost("/{id:guid}/copy", async (Guid id, CopyInput? input, PatrolStandardService service, HttpContext http, CancellationToken ct) =>
 {
     if (input?.PatrolStandardName is { } name && (string.IsNullOrWhiteSpace(name) || name.Length > 200))
         return Results.ValidationProblem(new Dictionary<string, string[]> { ["PatrolStandardName"] = ["Patrol Standard Name must be 1–200 non-whitespace characters."] });
-    return await service.CopyAsync(id, input?.PatrolStandardName, http.Request.Headers["X-Dev-Role"].ToString(), ct) is { } row
+    return await service.CopyAsync(id, input?.PatrolStandardName, IpqcPermissions.Username(http.User), ct) is { } row
         ? Results.Created($"/api/patrol-standards/{row.Id}", row) : Results.Problem(statusCode: 404, title: "Patrol Standard not found.");
-});
+}).RequireAuthorization(IpqcPermissions.StandardsWrite);
 const string contentType = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
 group.MapGet("/template", (PatrolStandardExcel excel) => Results.File(excel.Write(), contentType, "patrol-standard-template.xlsx"));
 group.MapGet("/export", async (Guid id, PatrolStandardService service, PatrolStandardExcel excel, CancellationToken ct) =>
@@ -126,14 +183,15 @@ group.MapPost("/import", async (IFormFile file, PatrolStandardExcel excel, Patro
     }
     var errors = PatrolStandardService.Validate(input);
     if (errors.Count > 0) return Results.ValidationProblem(errors);
-    var row = await service.CreateAsync(input, http.Request.Headers["X-Dev-Role"].ToString(), ct);
+    var row = await service.CreateAsync(input, IpqcPermissions.Username(http.User), ct);
     return Results.Created($"/api/patrol-standards/{row.Id}", row);
-}).DisableAntiforgery();
+}).DisableAntiforgery().RequireAuthorization(IpqcPermissions.StandardsWrite);
 
 app.MapPatrolPlans();
 app.MapPatrolTasks();
 app.MapCompletedPatrolRecords();
 
+await UserBootstrap.InitializeAsync(app);
 app.Run();
 
 public partial class Program { }

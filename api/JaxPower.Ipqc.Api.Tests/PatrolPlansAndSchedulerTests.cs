@@ -25,7 +25,7 @@ public sealed class PatrolPlansAndSchedulerTests
     private static ScheduleInput Hours(int n = 2) => new("everyNHours", n, null, null);
     private static PlanInput Draft(Guid standardId, ScheduleInput? schedule = null, bool enabled = true) =>
         new(null, "Line A Patrol", standardId, "F1", "Factory", "L1", "Line A", enabled,
-            "2026-10-03T08:00", null, PatrolSchedule.PlantTimeZone, schedule ?? Hours(), "dev-ipqa-1");
+            "2026-10-03T08:00", null, PatrolSchedule.PlantTimeZone, schedule ?? Hours(), TestAccounts.Ipqa1Id);
 
     [Fact]
     public async Task Plan_crud_filters_and_deletion_are_persistent()
@@ -61,18 +61,26 @@ public sealed class PatrolPlansAndSchedulerTests
     {
         await using var app = await TestApp.CreateAsync();
         var standard = await app.StandardAsync();
-        var bad = Draft(Guid.NewGuid()) with { PlanName = "  ", EffectiveEndLocal = "2026-10-03T07:00", AssigneeKey = null,
+        var bad = Draft(Guid.NewGuid()) with { PlanName = "  ", EffectiveEndLocal = "2026-10-03T07:00", AssigneeUserId = null,
             Schedule = new("cron", null, null, null) };
         Assert.Equal(HttpStatusCode.BadRequest, (await app.Client.PostAsJsonAsync("/api/patrol-plans", bad)).StatusCode);
         Assert.Equal(HttpStatusCode.BadRequest, (await app.Client.PostAsJsonAsync("/api/patrol-plans", Draft(standard) with { TimeZoneId = "UTC" })).StatusCode);
         Assert.Equal(HttpStatusCode.BadRequest, (await app.Client.PostAsJsonAsync("/api/patrol-plans", Draft(standard) with { Schedule = new("daily", null, [], null) })).StatusCode);
-        Assert.Equal(HttpStatusCode.BadRequest, (await app.Client.PostAsJsonAsync("/api/patrol-plans", Draft(standard) with { AssigneeKey = "unknown" })).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await app.Client.PostAsJsonAsync("/api/patrol-plans", Draft(standard) with { AssigneeUserId = Guid.NewGuid() })).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await app.Client.PostAsJsonAsync("/api/patrol-plans", Draft(standard) with { AssigneeUserId = TestAccounts.PqeId })).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await app.Client.PostAsJsonAsync("/api/patrol-plans", Draft(standard) with { AssigneeUserId = TestAccounts.AdminId })).StatusCode);
+        using (var scope = app.Factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<IpqcDbContext>();
+            var user = await db.ApplicationUsers.SingleAsync(x => x.Id == TestAccounts.Ipqa2Id);
+            user.IsActive = false;
+            await db.SaveChangesAsync();
+        }
+        Assert.Equal(HttpStatusCode.BadRequest, (await app.Client.PostAsJsonAsync("/api/patrol-plans", Draft(standard) with { AssigneeUserId = TestAccounts.Ipqa2Id })).StatusCode);
         Assert.Equal(HttpStatusCode.BadRequest, (await app.Client.PostAsJsonAsync("/api/patrol-plans", Draft(standard) with { EffectiveStartLocal = "2026-03-08T02:30" })).StatusCode);
-        var ipqa = app.Factory.CreateClient();
-        ipqa.DefaultRequestHeaders.Add("X-Dev-Role", "ipqa");
+        var ipqa = await TestAccounts.ClientAsync(app.Factory, "dev-ipqa-1");
         Assert.Equal(HttpStatusCode.Forbidden, (await ipqa.GetAsync("/api/patrol-plans")).StatusCode);
-        var pqe = app.Factory.CreateClient();
-        pqe.DefaultRequestHeaders.Add("X-Dev-Role", "pqe");
+        var pqe = await TestAccounts.ClientAsync(app.Factory, "pqe");
         Assert.Equal(HttpStatusCode.OK, (await pqe.GetAsync("/api/patrol-plans/assignees")).StatusCode);
     }
 
@@ -130,7 +138,7 @@ public sealed class PatrolPlansAndSchedulerTests
         }
         Assert.Equal(HttpStatusCode.Conflict, (await app.Client.DeleteAsync($"/api/patrol-plans/{plan.Id}")).StatusCode);
         Assert.Equal(HttpStatusCode.Conflict, (await app.Client.DeleteAsync($"/api/patrol-standards/{standard}")).StatusCode);
-        var update = Draft(standard, new("daily", null, ["09:00", "17:00"], null)) with { PlanNo = plan.PlanNo, AssigneeKey = "dev-ipqa-2" };
+        var update = Draft(standard, new("daily", null, ["09:00", "17:00"], null)) with { PlanNo = plan.PlanNo, AssigneeUserId = TestAccounts.Ipqa2Id };
         var response = await app.Client.PutAsJsonAsync($"/api/patrol-plans/{plan.Id}", update);
         response.EnsureSuccessStatusCode();
         Assert.Equal(0, await app.GenerateAsync()); // edited schedule cannot reinterpret earlier day
@@ -270,7 +278,7 @@ public sealed class PatrolPlansAndSchedulerTests
         var plan = await app.CreateAsync(Draft(firstStandard) with { EffectiveEndLocal = "2026-10-03T10:00" });
         app.Clock.Now = new DateTimeOffset(2026, 10, 3, 18, 0, 0, TimeSpan.Zero);
         Assert.Equal(2, await app.GenerateAsync()); // inclusive 08:00 and 10:00
-        var changed = Draft(secondStandard) with { PlanNo = plan.PlanNo, AssigneeKey = "dev-ipqa-2" };
+        var changed = Draft(secondStandard) with { PlanNo = plan.PlanNo, AssigneeUserId = TestAccounts.Ipqa2Id };
         var update = await app.Client.PutAsJsonAsync($"/api/patrol-plans/{plan.Id}", changed);
         update.EnsureSuccessStatusCode();
         app.Clock.Now = new DateTimeOffset(2026, 10, 3, 20, 0, 0, TimeSpan.Zero);
@@ -286,7 +294,7 @@ public sealed class PatrolPlansAndSchedulerTests
     {
         await using var app = await TestApp.CreateAsync();
         var standard = await app.StandardAsync();
-        var plan = await app.CreateAsync(Draft(standard, enabled: false) with { AssigneeKey = null });
+        var plan = await app.CreateAsync(Draft(standard, enabled: false) with { AssigneeUserId = null });
         Assert.Equal(HttpStatusCode.BadRequest, (await app.Client.PostAsync($"/api/patrol-plans/{plan.Id}/enable", null)).StatusCode);
         Assert.Equal(0, await app.GenerateAsync());
     }
@@ -367,8 +375,8 @@ public sealed class PatrolPlansAndSchedulerTests
             });
             using var scope = factory.Services.CreateScope();
             await scope.ServiceProvider.GetRequiredService<IpqcDbContext>().Database.MigrateAsync();
-            var client = factory.CreateClient();
-            client.DefaultRequestHeaders.Add("X-Dev-Role", "admin");
+            await TestAccounts.SeedAsync(factory);
+            var client = await TestAccounts.ClientAsync(factory, "admin");
             return new TestApp(factory, client, clock, path);
         }
 

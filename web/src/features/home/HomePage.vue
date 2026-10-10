@@ -40,10 +40,10 @@ import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import { ArrowRightOutlined } from '@ant-design/icons-vue'
 import { hasPermission } from '@/services/permissions'
-import { mockSession } from '@/services/mockSession'
+import { authSession } from '@/services/authSession'
 
 const { t } = useI18n()
 const router = useRouter()
-const canOpenStandards = computed(() => hasPermission(mockSession.role.value, 'standards:view'))
+const canOpenStandards = computed(() => hasPermission(authSession.user.value?.permissions ?? [], 'standards:view'))
 const steps = computed(() => [t('home.step1'), t('home.step2'), t('home.step3'), t('home.step4')])
 </script>

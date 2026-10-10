@@ -24,18 +24,21 @@
 - File access: authenticated HTTPS/API path rather than exposing FTP credentials/direct `ftp://` links.
 
 ## Still open before later backend/production phases
-1. Authentication source:
-   - local application accounts
-   - Microsoft Entra ID / O365 SSO
-   - another corporate identity source
-2. Exact production DB host/operations ownership.
-3. Exact file server technology:
+1. Exact production DB host/operations ownership.
+2. Exact file server technology:
    - existing FTP-backed storage
    - SMB/network share behind API
    - S3-compatible/MinIO
-4. File retention policy and maximum image size/count.
-5. Resolved for Phase 1E: all submitted item and sample results receive immutable normalized revision rows.
-6. Whether Excel download must exactly match legacy GQMS layout or only preserve required report content.
+3. File retention policy and maximum image size/count.
+4. Resolved for Phase 1E: all submitted item and sample results receive immutable normalized revision rows.
+5. Whether Excel download must exactly match legacy GQMS layout or only preserve required report content.
+
+## Phase 1G identity decision
+- IPQC v1 uses local ApplicationUser accounts for both Web and future Android. No Entra/O365/LDAP in v1.
+- Passwords are hashed, access uses short-lived JWTs with database-backed user validation, and rotating refresh sessions store token hashes only. Web uses an HttpOnly refresh cookie.
+- Admin manages persistent users without hard delete. New/reset accounts require password change; failed logins lock after five attempts for 15 minutes.
+- Plan assignees and Task owners use User IDs. Audit actor fields use the authenticated username.
+- Production credentials and JWT signing key come from deployment secrets, never repository configuration.
 
 ## Phase 1D decisions and remaining questions
 - PQE uses a business-friendly recurrence form (Every N Hours, Daily, Weekly); shift, holiday, and monthly scheduling are deferred.

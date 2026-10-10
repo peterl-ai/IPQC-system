@@ -1,4 +1,4 @@
-import { mockSession } from '@/services/mockSession'
+import { authFetch } from '@/services/authFetch'
 
 export interface ScheduleDefinition {
   type: 'everyNHours' | 'daily' | 'weekly'
@@ -20,7 +20,7 @@ export interface PlanDraft {
   effectiveEndLocal: string | null
   timeZoneId: string
   schedule: ScheduleDefinition
-  assigneeKey: string | null
+  assigneeUserId: string | null
 }
 
 export interface Plan extends PlanDraft {
@@ -29,7 +29,7 @@ export interface Plan extends PlanDraft {
   updatedAtUtc: string
 }
 
-export interface Assignee { key: string; displayName: string }
+export interface Assignee { id: string; username: string; displayName: string }
 export interface StandardOption { id: string; patrolStandardName: string; factoryCode: string; factoryName: string; lineCode: string; lineName: string }
 
 export class PlanApiError extends Error {
@@ -39,10 +39,9 @@ export class PlanApiError extends Error {
 const base = import.meta.env.VITE_API_BASE_URL || '/api'
 async function request(path: string, options: RequestInit = {}): Promise<Response> {
   const headers = new Headers(options.headers)
-  if (import.meta.env.DEV) headers.set('X-Dev-Role', mockSession.role.value)
   if (options.body) headers.set('Content-Type', 'application/json')
   let response: Response
-  try { response = await fetch(`${base}${path}`, { ...options, headers }) }
+  try { response = await authFetch(`${base}${path}`, { ...options, headers }) }
   catch { throw new PlanApiError('API unavailable', 0) }
   if (!response.ok) {
     const body = await response.json().catch(() => ({})) as { title?: string; errors?: Record<string, string[]> }
