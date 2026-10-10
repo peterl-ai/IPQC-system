@@ -288,6 +288,31 @@ public sealed class LocalAuthUserRbacTests
         Assert.Equal(HttpStatusCode.OK, (await app.Admin.PostAsync($"/api/users/{TestAccounts.Ipqa1Id}/deactivate", null)).StatusCode);
     }
 
+    [Fact]
+    public async Task Role_change_revokes_old_token_and_new_login_uses_database_role()
+    {
+        await using var app = await Fixture.CreateAsync();
+        var old = await app.LoginAsync("pqe");
+        Assert.Equal(HttpStatusCode.Forbidden, (await app.ClientWithToken(old.AccessToken).GetAsync("/api/users")).StatusCode);
+        var update = await app.Admin.PutAsJsonAsync($"/api/users/{TestAccounts.PqeId}", new UserUpdateInput("Promoted", "Admin"));
+        Assert.Equal(HttpStatusCode.OK, update.StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, (await app.ClientWithToken(old.AccessToken).GetAsync("/api/me")).StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, (await app.Anonymous.PostAsJsonAsync("/api/auth/refresh", new RefreshInput(old.RefreshToken))).StatusCode);
+        var fresh = await app.LoginAsync("pqe");
+        Assert.Equal("Admin", fresh.User.Role);
+        Assert.Equal(HttpStatusCode.OK, (await app.ClientWithToken(fresh.AccessToken).GetAsync("/api/users")).StatusCode);
+    }
+
+    [Fact]
+    public async Task Concurrent_duplicate_user_creates_resolve_as_created_and_conflict()
+    {
+        await using var app = await Fixture.CreateAsync();
+        var first = app.Admin.PostAsJsonAsync("/api/users", new UserCreateInput("race-user", "First", "IPQA", "InitialPass123", true));
+        var second = app.Admin.PostAsJsonAsync("/api/users", new UserCreateInput("RACE-USER", "Second", "IPQA", "InitialPass123", true));
+        var results = await Task.WhenAll(first, second);
+        Assert.Equal([HttpStatusCode.Created, HttpStatusCode.Conflict], results.Select(x => x.StatusCode).OrderBy(x => (int)x).ToArray());
+    }
+
     private sealed class Fixture(WebApplicationFactory<Program> factory, string path, HttpClient admin,
         HttpClient pqe, HttpClient ipqa, HttpClient anonymous) : IAsyncDisposable
     {
