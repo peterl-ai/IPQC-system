@@ -1,5 +1,5 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
-import { mockSession } from '@/services/mockSession'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { authSession } from '@/services/authSession'
 import { ApiError, patrolStandardsApi } from './api'
 
 const summary = {
@@ -20,17 +20,17 @@ const row = {
 }
 
 afterEach(() => vi.unstubAllGlobals())
+beforeEach(() => { authSession.initialized.value = true; authSession.accessToken.value = 'test-token' })
 
 describe('Patrol Standards API client', () => {
-  it('maps server DTOs and sends filters/pagination and development role', async () => {
-    mockSession.setRole('pqe')
+  it('maps server DTOs and sends filters/pagination with bearer auth', async () => {
     const fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({ items: [summary], total: 1, page: 2, pageSize: 5 }), { status: 200 }))
     vi.stubGlobal('fetch', fetch)
     const result = await patrolStandardsApi.list({ name: 'Standard', factory: 'F1', line: 'L1', page: 2, pageSize: 5 })
     expect(result.items[0].name).toBe('Standard A')
     expect(result.items[0]).not.toHaveProperty('inspectionItems')
     expect(fetch.mock.calls[0][0]).toContain('standardName=Standard&factoryCode=F1&lineCode=L1')
-    expect((fetch.mock.calls[0][1].headers as Headers).get('X-Dev-Role')).toBe('pqe')
+    expect((fetch.mock.calls[0][1].headers as Headers).get('Authorization')).toBe('Bearer test-token')
   })
 
   it('does not claim success on server validation failure', async () => {

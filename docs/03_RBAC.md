@@ -32,9 +32,10 @@ Android (future):
 - Resubmit
 
 ## Enforcement
-Phase 1A may use a mock role switcher for UI testing.
+Phase 1G uses persistent local ApplicationUser accounts. Admin, PQE, and IPQA authenticate with the same backend used by future Android clients. No Entra, O365, or LDAP integration is planned for v1.
 
-Once the API exists:
-- route/menu visibility is UX only
-- API authorization is mandatory and authoritative
-- server endpoints must enforce role/permission checks
+- Route/menu visibility follows the permissions returned by `/api/me`; API permission policies remain authoritative.
+- Each bearer request reloads the active user and current role from the database and checks the auth version.
+- A user flagged `MustChangePassword` can access `/api/me`, refresh, logout, and change password, but has no business permission claims.
+- Admin alone manages users. The last active Admin cannot be deactivated or demoted, and an Admin cannot deactivate or demote themselves.
+- An IPQA assigned to an enabled Plan or unfinished Task cannot be deactivated or moved to another role. Completed history alone does not block a change.

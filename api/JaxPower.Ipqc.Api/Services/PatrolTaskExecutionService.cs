@@ -17,10 +17,10 @@ public sealed class PatrolTaskExecutionService(IpqcDbContext db, TimeProvider cl
 {
     public async Task<PagedTasks> ListAsync(string? taskNo, string? status, Guid? planId, Guid? standardId,
         string? factory, string? line, string? inspector, DateTime? scheduledFrom, DateTime? scheduledTo,
-        DateTime? submittedFrom, DateTime? submittedTo, string? assignee, int page, int pageSize, CancellationToken ct)
+        DateTime? submittedFrom, DateTime? submittedTo, Guid? assignee, int page, int pageSize, CancellationToken ct)
     {
         var query = db.PatrolTasks.AsNoTracking().AsQueryable();
-        if (assignee is not null) query = query.Where(x => x.AssignedInspectorKey == assignee);
+        if (assignee is not null) query = query.Where(x => x.AssignedInspectorUserId == assignee);
         if (!string.IsNullOrWhiteSpace(taskNo)) query = query.Where(x => x.TaskNo.Contains(taskNo.Trim()));
         if (status == "Active") query = assignee is null ? query.Where(x => x.Status != "Completed") :
             query.Where(x => x.Status == "PendingInspection" || x.Status == "InProgress" || x.Status == "Rejected");
@@ -72,7 +72,10 @@ public sealed class PatrolTaskExecutionService(IpqcDbContext db, TimeProvider cl
                     review.Reviewer, review.Decision, review.Reason, review.ReviewedAtUtc) : null)).ToList());
     }
 
-    public async Task<TaskDetail?> SaveDraftAsync(Guid id, string assignee, TaskDraftInput input, CancellationToken ct)
+    public Task<bool> OwnsAsync(Guid taskId, Guid userId, CancellationToken ct) =>
+        db.PatrolTasks.AsNoTracking().AnyAsync(x => x.Id == taskId && x.AssignedInspectorUserId == userId, ct);
+
+    public async Task<TaskDetail?> SaveDraftAsync(Guid id, Guid assignee, TaskDraftInput input, CancellationToken ct)
     {
         var task = await EditableTask(id, assignee, ct);
         if (task is null) return null;
@@ -136,7 +139,7 @@ public sealed class PatrolTaskExecutionService(IpqcDbContext db, TimeProvider cl
         try
         {
             await using var tx = await db.Database.BeginTransactionAsync(ct);
-            var claimed = await db.PatrolTasks.Where(x => x.Id == id && x.AssignedInspectorKey == assignee &&
+            var claimed = await db.PatrolTasks.Where(x => x.Id == id && x.AssignedInspectorUserId == assignee &&
                     x.Status == task.Status && x.CurrentRevisionNo == task.CurrentRevisionNo)
                 .ExecuteUpdateAsync(x => x.SetProperty(t => t.Status,
                         task.Status == "PendingInspection" ? "InProgress" : task.Status)
@@ -154,7 +157,7 @@ public sealed class PatrolTaskExecutionService(IpqcDbContext db, TimeProvider cl
         return await GetAsync(id, ct);
     }
 
-    public async Task<TaskDetail?> SubmitAsync(Guid id, string assignee, CancellationToken ct)
+    public async Task<TaskDetail?> SubmitAsync(Guid id, Guid assignee, string actor, CancellationToken ct)
     {
         var task = await EditableTask(id, assignee, ct);
         if (task is null) return null;
@@ -171,7 +174,7 @@ public sealed class PatrolTaskExecutionService(IpqcDbContext db, TimeProvider cl
         var submission = new PatrolTaskSubmission
         {
             Id = Guid.NewGuid(), PatrolTaskId = id, RevisionNo = revision, Shift = task.Shift!,
-            OverallInspectionResult = overall, SubmittedBy = assignee, SubmittedAtUtc = now,
+            OverallInspectionResult = overall, SubmittedBy = actor, SubmittedAtUtc = now,
             Items = task.Items.OrderBy(x => x.SequenceNo).Select(x => new PatrolTaskSubmissionItem
             {
                 Id = Guid.NewGuid(), PatrolTaskItemId = x.Id, SequenceNo = x.SequenceNo,
@@ -189,7 +192,7 @@ public sealed class PatrolTaskExecutionService(IpqcDbContext db, TimeProvider cl
         try
         {
             await using var tx = await db.Database.BeginTransactionAsync(ct);
-            var claimed = await db.PatrolTasks.Where(x => x.Id == id && x.AssignedInspectorKey == assignee &&
+            var claimed = await db.PatrolTasks.Where(x => x.Id == id && x.AssignedInspectorUserId == assignee &&
                     x.CurrentRevisionNo == task.CurrentRevisionNo &&
                     (x.Status == "PendingInspection" || x.Status == "InProgress" || x.Status == "Rejected"))
                 .ExecuteUpdateAsync(x => x.SetProperty(t => t.Status, "PendingApproval")
@@ -209,11 +212,11 @@ public sealed class PatrolTaskExecutionService(IpqcDbContext db, TimeProvider cl
         return await GetAsync(id, ct);
     }
 
-    private async Task<PatrolTask?> EditableTask(Guid id, string assignee, CancellationToken ct)
+    private async Task<PatrolTask?> EditableTask(Guid id, Guid assignee, CancellationToken ct)
     {
         var task = await db.PatrolTasks.Include(x => x.Items).ThenInclude(x => x.Samples)
             .FirstOrDefaultAsync(x => x.Id == id, ct);
-        if (task is not null && task.AssignedInspectorKey != assignee)
+        if (task is not null && task.AssignedInspectorUserId != assignee)
             throw new UnauthorizedAccessException("Task is assigned to another IPQA inspector.");
         return task;
     }

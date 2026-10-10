@@ -5,6 +5,8 @@ namespace JaxPower.Ipqc.Api.Data;
 
 public sealed class IpqcDbContext(DbContextOptions<IpqcDbContext> options) : DbContext(options)
 {
+    public DbSet<ApplicationUser> ApplicationUsers => Set<ApplicationUser>();
+    public DbSet<RefreshTokenSession> RefreshTokenSessions => Set<RefreshTokenSession>();
     public DbSet<PatrolStandard> PatrolStandards => Set<PatrolStandard>();
     public DbSet<PatrolStandardItem> PatrolStandardItems => Set<PatrolStandardItem>();
     public DbSet<PatrolPlan> PatrolPlans => Set<PatrolPlan>();
@@ -19,6 +21,23 @@ public sealed class IpqcDbContext(DbContextOptions<IpqcDbContext> options) : DbC
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
+        var user = modelBuilder.Entity<ApplicationUser>();
+        user.HasKey(x => x.Id);
+        user.Property(x => x.Username).HasMaxLength(100).IsRequired();
+        user.Property(x => x.NormalizedUsername).HasMaxLength(100).IsRequired();
+        user.HasIndex(x => x.NormalizedUsername).IsUnique();
+        user.Property(x => x.DisplayName).HasMaxLength(200).IsRequired();
+        user.Property(x => x.PasswordHash).HasMaxLength(500).IsRequired();
+        user.Property(x => x.Role).HasMaxLength(10).IsRequired();
+        user.Property(x => x.CreatedBy).HasMaxLength(100);
+        user.Property(x => x.UpdatedBy).HasMaxLength(100);
+        var session = modelBuilder.Entity<RefreshTokenSession>();
+        session.HasKey(x => x.Id);
+        session.Property(x => x.TokenHash).HasMaxLength(64).IsRequired();
+        session.HasIndex(x => x.TokenHash).IsUnique();
+        session.HasIndex(x => new { x.UserId, x.RevokedAtUtc });
+        session.Property(x => x.UserAgent).HasMaxLength(500);
+        session.HasOne(x => x.User).WithMany(x => x.RefreshSessions).HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Restrict);
         var standard = modelBuilder.Entity<PatrolStandard>();
         standard.HasKey(x => x.Id);
         standard.Property(x => x.PatrolStandardName).HasMaxLength(200).IsRequired();
@@ -64,6 +83,8 @@ public sealed class IpqcDbContext(DbContextOptions<IpqcDbContext> options) : DbC
         assignee.HasKey(x => x.Id);
         assignee.Property(x => x.AssigneeKey).HasMaxLength(100).IsRequired();
         assignee.HasIndex(x => new { x.PatrolPlanId, x.AssigneeKey }).IsUnique();
+        assignee.HasIndex(x => new { x.PatrolPlanId, x.UserId }).IsUnique();
+        assignee.HasOne(x => x.User).WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Restrict);
 
         var task = modelBuilder.Entity<PatrolTask>();
         task.HasKey(x => x.Id);
@@ -71,6 +92,8 @@ public sealed class IpqcDbContext(DbContextOptions<IpqcDbContext> options) : DbC
         task.HasIndex(x => x.TaskNo).IsUnique();
         task.HasIndex(x => new { x.PatrolPlanId, x.ScheduledOccurrenceUtc }).IsUnique();
         task.Property(x => x.AssignedInspectorKey).HasMaxLength(100).IsRequired();
+        task.HasIndex(x => x.AssignedInspectorUserId);
+        task.HasOne(x => x.AssignedInspectorUser).WithMany().HasForeignKey(x => x.AssignedInspectorUserId).OnDelete(DeleteBehavior.Restrict);
         task.Property(x => x.Status).HasMaxLength(50).IsRequired();
         task.Property(x => x.GenerationSource).HasMaxLength(50).IsRequired();
         task.HasOne(x => x.PatrolStandard).WithMany().HasForeignKey(x => x.PatrolStandardId).OnDelete(DeleteBehavior.Restrict);

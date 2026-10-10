@@ -14,7 +14,7 @@ public sealed class PatrolTaskGenerationService(IpqcDbContext db, TimeProvider c
         var now = clock.GetUtcNow().UtcDateTime;
         var window = Math.Clamp(configuration.GetValue("Scheduler:CatchUpWindowHours", 24), 1, 168);
         var earliest = now.AddHours(-window);
-        var plans = await db.PatrolPlans.AsNoTracking().Include(x => x.Assignees)
+        var plans = await db.PatrolPlans.AsNoTracking().Include(x => x.Assignees).ThenInclude(x => x.User)
             .Include(x => x.PatrolStandard).ThenInclude(x => x.InspectionItems)
             .AsSplitQuery()
             .Where(x => x.IsEnabled && x.EffectiveStartUtc <= now &&
@@ -29,7 +29,8 @@ public sealed class PatrolTaskGenerationService(IpqcDbContext db, TimeProvider c
             try
             {
                 var assignee = plan.Assignees.SingleOrDefault(x => x.IsActive);
-                if (assignee is null) continue; // Invalid data cannot create an unassigned task.
+                if (assignee?.UserId is null || assignee.User is not { IsActive: true, Role: "IPQA" })
+                    continue; // Legacy or invalid assignments cannot create executable tasks.
                 var lower = new[] { earliest, plan.EffectiveStartUtc, plan.GenerationNotBeforeUtc }.Max();
                 var upper = plan.EffectiveEndUtc is { } end && end < now ? end : now;
                 if (upper < lower) continue;
@@ -42,7 +43,8 @@ public sealed class PatrolTaskGenerationService(IpqcDbContext db, TimeProvider c
                     var id = Guid.NewGuid();
                     var task = new PatrolTask { Id = id, TaskNo = $"PT-{id:N}".ToUpperInvariant(),
                         PatrolPlanId = plan.Id, PatrolStandardId = plan.PatrolStandardId,
-                        AssignedInspectorKey = assignee.AssigneeKey, ScheduledOccurrenceUtc = occurrence,
+                        AssignedInspectorUserId = assignee.UserId,
+                        AssignedInspectorKey = assignee.User.Username, ScheduledOccurrenceUtc = occurrence,
                         GeneratedAtUtc = now, CreatedAtUtc = now, UpdatedAtUtc = now,
                         PlanNoSnapshot = plan.PlanNo, PlanNameSnapshot = plan.PlanName,
                         StandardNameSnapshot = plan.PatrolStandard.PatrolStandardName,

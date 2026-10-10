@@ -369,22 +369,15 @@ public sealed class PatrolTaskWorkflowTests
         public override DateTimeOffset GetUtcNow() => Now;
     }
 
-    private sealed class Fixture(WebApplicationFactory<Program> factory, string path, ManualClock clock) : IAsyncDisposable
+    private sealed class Fixture(WebApplicationFactory<Program> factory, string path, ManualClock clock,
+        HttpClient admin, HttpClient pqe, HttpClient ipqa, HttpClient otherIpqa) : IAsyncDisposable
     {
         public WebApplicationFactory<Program> Factory { get; } = factory;
         public ManualClock Clock { get; } = clock;
-        public HttpClient Admin { get; } = Client(factory, "admin");
-        public HttpClient Pqe { get; } = Client(factory, "pqe");
-        public HttpClient Ipqa { get; } = Client(factory, "ipqa", "dev-ipqa-1");
-        public HttpClient OtherIpqa { get; } = Client(factory, "ipqa", "dev-ipqa-2");
-
-        private static HttpClient Client(WebApplicationFactory<Program> factory, string role, string? assignee = null)
-        {
-            var client = factory.CreateClient();
-            client.DefaultRequestHeaders.Add("X-Dev-Role", role);
-            if (assignee is not null) client.DefaultRequestHeaders.Add("X-Dev-Assignee-Key", assignee);
-            return client;
-        }
+        public HttpClient Admin { get; } = admin;
+        public HttpClient Pqe { get; } = pqe;
+        public HttpClient Ipqa { get; } = ipqa;
+        public HttpClient OtherIpqa { get; } = otherIpqa;
 
         public static async Task<Fixture> CreateAsync()
         {
@@ -406,7 +399,12 @@ public sealed class PatrolTaskWorkflowTests
             });
             using var scope = factory.Services.CreateScope();
             await scope.ServiceProvider.GetRequiredService<IpqcDbContext>().Database.MigrateAsync();
-            return new Fixture(factory, path, clock);
+            await TestAccounts.SeedAsync(factory);
+            return new Fixture(factory, path, clock,
+                await TestAccounts.ClientAsync(factory, "admin"),
+                await TestAccounts.ClientAsync(factory, "pqe"),
+                await TestAccounts.ClientAsync(factory, "dev-ipqa-1"),
+                await TestAccounts.ClientAsync(factory, "dev-ipqa-2"));
         }
 
         public async Task<StandardOutput> StandardAsync(string name, List<ItemInput> items)
@@ -421,7 +419,7 @@ public sealed class PatrolTaskWorkflowTests
             var response = await Admin.PostAsJsonAsync("/api/patrol-plans", new PlanInput(null,
                 "Line Plan", standardId, "FC", "Factory", "LC", "Line", true,
                 "2026-10-03T08:00", null, PatrolSchedule.PlantTimeZone,
-                new ScheduleInput("everyNHours", 2, null, null), "dev-ipqa-1"));
+                new ScheduleInput("everyNHours", 2, null, null), TestAccounts.Ipqa1Id));
             Assert.True(response.IsSuccessStatusCode, await response.Content.ReadAsStringAsync());
             return (await response.Content.ReadFromJsonAsync<PlanOutput>())!;
         }

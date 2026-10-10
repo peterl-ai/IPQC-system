@@ -1,4 +1,4 @@
-import { mockSession } from '@/services/mockSession'
+import { authFetch } from '@/services/authFetch'
 import type { PatrolStandard, PatrolStandardDraft, PatrolStandardItem, PatrolStandardSummary } from './model'
 
 interface ApiItem extends Omit<PatrolStandardItem, 'id' | 'itemCategory' | 'upperOperator' | 'upperValue' | 'lowerOperator' | 'lowerValue'> {
@@ -31,10 +31,9 @@ const base = import.meta.env.VITE_API_BASE_URL || '/api'
 
 async function request(path: string, options: RequestInit = {}): Promise<Response> {
   const headers = new Headers(options.headers)
-  if (import.meta.env.DEV) headers.set('X-Dev-Role', mockSession.role.value)
   if (options.body && !(options.body instanceof FormData)) headers.set('Content-Type', 'application/json')
   let response: Response
-  try { response = await fetch(`${base}${path}`, { ...options, headers }) }
+  try { response = await authFetch(`${base}${path}`, { ...options, headers }) }
   catch { throw new ApiError('Cannot connect to the Patrol Standards API.', 0) }
   if (!response.ok) {
     const body = await response.json().catch(() => ({})) as { title?: string; errors?: Record<string, string[]> }

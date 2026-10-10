@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { mockSession } from '@/services/mockSession'
+import { authSession } from '@/services/authSession'
 import { completedRecordsApi, CompletedRecordApiError } from './api'
 
 const summary = { id: 'record-1', taskNo: 'PT-1', finalRevisionNo: 2, overallInspectionResult: 'Qualified' }
@@ -9,7 +9,7 @@ const report = { summary, finalRevisionNo: 2, items: [{ sequenceNo: 1, isNa: tru
 function json(body: unknown, status = 200) { return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } }) }
 
 describe('completed records API', () => {
-  beforeEach(() => { mockSession.setRole('admin'); vi.restoreAllMocks() })
+  beforeEach(() => { authSession.initialized.value = true; authSession.accessToken.value = 'test-token'; vi.restoreAllMocks() })
 
   it('requests filtered pages from the completed-only API and preserves the response', async () => {
     const fetch = vi.fn().mockResolvedValue(json({ items: [summary], page: 2, pageSize: 1, total: 3 }))
@@ -23,7 +23,7 @@ describe('completed records API', () => {
     expect(url).toContain('/completed-patrol-records?')
     expect(url).toContain('completedFrom=2026-03-08')
     expect(url).toContain('page=2&pageSize=1')
-    expect(init.headers).toEqual({ 'X-Dev-Role': 'admin' })
+    expect((init.headers as Headers).get('Authorization')).toBe('Bearer test-token')
   })
 
   it('loads detail and preview independently from the server report model', async () => {
@@ -35,13 +35,12 @@ describe('completed records API', () => {
     expect(fetch.mock.calls[1][0]).toBe('/api/completed-patrol-records/record-1/report')
   })
 
-  it('downloads one XLSX as a blob with the selected development role', async () => {
-    mockSession.setRole('ipqa')
+  it('downloads one XLSX as a blob with bearer auth', async () => {
     const fetch = vi.fn().mockResolvedValue(new Response(new Blob(['xlsx']), { status: 200 }))
     vi.stubGlobal('fetch', fetch)
     expect((await completedRecordsApi.download('record-1')).size).toBeGreaterThan(0)
     expect(fetch.mock.calls[0][0]).toBe('/api/completed-patrol-records/record-1/report.xlsx')
-    expect((fetch.mock.calls[0][1] as RequestInit).headers).toEqual({ 'X-Dev-Role': 'ipqa' })
+    expect(((fetch.mock.calls[0][1] as RequestInit).headers as Headers).get('Authorization')).toBe('Bearer test-token')
   })
 
   it('surfaces integrity conflicts and network failures', async () => {

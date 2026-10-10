@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { RouteLocationNormalized } from 'vue-router'
 import { routeIsAuthorized } from './index'
+import { authSession } from '@/services/authSession'
 
 function routeWith(permission: RouteLocationNormalized['meta']['permission']) {
   return { meta: { permission } } as Pick<RouteLocationNormalized, 'meta'>
@@ -8,23 +9,25 @@ function routeWith(permission: RouteLocationNormalized['meta']['permission']) {
 
 describe('route authorization helper', () => {
   it('allows an authorized role', () => {
-    expect(routeIsAuthorized(routeWith('tasks:view'), 'pqe')).toBe(true)
+    authSession.user.value = { id: '1', username: 'pqe', displayName: 'PQE', role: 'PQE', isActive: true, mustChangePassword: false, permissions: ['PatrolTasks.Review'] }
+    expect(routeIsAuthorized(routeWith('tasks:view'))).toBe(true)
   })
 
   it('blocks a direct route access for an unauthorized role', () => {
-    expect(routeIsAuthorized(routeWith('home:view'), 'ipqa')).toBe(false)
-    expect(routeIsAuthorized(routeWith('standards:view'), 'ipqa')).toBe(false)
-    expect(routeIsAuthorized(routeWith('plans:view'), 'ipqa')).toBe(false)
-    expect(routeIsAuthorized(routeWith('tasks:view'), 'ipqa')).toBe(false)
-    expect(routeIsAuthorized(routeWith('users:view'), 'ipqa')).toBe(false)
-    expect(routeIsAuthorized(routeWith('users:view'), 'pqe')).toBe(false)
+    authSession.user.value = { id: '2', username: 'ipqa', displayName: 'IPQA', role: 'IPQA', isActive: true, mustChangePassword: false, permissions: ['CompletedRecords.Read', 'PatrolTasks.ExecuteOwn'] }
+    expect(routeIsAuthorized(routeWith('home:view'))).toBe(false)
+    expect(routeIsAuthorized(routeWith('standards:view'))).toBe(false)
+    expect(routeIsAuthorized(routeWith('plans:view'))).toBe(false)
+    expect(routeIsAuthorized(routeWith('tasks:view'))).toBe(false)
+    expect(routeIsAuthorized(routeWith('users:view'))).toBe(false)
   })
 
   it('allows IPQA to access Completed Patrol Records', () => {
-    expect(routeIsAuthorized(routeWith('records:view'), 'ipqa')).toBe(true)
+    authSession.user.value = { id: '2', username: 'ipqa', displayName: 'IPQA', role: 'IPQA', isActive: true, mustChangePassword: false, permissions: ['CompletedRecords.Read'] }
+    expect(routeIsAuthorized(routeWith('records:view'))).toBe(true)
   })
 
   it('allows public status routes without a permission', () => {
-    expect(routeIsAuthorized(routeWith(undefined), 'ipqa')).toBe(true)
+    expect(routeIsAuthorized(routeWith(undefined))).toBe(true)
   })
 })

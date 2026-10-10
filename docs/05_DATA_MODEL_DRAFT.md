@@ -76,7 +76,7 @@ This is a domain draft, not a final migration/schema script.
 - UserId (IPQA)
 - IsActive
 
-Phase 1D persists a stable development `AssigneeKey` instead of `UserId`; the production user relationship is deferred to Phase 1G. Enabled plans require one active assignee.
+Phase 1G persists `UserId` as the active IPQA relationship and retains `AssigneeKey` as a historical username snapshot. Enabled plans require one active assignee. `UserId` remains nullable only for pre-1G development rows; those rows are not linked to invented users.
 
 ## Patrol Task
 
@@ -120,7 +120,10 @@ Phase 1F adds an index on `(Status, CompletedAtUtc)` for the read-only Completed
 Each successful submit persists a numbered immutable revision with Shift, overall result, server identity/time, every item N/A/judgment/inspection-time/metadata, and ordered sample values/results/times. `(PatrolTaskId, RevisionNo)` and `(PatrolTaskSubmissionItemId, SequenceNo)` are unique. Current draft changes after rejection do not change earlier submissions.
 
 ### PatrolTaskReview
-Each approval or reasoned rejection stores the revision number, server-side reviewer identity, decision, optional/required reason, and review time. `(PatrolTaskId, RevisionNo)` is unique and protects competing decisions. Batch approval uses one transaction for all selected tasks. Development currently stores the role fixture as reviewer; persistent users are deferred to Phase 1G.
+Each approval or reasoned rejection stores the revision number, authenticated reviewer username, decision, optional/required reason, and review time. `(PatrolTaskId, RevisionNo)` is unique and protects competing decisions. Batch approval uses one transaction for all selected tasks.
+
+### Phase 1G persisted identity
+`ApplicationUser` has a GUID ID, username/unique normalized username, display name, password hash, Admin/PQE/IPQA role, active and forced-password-change flags, auth version, failed-attempt/lockout state, and created/updated timestamps and usernames. `RefreshTokenSession` has a GUID ID, User ID, unique SHA-256 token hash, auth version, created/expiry/revoked times, optional replacement session ID, and user agent. User foreign keys on Plan assignees, Tasks, and sessions restrict deletion; no user hard-delete API exists. Task `AssignedInspectorUserId` is nullable solely for pre-1G compatibility; new generated tasks require a valid user.
 
 ## Attachments
 

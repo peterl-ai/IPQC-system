@@ -62,6 +62,8 @@ Implemented as a read-only view of Completed tasks and their final approved immu
 - server authorization
 - route/menu permission integration
 - audit fields
+- local-account login, password change/reset, rotating refresh sessions, and database-backed bearer authorization
+- user-backed Plan assignment and Task ownership
 
 ## Phase 1H — UAT / Hardening
 - bilingual review
@@ -71,6 +73,14 @@ Implemented as a read-only view of Completed tasks and their final approved immu
 - scheduler recovery/idempotency tests
 - deployment configuration
 - backup/restore runbook
+- Move quantitative Standard readiness checks earlier from Submit to Standard Save / Plan Enable.
+- Avoid eager Standard Item loading in scheduler polls with no due occurrence.
+- Remove duplicate qualitative `OK · OK` display in Completed Records.
+- Review heavy shared detail/report DTOs and corrupt Completed ledger rows that only fail on detail/report.
+- Clarify `/api/me` effective permissions while `MustChangePassword=true`.
+- Harden concurrent failed-login counter updates.
+- Align refresh-cookie expiry with configured refresh-session lifetime.
+- Reconcile `VITE_API_BASE_URL` and same-origin authentication documentation.
 
 ## Later Phase — Android IPQA App
 - English-only

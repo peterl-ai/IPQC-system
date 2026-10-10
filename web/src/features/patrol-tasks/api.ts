@@ -1,4 +1,4 @@
-import { mockSession } from '@/services/mockSession'
+import { authFetch } from '@/services/authFetch'
 
 export type TaskStatus = 'PendingInspection' | 'InProgress' | 'PendingApproval' | 'Rejected' | 'Completed'
 export interface TaskSummary {
@@ -102,9 +102,9 @@ export function validRejectReason(reason: string): boolean { return reason.trim(
 async function request(path: string, init?: RequestInit): Promise<Response> {
   let response: Response
   try {
-    response = await fetch(`/api${path}`, {
+    response = await authFetch(`/api${path}`, {
       ...init,
-      headers: { 'Content-Type': 'application/json', 'X-Dev-Role': mockSession.role.value, ...init?.headers },
+      headers: { 'Content-Type': 'application/json', ...init?.headers },
     })
   } catch { throw new TaskApiError('API unavailable', 0) }
   if (!response.ok) {

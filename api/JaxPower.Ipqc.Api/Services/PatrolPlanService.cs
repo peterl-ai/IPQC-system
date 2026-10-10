@@ -9,9 +9,8 @@ namespace JaxPower.Ipqc.Api.Services;
 
 public sealed class PatrolPlanService(IpqcDbContext db, TimeProvider clock)
 {
-    // Stable development fixture until Phase 1G provides real users and identity.
-    public static readonly IReadOnlyList<AssigneeOption> DevelopmentAssignees =
-        [new("dev-ipqa-1", "Development IPQA 1"), new("dev-ipqa-2", "Development IPQA 2")];
+    public async Task<bool> ValidAssigneeAsync(Guid? userId, CancellationToken ct) =>
+        userId is { } id && await db.ApplicationUsers.AnyAsync(x => x.Id == id && x.IsActive && x.Role == "IPQA", ct);
 
     public static Dictionary<string, string[]> Validate(PlanInput input)
     {
@@ -27,10 +26,8 @@ public sealed class PatrolPlanService(IpqcDbContext db, TimeProvider clock)
         if (input.TimeZoneId != PatrolSchedule.PlantTimeZone) errors["TimeZoneId"] = ["Use the supported plant timezone America/New_York."];
         if (string.IsNullOrWhiteSpace(input.EffectiveStartLocal)) errors["EffectiveStartLocal"] = ["Effective Start is required."];
         PatrolSchedule.Normalize(input.Schedule, errors);
-        if (input.IsEnabled && string.IsNullOrWhiteSpace(input.AssigneeKey))
-            errors["AssigneeKey"] = ["An enabled plan requires one IPQA assignee."];
-        if (!string.IsNullOrWhiteSpace(input.AssigneeKey) && !DevelopmentAssignees.Any(x => x.Key == input.AssigneeKey))
-            errors["AssigneeKey"] = ["Select an available IPQA assignee."];
+        if (input.IsEnabled && input.AssigneeUserId is null)
+            errors["AssigneeUserId"] = ["An enabled plan requires one IPQA assignee."];
         return errors;
 
         void Check(string? value, int max, string field)
@@ -72,9 +69,10 @@ public sealed class PatrolPlanService(IpqcDbContext db, TimeProvider clock)
         var total = await query.CountAsync(ct);
         var rows = await query.OrderBy(x => x.PlanNo).ThenBy(x => x.Id).Skip((page - 1) * pageSize).Take(pageSize)
             .Select(x => new { Plan = x, StandardName = x.PatrolStandard.PatrolStandardName,
-                AssigneeKey = x.Assignees.Where(a => a.IsActive).Select(a => a.AssigneeKey).FirstOrDefault() })
+                Assignee = x.Assignees.Where(a => a.IsActive).Select(a => new { a.UserId, a.AssigneeKey }).FirstOrDefault() })
             .ToListAsync(ct);
-        return new PagedPlans(rows.Select(x => Summary(x.Plan, x.StandardName, x.AssigneeKey)).ToList(), page, pageSize, total);
+        return new PagedPlans(rows.Select(x => Summary(x.Plan, x.StandardName, x.Assignee?.UserId,
+            x.Assignee?.AssigneeKey)).ToList(), page, pageSize, total);
     }
 
     public async Task<PlanOutput?> GetAsync(Guid id, CancellationToken ct)
@@ -86,10 +84,11 @@ public sealed class PatrolPlanService(IpqcDbContext db, TimeProvider clock)
 
     public async Task<PlanOutput> CreateAsync(PlanInput input, DateTime start, DateTime? end, string actor, CancellationToken ct)
     {
+        var assignee = await ResolveAssigneeAsync(input.AssigneeUserId, ct);
         var now = clock.GetUtcNow().UtcDateTime;
         var row = new PatrolPlan { Id = Guid.NewGuid(), CreatedBy = actor, CreatedAtUtc = now,
             GenerationNotBeforeUtc = now.AddTicks(-1) };
-        Apply(row, input, start, end, now, actor);
+        Apply(row, input, start, end, now, actor, assignee);
         db.PatrolPlans.Add(row);
         await SaveChangesAsync(ct);
         return (await GetAsync(row.Id, ct))!;
@@ -97,17 +96,18 @@ public sealed class PatrolPlanService(IpqcDbContext db, TimeProvider clock)
 
     public async Task<PlanOutput?> UpdateAsync(Guid id, PlanInput input, DateTime start, DateTime? end, string actor, CancellationToken ct)
     {
+        var assignee = await ResolveAssigneeAsync(input.AssigneeUserId, ct);
         var row = await db.PatrolPlans.Include(x => x.Assignees).FirstOrDefaultAsync(x => x.Id == id, ct);
         if (row is null) return null;
         var now = clock.GetUtcNow().UtcDateTime;
         var schedule = PatrolSchedule.Normalize(input.Schedule, new());
-        var active = row.Assignees.SingleOrDefault(x => x.IsActive)?.AssigneeKey;
+        var active = row.Assignees.SingleOrDefault(x => x.IsActive)?.UserId;
         if (row.ScheduleDefinition != schedule || row.TimeZoneId != input.TimeZoneId ||
             row.EffectiveStartUtc != start || row.EffectiveEndUtc != end ||
-            row.PatrolStandardId != input.PatrolStandardId || active != input.AssigneeKey ||
+            row.PatrolStandardId != input.PatrolStandardId || active != input.AssigneeUserId ||
             (!row.IsEnabled && input.IsEnabled))
             row.GenerationNotBeforeUtc = now;
-        Apply(row, input, start, end, now, actor);
+        Apply(row, input, start, end, now, actor, assignee);
         await SaveChangesAsync(ct);
         return await GetAsync(id, ct);
     }
@@ -126,7 +126,9 @@ public sealed class PatrolPlanService(IpqcDbContext db, TimeProvider clock)
     {
         var row = await db.PatrolPlans.Include(x => x.Assignees).FirstOrDefaultAsync(x => x.Id == id, ct);
         if (row is null) return null;
-        if (enabled && row.Assignees.Count(x => x.IsActive) != 1) throw new InvalidOperationException("An enabled plan requires exactly one active assignee.");
+        if (enabled && (row.Assignees.Count(x => x.IsActive && x.UserId != null) != 1 ||
+            !await ValidAssigneeAsync(row.Assignees.Single(x => x.IsActive).UserId, ct)))
+            throw new InvalidOperationException("An enabled plan requires exactly one active IPQA assignee.");
         if (row.IsEnabled != enabled)
         {
             row.IsEnabled = enabled;
@@ -138,7 +140,8 @@ public sealed class PatrolPlanService(IpqcDbContext db, TimeProvider clock)
         return await GetAsync(id, ct);
     }
 
-    private void Apply(PatrolPlan row, PlanInput input, DateTime start, DateTime? end, DateTime now, string actor)
+    private void Apply(PatrolPlan row, PlanInput input, DateTime start, DateTime? end, DateTime now, string actor,
+        ApplicationUser? assignedUser)
     {
         row.PlanNo = string.IsNullOrWhiteSpace(input.PlanNo) ? (row.PlanNo.Length > 0 ? row.PlanNo : $"PLN-{row.Id:N}".ToUpperInvariant()) : input.PlanNo.Trim();
         row.PlanName = input.PlanName!.Trim();
@@ -154,13 +157,21 @@ public sealed class PatrolPlanService(IpqcDbContext db, TimeProvider clock)
         row.TimeZoneId = input.TimeZoneId!;
         row.UpdatedAtUtc = now;
         row.UpdatedBy = actor;
-        foreach (var assignee in row.Assignees) assignee.IsActive = assignee.AssigneeKey == input.AssigneeKey;
-        if (!string.IsNullOrWhiteSpace(input.AssigneeKey) && !row.Assignees.Any(x => x.AssigneeKey == input.AssigneeKey))
+        foreach (var assignee in row.Assignees) assignee.IsActive = assignee.UserId == input.AssigneeUserId && assignedUser is not null;
+        if (assignedUser is not null && !row.Assignees.Any(x => x.UserId == assignedUser.Id))
         {
-            var added = new PatrolPlanAssignee { Id = Guid.NewGuid(), AssigneeKey = input.AssigneeKey, IsActive = true };
+            var added = new PatrolPlanAssignee { Id = Guid.NewGuid(), UserId = assignedUser.Id,
+                AssigneeKey = assignedUser.Username, IsActive = true };
             row.Assignees.Add(added);
             db.PatrolPlanAssignees.Add(added);
         }
+    }
+
+    private async Task<ApplicationUser?> ResolveAssigneeAsync(Guid? userId, CancellationToken ct)
+    {
+        if (userId is null) return null;
+        return await db.ApplicationUsers.SingleOrDefaultAsync(x => x.Id == userId && x.IsActive && x.Role == "IPQA", ct)
+            ?? throw new PlanAssignmentException();
     }
 
     private async Task SaveChangesAsync(CancellationToken ct)
@@ -187,25 +198,28 @@ public sealed class PatrolPlanService(IpqcDbContext db, TimeProvider clock)
             ConstraintName: "IX_PatrolPlans_PlanNo"
         };
 
-    private static PlanSummary Summary(PatrolPlan row, string standardName, string? assignee)
+    private static PlanSummary Summary(PatrolPlan row, string standardName, Guid? assigneeUserId, string? assignee)
     {
         var zone = TimeZoneInfo.FindSystemTimeZoneById(row.TimeZoneId);
         return new(row.Id, row.PlanNo, row.PlanName, row.PatrolStandardId, standardName,
             row.FactoryCode, row.FactoryName, row.LineCode, row.LineName, row.IsEnabled,
             PatrolSchedule.LocalText(row.EffectiveStartUtc, zone), row.EffectiveEndUtc is { } end ? PatrolSchedule.LocalText(end, zone) : null,
-            row.TimeZoneId, PatrolSchedule.Read(row.ScheduleDefinition), assignee, DateTime.SpecifyKind(row.UpdatedAtUtc, DateTimeKind.Utc));
+            row.TimeZoneId, PatrolSchedule.Read(row.ScheduleDefinition), assigneeUserId, assignee,
+            DateTime.SpecifyKind(row.UpdatedAtUtc, DateTimeKind.Utc));
     }
 
     private static PlanOutput Output(PatrolPlan row)
     {
-        var summary = Summary(row, row.PatrolStandard.PatrolStandardName, row.Assignees.SingleOrDefault(x => x.IsActive)?.AssigneeKey);
+        var active = row.Assignees.SingleOrDefault(x => x.IsActive);
+        var summary = Summary(row, row.PatrolStandard.PatrolStandardName, active?.UserId, active?.AssigneeKey);
         return new(summary.Id, summary.PlanNo, summary.PlanName, summary.PatrolStandardId, summary.PatrolStandardName,
             summary.FactoryCode, summary.FactoryName, summary.LineCode, summary.LineName, summary.IsEnabled,
             summary.EffectiveStartLocal, summary.EffectiveEndLocal, summary.TimeZoneId, summary.Schedule,
-            summary.AssigneeKey, DateTime.SpecifyKind(row.GenerationNotBeforeUtc, DateTimeKind.Utc), row.CreatedBy,
+            summary.AssigneeUserId, summary.AssigneeKey, DateTime.SpecifyKind(row.GenerationNotBeforeUtc, DateTimeKind.Utc), row.CreatedBy,
             DateTime.SpecifyKind(row.CreatedAtUtc, DateTimeKind.Utc), row.UpdatedBy, summary.UpdatedAtUtc);
     }
 }
 
 public sealed class DuplicatePlanNoException(Exception innerException)
     : Exception("Plan No. is already in use.", innerException);
+public sealed class PlanAssignmentException() : Exception("Select an active IPQA user.");

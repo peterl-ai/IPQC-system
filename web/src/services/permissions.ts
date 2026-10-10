@@ -6,8 +6,19 @@ export const rolePermissions: Readonly<Record<Role, readonly Permission[]>> = {
   ipqa: ['records:view'],
 }
 
-export function hasPermission(role: Role, permission?: Permission): boolean {
-  return permission === undefined || rolePermissions[role].includes(permission)
+const serverPermission: Record<Permission, string> = {
+  'home:view': 'PatrolStandards.Read',
+  'standards:view': 'PatrolStandards.Read',
+  'plans:view': 'PatrolPlans.Read',
+  'tasks:view': 'PatrolTasks.Review',
+  'records:view': 'CompletedRecords.Read',
+  'users:view': 'Users.Read',
+}
+
+export function hasPermission(granted: readonly string[] | Role, permission?: Permission): boolean {
+  if (permission === undefined) return true
+  if (typeof granted === 'string') return rolePermissions[granted].includes(permission)
+  return granted.includes(serverPermission[permission])
 }
 
 export function defaultRouteForRole(role: Role): string {
