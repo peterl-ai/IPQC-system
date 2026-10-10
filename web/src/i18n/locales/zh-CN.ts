@@ -5,7 +5,7 @@ export default {
   auth: { signIn: '登录', password: '密码', invalidCredentials: '用户名或密码无效。', changePassword: '修改密码',
     currentPassword: '当前密码', newPassword: '新密码', confirmPassword: '确认新密码',
     passwordPolicy: '密码需为 10–256 个字符，包含大写字母、小写字母和数字。',
-    passwordMismatch: '两次输入的密码不一致。', passwordChangeFailed: '无法修改密码。' },
+    passwordMismatch: '两次输入的密码不一致。', passwordReuse: '新密码不能与当前密码相同。', passwordChangeFailed: '无法修改密码。' },
   user: { newTitle: '新增用户', editTitle: '编辑用户', initialPassword: '临时密码', mustChangePassword: '必须修改密码',
     yes: '是', no: '否', resetPassword: '重置密码', activate: '启用', deactivate: '停用',
     activateConfirm: '启用此用户？', deactivateConfirm: '停用此用户？', unlock: '解锁',

@@ -19,9 +19,10 @@ public sealed class ApplicationUserService(IpqcDbContext db, IPasswordHasher<App
     TimeProvider clock)
 {
     public static bool ValidRole(string? role) => role is "Admin" or "PQE" or "IPQA";
+    private static DateTime Utc(DateTime value) => DateTime.SpecifyKind(value, DateTimeKind.Utc);
     public static UserOutput Output(ApplicationUser u) => new(u.Id, u.Username, u.DisplayName, u.Role,
-        u.IsActive, u.MustChangePassword, u.LockoutEndUtc, u.CreatedAtUtc, u.CreatedBy,
-        u.UpdatedAtUtc, u.UpdatedBy);
+        u.IsActive, u.MustChangePassword, u.LockoutEndUtc is { } lockout ? Utc(lockout) : null,
+        Utc(u.CreatedAtUtc), u.CreatedBy, Utc(u.UpdatedAtUtc), u.UpdatedBy);
 
     public async Task<PagedUsers> ListAsync(string? username, string? displayName, string? role,
         bool? active, int page, int pageSize, CancellationToken ct)
@@ -33,17 +34,13 @@ public sealed class ApplicationUserService(IpqcDbContext db, IPasswordHasher<App
         if (active is { } yes) query = query.Where(x => x.IsActive == yes);
         var total = await query.CountAsync(ct);
         var users = await query.OrderBy(x => x.Username).ThenBy(x => x.Id)
-            .Skip((page - 1) * pageSize).Take(pageSize).Select(x => new UserOutput(x.Id, x.Username,
-                x.DisplayName, x.Role, x.IsActive, x.MustChangePassword, x.LockoutEndUtc,
-                x.CreatedAtUtc, x.CreatedBy, x.UpdatedAtUtc, x.UpdatedBy)).ToListAsync(ct);
-        return new(users, page, pageSize, total);
+            .Skip((page - 1) * pageSize).Take(pageSize).ToListAsync(ct);
+        return new(users.Select(Output).ToList(), page, pageSize, total);
     }
 
     public async Task<UserOutput?> GetAsync(Guid id, CancellationToken ct) =>
-        await db.ApplicationUsers.AsNoTracking().Where(x => x.Id == id)
-            .Select(x => new UserOutput(x.Id, x.Username, x.DisplayName, x.Role, x.IsActive,
-                x.MustChangePassword, x.LockoutEndUtc, x.CreatedAtUtc, x.CreatedBy,
-                x.UpdatedAtUtc, x.UpdatedBy)).SingleOrDefaultAsync(ct);
+        await db.ApplicationUsers.AsNoTracking().SingleOrDefaultAsync(x => x.Id == id, ct) is { } user
+            ? Output(user) : null;
 
     public async Task<UserOutput> CreateAsync(UserCreateInput input, string actor, CancellationToken ct)
     {

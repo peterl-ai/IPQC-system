@@ -28,6 +28,7 @@ const busy = ref(false)
 const error = ref('')
 async function submit() {
   if (next.value !== confirm.value) { error.value = t('auth.passwordMismatch'); return }
+  if (next.value === current.value) { error.value = t('auth.passwordReuse'); return }
   busy.value = true; error.value = ''
   try { await authSession.changePassword(current.value, next.value); await router.replace('/login') }
   catch { error.value = t('auth.passwordChangeFailed') }

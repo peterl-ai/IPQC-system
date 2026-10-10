@@ -87,6 +87,7 @@ public sealed class LocalAuthService(IpqcDbContext db, IPasswordHasher<Applicati
         var user = await db.ApplicationUsers.FindAsync([userId], ct);
         if (user is null || hasher.VerifyHashedPassword(user, user.PasswordHash, currentPassword) == PasswordVerificationResult.Failed)
             return false;
+        if (string.Equals(currentPassword, newPassword, StringComparison.Ordinal)) return false;
         var now = clock.GetUtcNow().UtcDateTime;
         user.PasswordHash = hasher.HashPassword(user, newPassword!);
         user.MustChangePassword = false;

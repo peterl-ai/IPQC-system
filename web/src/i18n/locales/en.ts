@@ -9,7 +9,7 @@ export default {
   auth: { signIn: 'Sign In', password: 'Password', invalidCredentials: 'Invalid username or password.',
     changePassword: 'Change Password', currentPassword: 'Current Password', newPassword: 'New Password',
     confirmPassword: 'Confirm New Password', passwordPolicy: 'Use 10–256 characters with uppercase, lowercase, and a number.',
-    passwordMismatch: 'Passwords do not match.', passwordChangeFailed: 'Could not change the password.' },
+    passwordMismatch: 'Passwords do not match.', passwordReuse: 'New password must be different from the current password.', passwordChangeFailed: 'Could not change the password.' },
   user: { newTitle: 'New User', editTitle: 'Edit User', initialPassword: 'Temporary Password',
     mustChangePassword: 'Must Change Password', yes: 'Yes', no: 'No', resetPassword: 'Reset Password',
     activate: 'Activate', deactivate: 'Deactivate', activateConfirm: 'Activate this user?',

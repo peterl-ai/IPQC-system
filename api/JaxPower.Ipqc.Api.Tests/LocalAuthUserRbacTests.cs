@@ -3,6 +3,7 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Security.Claims;
+using System.Text.Json;
 using JaxPower.Ipqc.Api.Contracts;
 using JaxPower.Ipqc.Api.Data;
 using JaxPower.Ipqc.Api.Domain;
@@ -93,12 +94,74 @@ public sealed class LocalAuthUserRbacTests
         var client = app.ClientWithToken(login.AccessToken);
         Assert.Equal(HttpStatusCode.BadRequest, (await client.PostAsJsonAsync("/api/auth/change-password",
             new ChangePasswordInput("wrong", "ChangedPass123"))).StatusCode);
+        using (var scope = app.Factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<IpqcDbContext>();
+            var user = await db.ApplicationUsers.SingleAsync(x => x.Username == "newipqa");
+            var version = user.AuthVersion;
+            Assert.Equal(HttpStatusCode.BadRequest, (await client.PostAsJsonAsync("/api/auth/change-password",
+                new ChangePasswordInput("InitialPass123", "InitialPass123"))).StatusCode);
+            await db.Entry(user).ReloadAsync();
+            Assert.Equal(version, user.AuthVersion);
+            Assert.True(user.MustChangePassword);
+            Assert.Equal(1, await db.RefreshTokenSessions.CountAsync(x => x.UserId == user.Id && x.RevokedAtUtc == null));
+        }
+        Assert.True((await client.GetFromJsonAsync<CurrentUserOutput>("/api/me"))!.MustChangePassword);
+        Assert.Equal(HttpStatusCode.Forbidden, (await client.GetAsync("/api/completed-patrol-records")).StatusCode);
         Assert.Equal(HttpStatusCode.NoContent, (await client.PostAsJsonAsync("/api/auth/change-password",
             new ChangePasswordInput("InitialPass123", "ChangedPass123"))).StatusCode);
         Assert.Equal(HttpStatusCode.Unauthorized, (await client.GetAsync("/api/me")).StatusCode);
         Assert.Equal(HttpStatusCode.Unauthorized, (await app.Anonymous.PostAsJsonAsync("/api/auth/login",
             new LoginInput("newipqa", "InitialPass123", "Native"))).StatusCode);
         Assert.False((await app.LoginAsync("newipqa", "ChangedPass123")).User.MustChangePassword);
+    }
+
+    [Fact]
+    public async Task User_management_sqlite_timestamps_are_utc_in_every_response()
+    {
+        await using var app = await Fixture.CreateAsync();
+        var created = await app.Admin.PostAsJsonAsync("/api/users", new UserCreateInput("utcuser", "UTC User", "IPQA", "InitialPass123", true));
+        var row = await AssertUtcUserAsync(created);
+        var id = row.Id;
+        await AssertUtcUserAsync(await app.Admin.GetAsync($"/api/users/{id}"));
+        var list = await app.Admin.GetAsync("/api/users?username=utcuser");
+        list.EnsureSuccessStatusCode();
+        var raw = await list.Content.ReadAsStringAsync();
+        using (var document = JsonDocument.Parse(raw))
+        {
+            var item = document.RootElement.GetProperty("items")[0];
+            AssertUtcJson(item, false);
+        }
+        var page = JsonSerializer.Deserialize<PagedUsers>(raw, new JsonSerializerOptions(JsonSerializerDefaults.Web))!;
+        Assert.Equal(DateTimeKind.Utc, Assert.Single(page.Items).CreatedAtUtc.Kind);
+        await AssertUtcUserAsync(await app.Admin.PutAsJsonAsync($"/api/users/{id}", new UserUpdateInput("Updated", "IPQA")));
+        for (var i = 0; i < 5; i++)
+            Assert.Equal(HttpStatusCode.Unauthorized, (await app.Anonymous.PostAsJsonAsync("/api/auth/login", new LoginInput("utcuser", "WrongPass123", "Native"))).StatusCode);
+        await AssertUtcUserAsync(await app.Admin.GetAsync($"/api/users/{id}"), true);
+        await AssertUtcUserAsync(await app.Admin.PostAsync($"/api/users/{id}/deactivate", null), true);
+        await AssertUtcUserAsync(await app.Admin.PostAsync($"/api/users/{id}/activate", null), true);
+        await AssertUtcUserAsync(await app.Admin.PostAsync($"/api/users/{id}/unlock", null));
+        await AssertUtcUserAsync(await app.Admin.PostAsJsonAsync($"/api/users/{id}/reset-password", new ResetPasswordInput("ResetPass456A")));
+    }
+
+    private static async Task<UserOutput> AssertUtcUserAsync(HttpResponseMessage response, bool lockout = false)
+    {
+        response.EnsureSuccessStatusCode();
+        var raw = await response.Content.ReadAsStringAsync();
+        using var document = JsonDocument.Parse(raw);
+        AssertUtcJson(document.RootElement, lockout);
+        var output = JsonSerializer.Deserialize<UserOutput>(raw, new JsonSerializerOptions(JsonSerializerDefaults.Web))!;
+        Assert.Equal(DateTimeKind.Utc, output.CreatedAtUtc.Kind);
+        Assert.Equal(DateTimeKind.Utc, output.UpdatedAtUtc.Kind);
+        if (lockout) Assert.Equal(DateTimeKind.Utc, output.LockoutEndUtc!.Value.Kind);
+        return output;
+    }
+
+    private static void AssertUtcJson(JsonElement item, bool lockout)
+    {
+        Assert.EndsWith("Z", item.GetProperty("createdAtUtc").GetString());
+        Assert.EndsWith("Z", item.GetProperty("updatedAtUtc").GetString());
+        if (lockout) Assert.EndsWith("Z", item.GetProperty("lockoutEndUtc").GetString());
     }
 
     [Fact]
