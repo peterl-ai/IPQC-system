@@ -32,6 +32,7 @@ Date: 2026-10-11 (America/New_York). Branch: `phase-1h-uat-hardening`. This docu
 | Fresh SQLite `dotnet-ef database update` | Passed through Phase 1G migration on a disposable database; no Phase 1H schema change |
 | `dotnet-ef migrations has-pending-model-changes` | No pending changes |
 | PostgreSQL idempotent migration SQL | Generated and inspected locally; 26,544 bytes, includes task occurrence unique index |
+| GitHub Actions CI on PR #8 | Push and pull request runs completed; backend and frontend jobs succeeded in both runs |
 
 The initial sandboxed .NET/Vitest commands encountered local named-pipe/`EPERM` restrictions. The reported passing commands ran outside that sandbox against the same checkout. No tests were deleted.
 
@@ -52,5 +53,5 @@ Automated backend tests cover scheduler duplicate/concurrent generation, recover
 ## Production validation still open
 
 - No local `docker`, `psql`, `pg_dump`, or `pg_restore` executable was available. **No live PostgreSQL migration/API smoke or restore rehearsal was run.** Generated PostgreSQL SQL and SQLite tests do not replace live provider validation.
-- GitHub Actions cannot be reported as passing until this branch is pushed and a workflow run completes.
+- GitHub Actions passed for commit `ab87e48` on PR #8. Verify checks for the latest PR head before merge.
 - Production PostgreSQL host, deployment host, reverse proxy/TLS, backup owner/retention, monitoring/log retention, and future file storage remain JAX Power operational decisions. See the deployment checklist and backup runbook.
