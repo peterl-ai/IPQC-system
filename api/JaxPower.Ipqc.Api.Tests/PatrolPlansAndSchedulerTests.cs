@@ -299,6 +299,73 @@ public sealed class PatrolPlansAndSchedulerTests
         Assert.Equal(0, await app.GenerateAsync());
     }
 
+    [Fact]
+    public async Task Enabled_plan_rejects_empty_or_corrupt_standard()
+    {
+        await using var app = await TestApp.CreateAsync();
+        var empty = await app.Client.PostAsJsonAsync("/api/patrol-standards",
+            new StandardInput("Empty", null, null, null, null, "Line", null, []));
+        empty.EnsureSuccessStatusCode();
+        var emptyId = (await empty.Content.ReadFromJsonAsync<StandardOutput>())!.Id;
+        Assert.Equal(HttpStatusCode.BadRequest,
+            (await app.Client.PostAsJsonAsync("/api/patrol-plans", Draft(emptyId))).StatusCode);
+        var disabled = await app.CreateAsync(Draft(emptyId, enabled: false));
+        Assert.Equal(HttpStatusCode.BadRequest,
+            (await app.Client.PostAsync($"/api/patrol-plans/{disabled.Id}/enable", null)).StatusCode);
+
+        var standard = await app.StandardAsync();
+        using (var scope = app.Factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<IpqcDbContext>();
+            var item = await db.PatrolStandardItems.SingleAsync(x => x.PatrolStandardId == standard);
+            item.InspectionType = "Quantitative";
+            item.LowerLimitOperator = ">=";
+            item.LowerLimitValue = "not-a-number";
+            await db.SaveChangesAsync();
+        }
+        Assert.Equal(HttpStatusCode.BadRequest,
+            (await app.Client.PostAsJsonAsync("/api/patrol-plans", Draft(standard))).StatusCode);
+    }
+
+    [Fact]
+    public async Task Enabled_plan_prevents_standard_from_becoming_non_executable()
+    {
+        await using var app = await TestApp.CreateAsync();
+        var standard = await app.StandardAsync();
+        await app.CreateAsync(Draft(standard));
+        var removeItems = new StandardInput("Standard", null, null, null, null, "Line", null, []);
+        Assert.Equal(HttpStatusCode.BadRequest,
+            (await app.Client.PutAsJsonAsync($"/api/patrol-standards/{standard}", removeItems)).StatusCode);
+        var stored = await app.Client.GetFromJsonAsync<StandardOutput>($"/api/patrol-standards/{standard}");
+        Assert.Single(stored!.InspectionItems);
+    }
+
+    [Fact]
+    public async Task Corrupted_standard_skips_its_plan_without_blocking_other_plans()
+    {
+        await using var app = await TestApp.CreateAsync();
+        var badStandard = await app.StandardAsync();
+        var goodStandard = await app.StandardAsync();
+        var badPlan = await app.CreateAsync(Draft(badStandard));
+        var goodPlan = await app.CreateAsync(Draft(goodStandard));
+        using (var scope = app.Factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<IpqcDbContext>();
+            var item = await db.PatrolStandardItems.SingleAsync(x => x.PatrolStandardId == badStandard);
+            item.InspectionType = "Quantitative";
+            item.LowerLimitOperator = ">=";
+            item.LowerLimitValue = "bad";
+            await db.SaveChangesAsync();
+        }
+        app.Clock.Now = new DateTimeOffset(2026, 10, 3, 14, 0, 0, TimeSpan.Zero);
+        Assert.Equal(2, await app.GenerateAsync());
+        using var verification = app.Factory.Services.CreateScope();
+        var tasks = await verification.ServiceProvider.GetRequiredService<IpqcDbContext>()
+            .PatrolTasks.AsNoTracking().ToListAsync();
+        Assert.All(tasks, x => Assert.Equal(goodPlan.Id, x.PatrolPlanId));
+        Assert.DoesNotContain(tasks, x => x.PatrolPlanId == badPlan.Id);
+    }
+
     private sealed class ManualClock : TimeProvider
     {
         public DateTimeOffset Now { get; set; } = new(InitialUtc);
@@ -382,7 +449,9 @@ public sealed class PatrolPlansAndSchedulerTests
 
         public async Task<Guid> StandardAsync()
         {
-            var response = await Client.PostAsJsonAsync("/api/patrol-standards", new StandardInput("Standard", null, null, null, null, "Line", null, []));
+            var response = await Client.PostAsJsonAsync("/api/patrol-standards", new StandardInput("Standard", null, null, null, null, "Line", null,
+                [new ItemInput(null, null, null, "Visual check", null, null, null, null, null,
+                    "Qualitative", null, "1", null, null)]));
             response.EnsureSuccessStatusCode();
             return (await response.Content.ReadFromJsonAsync<StandardOutput>())!.Id;
         }

@@ -18,7 +18,7 @@ public sealed class CompletedPatrolRecordService(IpqcDbContext db)
         string? factory, string? line, string? inspector, string? shift, string? result,
         DateOnly? completedFrom, DateOnly? completedTo, int page, int pageSize, CancellationToken ct)
     {
-        var query = db.PatrolTasks.AsNoTracking().Where(x => x.Status == "Completed");
+        var query = db.PatrolTasks.AsNoTracking().AsSplitQuery().Where(x => x.Status == "Completed");
         if (!string.IsNullOrWhiteSpace(taskNo)) query = query.Where(x => x.TaskNo.Contains(taskNo.Trim()));
         if (!string.IsNullOrWhiteSpace(plan)) query = query.Where(x => x.PlanNameSnapshot!.Contains(plan.Trim()) || x.PlanNoSnapshot!.Contains(plan.Trim()));
         if (!string.IsNullOrWhiteSpace(standard)) query = query.Where(x => x.StandardNameSnapshot!.Contains(standard.Trim()));
@@ -55,7 +55,10 @@ public sealed class CompletedPatrolRecordService(IpqcDbContext db)
                 x.Reviews.Where(r => r.RevisionNo == x.CurrentRevisionNo && r.Decision == "Approved")
                     .Select(r => r.Reviewer).FirstOrDefault(),
                 x.Reviews.Where(r => r.RevisionNo == x.CurrentRevisionNo && r.Decision == "Approved")
-                    .Select(r => (DateTime?)r.ReviewedAtUtc).FirstOrDefault()))
+                    .Select(r => (DateTime?)r.ReviewedAtUtc).FirstOrDefault(),
+                x.CurrentRevisionNo < 1 ||
+                !x.Submissions.Any(s => s.RevisionNo == x.CurrentRevisionNo) ||
+                !x.Reviews.Any(r => r.RevisionNo == x.CurrentRevisionNo && r.Decision == "Approved")))
             .ToListAsync(ct);
         return new(rows.Select(x => x with {
             CompletedAtUtc = Utc(x.CompletedAtUtc), ScheduledOccurrenceUtc = Utc(x.ScheduledOccurrenceUtc),
@@ -110,7 +113,7 @@ public sealed class CompletedPatrolRecordService(IpqcDbContext db)
             final.RevisionNo, task.AssignedInspectorKey, final.Shift, task.PlanNoSnapshot,
             task.PlanNameSnapshot, task.StandardNameSnapshot, task.FactoryCodeSnapshot,
             task.FactoryNameSnapshot, task.WorkshopCodeSnapshot, task.LineCodeSnapshot,
-            task.LineNameSnapshot, task.MaterialCodeSnapshot, approved.Reviewer, Utc(approved.ReviewedAtUtc));
+            task.LineNameSnapshot, task.MaterialCodeSnapshot, approved.Reviewer, Utc(approved.ReviewedAtUtc), false);
         return new(summary, Utc(task.GeneratedAtUtc), Utc(task.StartedAtUtc), final.RevisionNo,
             final.SubmittedBy, Utc(final.SubmittedAtUtc), items, history);
     }

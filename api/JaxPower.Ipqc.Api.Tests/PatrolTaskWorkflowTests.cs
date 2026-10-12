@@ -81,6 +81,8 @@ public sealed class PatrolTaskWorkflowTests
         Assert.Equal(1, await app.GenerateAsync());
         var first = (await app.TasksAsync()).Single();
         var frozen = await app.DetailAsync(first.Id);
+        Assert.Equal(DateTimeKind.Utc, first.ScheduledOccurrenceUtc.Kind);
+        Assert.Equal(DateTimeKind.Utc, frozen.Summary.GeneratedAtUtc.Kind);
         Assert.Equal(plan.PlanNo, frozen.Summary.PlanNoSnapshot);
         Assert.Equal("Original", frozen.Summary.StandardNameSnapshot);
         Assert.Equal(["First", "Second"], frozen.Items.Select(x => x.InspectionItem));

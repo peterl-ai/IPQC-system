@@ -17,6 +17,19 @@ public sealed class InspectionJudgmentService
     public static int RequiredSamples(string? value) =>
         int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var count) && count > 0 ? count : 1;
 
+    public static string? ValidateDefinition(string? type, string? sampleCount,
+        string? lowerOperator, string? lowerValue, string? upperOperator, string? upperValue)
+    {
+        if (CanonicalType(type) is null) return "Inspection type must be Qualitative or Quantitative.";
+        if (!string.IsNullOrWhiteSpace(sampleCount) &&
+            (!int.TryParse(sampleCount, NumberStyles.Integer, CultureInfo.InvariantCulture, out var count) ||
+             count is < 1 or > MaxSamples))
+            return $"Sample Count must be a whole number from 1 to {MaxSamples}.";
+        return CanonicalType(type) == "Quantitative" &&
+            !TryLimits(lowerOperator, lowerValue, upperOperator, upperValue, out _, out _, out var error)
+            ? error : null;
+    }
+
     public Dictionary<string, string[]> Calculate(PatrolTask task, bool strict)
     {
         var errors = new Dictionary<string, string[]>();
@@ -88,28 +101,35 @@ public sealed class InspectionJudgmentService
     public static string Overall(PatrolTask task) => task.Items.Any(x => x.JudgmentResult == "NG") ? "Unqualified" : "Qualified";
 
     private static bool TryLimits(PatrolTaskItem item, out (string Op, decimal Value)? lower,
+        out (string Op, decimal Value)? upper, out string? error) =>
+        TryLimits(item.LowerLimitOperator, item.LowerLimitValue, item.UpperLimitOperator,
+            item.UpperLimitValue, out lower, out upper, out error);
+
+    private static bool TryLimits(string? lowerOperator, string? lowerValue, string? upperOperator,
+        string? upperValue, out (string Op, decimal Value)? lower,
         out (string Op, decimal Value)? upper, out string? error)
     {
         lower = null;
         upper = null;
         error = null;
-        if (!string.IsNullOrWhiteSpace(item.LowerLimitOperator) || !string.IsNullOrWhiteSpace(item.LowerLimitValue))
+        if (!string.IsNullOrWhiteSpace(lowerOperator) || !string.IsNullOrWhiteSpace(lowerValue))
         {
-            if (item.LowerLimitOperator is not (">" or ">=") ||
-                !decimal.TryParse(item.LowerLimitValue, NumberStyles.Float, CultureInfo.InvariantCulture, out var value))
+            if (lowerOperator is not (">" or ">=") ||
+                !decimal.TryParse(lowerValue, NumberStyles.Float, CultureInfo.InvariantCulture, out var value))
                 error = "The frozen lower limit requires > or >= and a numeric value.";
-            else lower = (item.LowerLimitOperator, value);
+            else lower = (lowerOperator, value);
         }
-        if (!string.IsNullOrWhiteSpace(item.UpperLimitOperator) || !string.IsNullOrWhiteSpace(item.UpperLimitValue))
+        if (!string.IsNullOrWhiteSpace(upperOperator) || !string.IsNullOrWhiteSpace(upperValue))
         {
-            if (item.UpperLimitOperator is not ("<" or "<=") ||
-                !decimal.TryParse(item.UpperLimitValue, NumberStyles.Float, CultureInfo.InvariantCulture, out var value))
+            if (upperOperator is not ("<" or "<=") ||
+                !decimal.TryParse(upperValue, NumberStyles.Float, CultureInfo.InvariantCulture, out var value))
                 error = "The frozen upper limit requires < or <= and a numeric value.";
-            else upper = (item.UpperLimitOperator, value);
+            else upper = (upperOperator, value);
         }
         if (lower is null && upper is null && error is null) error = "The frozen Quantitative item has no usable numeric limits.";
-        if (lower is { } lo && upper is { } hi && lo.Value > hi.Value)
-            error = "The frozen lower limit exceeds the upper limit.";
+        if (lower is { } lo && upper is { } hi &&
+            (lo.Value > hi.Value || lo.Value == hi.Value && (lo.Op == ">" || hi.Op == "<")))
+            error = "The lower and upper limits have no valid common value.";
         return error is null;
     }
 

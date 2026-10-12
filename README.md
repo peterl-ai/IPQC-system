@@ -164,7 +164,9 @@ npm ci
 npm run dev
 ```
 
-Open `http://localhost:5173/standards`. Vite proxies `/api` to the local API. `VITE_API_BASE_URL` can override the API base path if needed. The development database is `api/JaxPower.Ipqc.Api/ipqc-dev.db` (ignored by Git). The migration is `InitialPatrolStandards`; the repo-local `dotnet-ef` tool is pinned in `dotnet-tools.json`. The backend solution includes an HTTP/SQLite integration test project; run `dotnet test api/JaxPower.Ipqc.slnx`.
+Open `http://localhost:5173/standards`. Vite proxies same-origin `/api` requests to the local API. Authenticated Web v1 requires the Web app and `/api/*` to share one browser origin; `VITE_API_BASE_URL` is not supported. The development database is `api/JaxPower.Ipqc.Api/ipqc-dev.db` (ignored by Git). The repo-local `dotnet-ef` tool is pinned in `dotnet-tools.json`. The backend solution includes an HTTP/SQLite integration test project; run `dotnet test api/JaxPower.Ipqc.slnx`.
+
+For production setup, see [deployment checklist](docs/10_DEPLOYMENT_CHECKLIST.md), [PostgreSQL backup/restore runbook](docs/11_POSTGRES_BACKUP_RESTORE.md), and [Phase 1H UAT evidence](docs/12_PHASE_1H_UAT.md).
 
 For a PostgreSQL deployment, set `Database__Provider=Postgres` and `ConnectionStrings__Ipqc` via environment or secret configuration, then apply the migration with `dotnet tool run dotnet-ef database update` from the API project directory. Never commit a real connection string. Production requires PostgreSQL, HTTPS at the hosting/reverse-proxy boundary, a strong secret `Authentication__JwtSigningKey` (at least 32 UTF-8 bytes), and an explicitly configured initial `BootstrapAdmin__Username`, `BootstrapAdmin__DisplayName`, and `BootstrapAdmin__Password` when the user table is empty. The initial Admin must change their password. Bootstrap never resets an existing account. Local account credentials are shared by Web and future Android clients. Development can seed four local accounts only when the database is empty and `DevelopmentSeed__Password` is supplied. There are no default passwords. Audit actors are authenticated usernames.
 

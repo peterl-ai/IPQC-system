@@ -28,6 +28,14 @@ public sealed class PatrolStandardService(IpqcDbContext db, TimeProvider clock)
             if (!string.IsNullOrWhiteSpace(items[i].InspectionType) &&
                 InspectionJudgmentService.CanonicalType(items[i].InspectionType) is null)
                 errors[$"InspectionItems[{i}].InspectionType"] = ["Use Qualitative or Quantitative."];
+            if (InspectionJudgmentService.CanonicalType(items[i].InspectionType) == "Quantitative")
+            {
+                var item = items[i];
+                var issue = InspectionJudgmentService.ValidateDefinition(item.InspectionType, item.SampleCount,
+                    item.LowerLimitOperator?.Trim(), item.LowerLimitValue?.Trim(),
+                    item.UpperLimitOperator?.Trim(), item.UpperLimitValue?.Trim());
+                if (issue is not null) errors[$"InspectionItems[{i}]"] = [issue];
+            }
         }
         return errors;
 
@@ -35,6 +43,21 @@ public sealed class PatrolStandardService(IpqcDbContext db, TimeProvider clock)
         {
             if (value?.Length > max) errors[field] = [$"Must be {max} characters or fewer."];
         }
+    }
+
+    public static string? ExecutabilityIssue(StandardInput input)
+    {
+        if (input.InspectionItems is not { Count: > 0 })
+            return "An enabled plan requires a Standard with inspection items.";
+        for (var i = 0; i < input.InspectionItems.Count; i++)
+        {
+            var item = input.InspectionItems[i];
+            var issue = InspectionJudgmentService.ValidateDefinition(item.InspectionType, item.SampleCount,
+                item.LowerLimitOperator?.Trim(), item.LowerLimitValue?.Trim(),
+                item.UpperLimitOperator?.Trim(), item.UpperLimitValue?.Trim());
+            if (issue is not null) return $"Inspection item {i + 1}: {issue}";
+        }
+        return null;
     }
 
     private static IEnumerable<string?> ItemValues(ItemInput item) =>
@@ -55,7 +78,9 @@ public sealed class PatrolStandardService(IpqcDbContext db, TimeProvider clock)
                 x.WorkshopCode, x.LineCode, x.LineName, x.MaterialCode, x.CreatedBy, x.CreatedAtUtc,
                 x.UpdatedBy, x.UpdatedAtUtc))
             .ToListAsync(ct);
-        return new PagedStandards(rows, page, pageSize, total);
+        return new PagedStandards(rows.Select(x => x with {
+            CreatedAtUtc = Utc(x.CreatedAtUtc), UpdatedAtUtc = Utc(x.UpdatedAtUtc)
+        }).ToList(), page, pageSize, total);
     }
 
     public async Task<StandardOutput?> GetAsync(Guid id, CancellationToken ct)
@@ -177,10 +202,11 @@ public sealed class PatrolStandardService(IpqcDbContext db, TimeProvider clock)
     }
 
     private static string Clean(string? value) => value?.Trim() ?? "";
+    private static DateTime Utc(DateTime value) => DateTime.SpecifyKind(value, DateTimeKind.Utc);
 
     private static StandardOutput ToOutput(PatrolStandard row) => new(row.Id, row.PatrolStandardName,
         row.FactoryCode, row.FactoryName, row.WorkshopCode, row.LineCode, row.LineName, row.MaterialCode,
-        row.CreatedBy, row.CreatedAtUtc, row.UpdatedBy, row.UpdatedAtUtc,
+        row.CreatedBy, Utc(row.CreatedAtUtc), row.UpdatedBy, Utc(row.UpdatedAtUtc),
         row.InspectionItems.OrderBy(x => x.SequenceNo).Select(x => new ItemOutput(x.Id, x.SequenceNo,
             x.ProcessCode, x.ProcessName, x.InspectionItemCategory, x.InspectionItem,
             x.InspectionContent, x.UpperLimitOperator, x.UpperLimitValue, x.LowerLimitOperator,

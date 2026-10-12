@@ -19,7 +19,7 @@ public static class AuthEndpoints
             if (issued is null) return Results.Problem(statusCode: 401, title: "Invalid username or password.");
             if (input.ClientType == "Native")
                 return Results.Ok(issued.Value.Output with { RefreshToken = issued.Value.RefreshToken });
-            SetCookie(http, issued.Value.RefreshToken, app.Environment.IsDevelopment());
+            SetCookie(http, issued.Value.RefreshToken, issued.Value.RefreshExpiresAtUtc, app.Environment.IsDevelopment());
             return Results.Ok(issued.Value.Output);
         }).AllowAnonymous().RequireRateLimiting("login");
         group.MapPost("/refresh", async (RefreshInput? input, LocalAuthService auth,
@@ -30,7 +30,7 @@ public static class AuthEndpoints
             var issued = await auth.RefreshAsync(token, http.Request.Headers.UserAgent.ToString(), ct);
             if (issued is null) { ClearCookie(http); return Results.Problem(statusCode: 401, title: "Session expired."); }
             if (native) return Results.Ok(issued.Value.Output with { RefreshToken = issued.Value.RefreshToken });
-            SetCookie(http, issued.Value.RefreshToken, app.Environment.IsDevelopment());
+            SetCookie(http, issued.Value.RefreshToken, issued.Value.RefreshExpiresAtUtc, app.Environment.IsDevelopment());
             return Results.Ok(issued.Value.Output);
         }).AllowAnonymous().RequireRateLimiting("refresh");
         group.MapPost("/logout", async (RefreshInput? input, LocalAuthService auth,
@@ -59,10 +59,10 @@ public static class AuthEndpoints
         }).RequireAuthorization();
     }
 
-    private static void SetCookie(HttpContext http, string token, bool development) =>
+    private static void SetCookie(HttpContext http, string token, DateTime expiresAtUtc, bool development) =>
         http.Response.Cookies.Append(LocalAuthService.RefreshCookie, token, new CookieOptions {
             HttpOnly = true, Secure = !development, SameSite = SameSiteMode.Strict,
-            Path = "/api/auth", Expires = DateTimeOffset.UtcNow.AddDays(14) });
+            Path = "/api/auth", Expires = new DateTimeOffset(DateTime.SpecifyKind(expiresAtUtc, DateTimeKind.Utc)) });
 
     private static void ClearCookie(HttpContext http) =>
         http.Response.Cookies.Delete(LocalAuthService.RefreshCookie, new CookieOptions { Path = "/api/auth" });

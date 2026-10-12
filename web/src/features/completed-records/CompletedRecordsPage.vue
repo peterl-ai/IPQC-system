@@ -20,7 +20,8 @@
       <a-alert v-if="error" type="error" show-icon :message="error" class="record-alert" />
       <a-table row-key="id" size="small" :columns="columns" :data-source="rows" :loading="loading" :scroll="{ x: 1750 }" :pagination="pagination">
         <template #bodyCell="{ column, record }">
-          <template v-if="column.key === 'completedAtUtc'">{{ plantDate(record.completedAtUtc) }}</template>
+          <template v-if="column.key === 'taskNo'">{{ record.taskNo }} <StatusTag v-if="record.hasIntegrityIssue" tone="warning" :label="t('record.integrityFlag')" /></template>
+          <template v-else-if="column.key === 'completedAtUtc'">{{ plantDate(record.completedAtUtc) }}</template>
           <template v-else-if="column.key === 'approvedAtUtc'">{{ plantDate(record.approvedAtUtc) }}</template>
           <template v-else-if="column.key === 'overallInspectionResult'"><StatusTag :tone="record.overallInspectionResult === 'Qualified' ? 'success' : 'warning'" :label="resultLabel(record.overallInspectionResult)" /></template>
           <template v-else-if="column.key === 'shift'">{{ shiftLabel(record.shift) }}</template>
@@ -67,7 +68,7 @@
               <a-descriptions-item :label="t('task.remarks')">{{ item.remarks || '—' }}</a-descriptions-item>
             </a-descriptions>
             <div v-for="sample in item.samples" :key="sample.sequenceNo" class="sample-line">
-              {{ t('task.sample') }} {{ sample.sequenceNo }} · {{ sample.inspectionValue ?? resultLabel(sample.judgmentResult) }} · {{ resultLabel(sample.judgmentResult) }} · {{ plantDate(sample.inspectedAtUtc) }}
+              {{ t('task.sample') }} {{ sample.sequenceNo }} · {{ sampleResult(sample) }} · {{ plantDate(sample.inspectedAtUtc) }}
             </div>
           </a-card>
           <h3 class="section-title">{{ t('record.finalApproval') }}</h3>
@@ -101,7 +102,7 @@
             <thead><tr><th>{{ t('field.inspectionItem') }}</th><th>{{ t('field.inspectionContent') }}</th><th>{{ t('field.inspectionType') }}</th><th>{{ t('field.lowerLimit') }}</th><th>{{ t('field.upperLimit') }}</th><th>{{ t('task.isNa') }}</th><th>{{ t('field.result') }}</th><th>{{ t('field.inspectionTime') }}</th><th>{{ t('task.sample') }}</th></tr></thead><tbody>
               <template v-for="item in preview.items" :key="item.sequenceNo">
                 <tr v-if="item.samples.length === 0"><td>{{ item.inspectionItem }}</td><td>{{ item.inspectionContent }}</td><td>{{ typeLabel(item.inspectionType) }}</td><td>{{ item.lowerLimitOperator }} {{ item.lowerLimitValue }}</td><td>{{ item.upperLimitOperator }} {{ item.upperLimitValue }}</td><td>{{ t(item.isNa ? 'task.yes' : 'task.no') }}</td><td>{{ resultLabel(item.judgmentResult) }}</td><td>{{ plantDate(item.inspectedAtUtc) }}</td><td>—</td></tr>
-                <tr v-for="sample in item.samples" v-else :key="sample.sequenceNo"><td>{{ item.inspectionItem }}</td><td>{{ item.inspectionContent }}</td><td>{{ typeLabel(item.inspectionType) }}</td><td>{{ item.lowerLimitOperator }} {{ item.lowerLimitValue }}</td><td>{{ item.upperLimitOperator }} {{ item.upperLimitValue }}</td><td>{{ t(item.isNa ? 'task.yes' : 'task.no') }}</td><td>{{ resultLabel(item.judgmentResult) }}</td><td>{{ plantDate(item.inspectedAtUtc) }}</td><td>{{ sample.sequenceNo }}: {{ sample.inspectionValue ?? resultLabel(sample.judgmentResult) }} · {{ resultLabel(sample.judgmentResult) }} · {{ plantDate(sample.inspectedAtUtc) }}</td></tr>
+                <tr v-for="sample in item.samples" v-else :key="sample.sequenceNo"><td>{{ item.inspectionItem }}</td><td>{{ item.inspectionContent }}</td><td>{{ typeLabel(item.inspectionType) }}</td><td>{{ item.lowerLimitOperator }} {{ item.lowerLimitValue }}</td><td>{{ item.upperLimitOperator }} {{ item.upperLimitValue }}</td><td>{{ t(item.isNa ? 'task.yes' : 'task.no') }}</td><td>{{ resultLabel(item.judgmentResult) }}</td><td>{{ plantDate(item.inspectedAtUtc) }}</td><td>{{ sample.sequenceNo }}: {{ sampleResult(sample) }} · {{ plantDate(sample.inspectedAtUtc) }}</td></tr>
               </template>
             </tbody>
           </table>
@@ -151,6 +152,9 @@ function plantDate(value?: string | null) {
     day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }).format(new Date(value)) : '—'
 }
 function resultLabel(value?: string | null) { return value ? t(`task.result.${value}`) : '—' }
+function sampleResult(sample: { inspectionValue: number | null; judgmentResult: string }) {
+  return sample.inspectionValue === null ? resultLabel(sample.judgmentResult) : `${sample.inspectionValue} · ${resultLabel(sample.judgmentResult)}`
+}
 function shiftLabel(value?: string | null) { return value ? t(`task.shift.${value}`) : '—' }
 function reviewLabel(value?: string | null) { return value ? t(`task.review.${value}`) : '—' }
 function typeLabel(value: string) { return t(`task.type.${value}`) }

@@ -45,7 +45,7 @@ export default {
     shift: { Day: '白班', Night: '夜班' }, type: { Qualitative: '定性', Quantitative: '计量' },
     review: { Approved: 'PQE 已批准', Rejected: 'PQE 已驳回' },
   },
-  record: { detailTitle: '巡检记录详情', basic: '基本信息', inspection: '检验明细', previewTitle: '巡检报告预览', reportTitle: 'JAX Power IPQC 巡检报告', completedFrom: '完成日期起', completedTo: '完成日期止', startedTime: '开始时间', machineCode: '设备编码', series: '系列', mold: '模具', finalApproval: '最终批准', loadFailed: '无法加载已完成巡检记录。', integrityConflict: '已完成的工作流记录不一致，请联系管理员。' },
+  record: { detailTitle: '巡检记录详情', basic: '基本信息', inspection: '检验明细', previewTitle: '巡检报告预览', reportTitle: 'JAX Power IPQC 巡检报告', completedFrom: '完成日期起', completedTo: '完成日期止', startedTime: '开始时间', machineCode: '设备编码', series: '系列', mold: '模具', finalApproval: '最终批准', loadFailed: '无法加载已完成巡检记录。', integrityConflict: '已完成的工作流记录不一致，请联系管理员。', integrityFlag: '数据完整性异常' },
   permission: { code: '403', title: '无访问权限', description: '当前账户无权访问此页面。', back: '前往可访问页面' },
   notFound: { code: '404', title: '页面不存在', description: '请求的工作区不存在。', back: '返回首页' },
 }

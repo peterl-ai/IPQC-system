@@ -4,7 +4,8 @@ public sealed record CompletedRecordSummary(Guid Id, string TaskNo, DateTime? Co
     DateTime ScheduledOccurrenceUtc, DateTime? SubmittedAtUtc, string? OverallInspectionResult,
     int FinalRevisionNo, string Inspector, string? Shift, string? PlanNo, string? PlanName,
     string? StandardName, string? FactoryCode, string? FactoryName, string? WorkshopCode,
-    string? LineCode, string? LineName, string? MaterialCode, string? ApprovedBy, DateTime? ApprovedAtUtc);
+    string? LineCode, string? LineName, string? MaterialCode, string? ApprovedBy, DateTime? ApprovedAtUtc,
+    bool HasIntegrityIssue);
 public sealed record PagedCompletedRecords(List<CompletedRecordSummary> Items, int Page, int PageSize, int Total);
 public sealed record CompletedRecordSample(int SequenceNo, decimal? InspectionValue, string JudgmentResult,
     DateTime? InspectedAtUtc);

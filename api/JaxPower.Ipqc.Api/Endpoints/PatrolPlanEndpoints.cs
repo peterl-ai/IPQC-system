@@ -47,6 +47,7 @@ public static class PatrolPlanEndpoints
                 return DuplicatePlanNo();
             }
             catch (PlanAssignmentException ex) { return Results.ValidationProblem(new Dictionary<string, string[]> { ["AssigneeUserId"] = [ex.Message] }); }
+            catch (PlanStandardNotReadyException ex) { return StandardNotReady(ex); }
         }).RequireAuthorization(IpqcPermissions.PlansWrite);
         group.MapPut("/{id:guid}", async (Guid id, PlanInput input, PatrolPlanService service, IpqcDbContext db, HttpContext http, CancellationToken ct) =>
         {
@@ -69,6 +70,7 @@ public static class PatrolPlanEndpoints
                 return DuplicatePlanNo();
             }
             catch (PlanAssignmentException ex) { return Results.ValidationProblem(new Dictionary<string, string[]> { ["AssigneeUserId"] = [ex.Message] }); }
+            catch (PlanStandardNotReadyException ex) { return StandardNotReady(ex); }
         }).RequireAuthorization(IpqcPermissions.PlansWrite);
         group.MapPost("/{id:guid}/enable", async (Guid id, PatrolPlanService service, HttpContext http, CancellationToken ct) =>
         {
@@ -76,8 +78,12 @@ public static class PatrolPlanEndpoints
             if (current is null) return Results.Problem(statusCode: 404, title: "Patrol Plan not found.");
             if (!await service.ValidAssigneeAsync(current.AssigneeUserId, ct))
                 return Results.ValidationProblem(new Dictionary<string, string[]> { ["AssigneeUserId"] = ["Assign one active IPQA before enabling the plan."] });
-            var row = await service.SetEnabledAsync(id, true, IpqcPermissions.Username(http.User), ct);
-            return Results.Ok(row);
+            try
+            {
+                var row = await service.SetEnabledAsync(id, true, IpqcPermissions.Username(http.User), ct);
+                return Results.Ok(row);
+            }
+            catch (PlanStandardNotReadyException ex) { return StandardNotReady(ex); }
         }).RequireAuthorization(IpqcPermissions.PlansWrite);
         group.MapPost("/{id:guid}/disable", async (Guid id, PatrolPlanService service, HttpContext http, CancellationToken ct) =>
             await service.SetEnabledAsync(id, false, IpqcPermissions.Username(http.User), ct) is { } row
@@ -94,4 +100,6 @@ public static class PatrolPlanEndpoints
 
     private static IResult DuplicatePlanNo() => Results.ValidationProblem(
         new Dictionary<string, string[]> { ["PlanNo"] = ["Plan No. is already in use."] });
+    private static IResult StandardNotReady(PlanStandardNotReadyException ex) => Results.ValidationProblem(
+        new Dictionary<string, string[]> { ["PatrolStandardId"] = [ex.Message] });
 }

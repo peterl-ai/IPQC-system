@@ -138,6 +138,9 @@ public sealed class CompletedPatrolRecordTests
             Assert.Equal("Unqualified", workbook.Worksheet("Inspection Report").Cell(17, 2).GetString());
         var broken = await app.SeedAsync("Completed", "PT-BROKEN", SpringDate, twoRevisions: true, missingReview: true);
         await app.SetFirstReviewApprovedAsync(broken);
+        var ledger = await app.Admin.GetFromJsonAsync<PagedCompletedRecords>("/api/completed-patrol-records");
+        Assert.True(Assert.Single(ledger!.Items, x => x.Id == broken).HasIntegrityIssue);
+        Assert.False(Assert.Single(ledger.Items, x => x.Id == unqualified).HasIntegrityIssue);
         foreach (var path in new[] { $"/api/completed-patrol-records/{broken}",
             $"/api/completed-patrol-records/{broken}/report", $"/api/completed-patrol-records/{broken}/report.xlsx" })
             Assert.Equal(HttpStatusCode.Conflict, (await app.Admin.GetAsync(path)).StatusCode);
