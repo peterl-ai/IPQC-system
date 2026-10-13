@@ -32,7 +32,7 @@ Date: 2026-10-11 (America/New_York). Branch: `phase-1h-uat-hardening`. This docu
 | Fresh SQLite `dotnet-ef database update` | Passed through Phase 1G migration on a disposable database; no Phase 1H schema change |
 | `dotnet-ef migrations has-pending-model-changes` | No pending changes |
 | PostgreSQL idempotent migration SQL | Generated and inspected locally; 26,544 bytes, includes task occurrence unique index |
-| GitHub Actions CI on PR #8 | Backend and frontend jobs succeeded on the earlier Phase 1H head; checks for the frozen Task sample-count fix remain to be verified after push |
+| GitHub Actions CI on PR #8 | Frozen Task fix commit `7ac52d1` passed backend and frontend jobs in both push and pull request runs. The [workflow status for the current branch](https://github.com/peterl-ai/IPQC-system/actions/workflows/ci.yml?query=branch%3Aphase-1h-uat-hardening) tracks the latest PR head. |
 
 The initial sandboxed .NET/Vitest commands encountered local named-pipe/`EPERM` restrictions. The reported passing commands ran outside that sandbox against the same checkout. No tests were deleted.
 
@@ -53,5 +53,5 @@ Automated backend tests cover scheduler duplicate/concurrent generation, recover
 ## Production validation still open
 
 - No local `docker`, `psql`, `pg_dump`, or `pg_restore` executable was available. **No live PostgreSQL migration/API smoke or restore rehearsal was run.** Generated PostgreSQL SQL and SQLite tests do not replace live provider validation.
-- GitHub Actions passed on the earlier Phase 1H head of PR #8; verify the frozen Task sample-count fix on the latest PR head before merge.
+- GitHub Actions passed for the frozen Task fix commit `7ac52d1` on PR #8; check the linked workflow status for the latest PR head before merge.
 - Production PostgreSQL host, deployment host, reverse proxy/TLS, backup owner/retention, monitoring/log retention, and future file storage remain JAX Power operational decisions. See the deployment checklist and backup runbook.
