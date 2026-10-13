@@ -22,9 +22,10 @@ public sealed class LocalAuthService(IpqcDbContext db, IPasswordHasher<Applicati
     public static bool ValidPassword(string? password) => password is { Length: >= 10 and <= 256 } &&
         password.Any(char.IsUpper) && password.Any(char.IsLower) && password.Any(char.IsDigit);
     public static CurrentUserOutput Current(ApplicationUser user) => new(user.Id, user.Username,
-        user.DisplayName, user.Role, user.IsActive, user.MustChangePassword, IpqcPermissions.ForRole(user.Role));
+        user.DisplayName, user.Role, user.IsActive, user.MustChangePassword,
+        user.MustChangePassword ? [] : IpqcPermissions.ForRole(user.Role));
 
-    public async Task<(AuthOutput Output, string RefreshToken)?> LoginAsync(string? username, string? password,
+    public async Task<(AuthOutput Output, string RefreshToken, DateTime RefreshExpiresAtUtc)?> LoginAsync(string? username, string? password,
         string? userAgent, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(username) || password is null || username.Length > 100) return null;
@@ -34,25 +35,28 @@ public sealed class LocalAuthService(IpqcDbContext db, IPasswordHasher<Applicati
         var result = hasher.VerifyHashedPassword(user, user.PasswordHash, password);
         if (result == PasswordVerificationResult.Failed)
         {
-            user.FailedLoginCount++;
-            if (user.FailedLoginCount >= 5)
-            {
-                user.FailedLoginCount = 0;
-                user.LockoutEndUtc = now.AddMinutes(15);
-            }
-            await db.SaveChangesAsync(ct);
+            // One database statement serializes increments for this account on SQLite and PostgreSQL.
+            await db.ApplicationUsers.Where(x => x.Id == user.Id && x.IsActive &&
+                (x.LockoutEndUtc == null || x.LockoutEndUtc <= now))
+                .ExecuteUpdateAsync(update => update
+                    .SetProperty(x => x.LockoutEndUtc,
+                        x => x.FailedLoginCount >= 4 ? now.AddMinutes(15) : x.LockoutEndUtc)
+                    .SetProperty(x => x.FailedLoginCount,
+                        x => x.FailedLoginCount >= 4 ? 0 : x.FailedLoginCount + 1), ct);
             return null;
         }
+        await db.Entry(user).ReloadAsync(ct);
+        if (!user.IsActive || user.LockoutEndUtc > now) return null;
         user.FailedLoginCount = 0;
         user.LockoutEndUtc = null;
         if (result == PasswordVerificationResult.SuccessRehashNeeded)
             user.PasswordHash = hasher.HashPassword(user, password);
         var issued = Issue(user, now, now.AddDays(settings.RefreshDays), userAgent);
         await db.SaveChangesAsync(ct);
-        return (issued.Output, issued.RefreshToken);
+        return (issued.Output, issued.RefreshToken, now.AddDays(settings.RefreshDays));
     }
 
-    public async Task<(AuthOutput Output, string RefreshToken)?> RefreshAsync(string? token,
+    public async Task<(AuthOutput Output, string RefreshToken, DateTime RefreshExpiresAtUtc)?> RefreshAsync(string? token,
         string? userAgent, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(token) || token.Length > 256) return null;
@@ -68,7 +72,7 @@ public sealed class LocalAuthService(IpqcDbContext db, IPasswordHasher<Applicati
         var issued = Issue(session.User, now, session.ExpiresAtUtc, userAgent);
         session.ReplacedBySessionId = issued.SessionId;
         await db.SaveChangesAsync(ct);
-        return (issued.Output, issued.RefreshToken);
+        return (issued.Output, issued.RefreshToken, session.ExpiresAtUtc);
     }
 
     public async Task LogoutAsync(string? token, CancellationToken ct)

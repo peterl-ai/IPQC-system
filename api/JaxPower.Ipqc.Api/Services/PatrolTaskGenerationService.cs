@@ -15,8 +15,6 @@ public sealed class PatrolTaskGenerationService(IpqcDbContext db, TimeProvider c
         var window = Math.Clamp(configuration.GetValue("Scheduler:CatchUpWindowHours", 24), 1, 168);
         var earliest = now.AddHours(-window);
         var plans = await db.PatrolPlans.AsNoTracking().Include(x => x.Assignees).ThenInclude(x => x.User)
-            .Include(x => x.PatrolStandard).ThenInclude(x => x.InspectionItems)
-            .AsSplitQuery()
             .Where(x => x.IsEnabled && x.EffectiveStartUtc <= now &&
                 (x.EffectiveEndUtc == null || x.EffectiveEndUtc >= earliest))
             .OrderBy(x => x.Id)
@@ -36,10 +34,17 @@ public sealed class PatrolTaskGenerationService(IpqcDbContext db, TimeProvider c
                 if (upper < lower) continue;
                 var occurrences = PatrolSchedule.Occurrences(PatrolSchedule.Read(plan.ScheduleDefinition),
                     plan.TimeZoneId, plan.EffectiveStartUtc, lower, upper);
+                PatrolStandard? standard = null;
                 foreach (var occurrence in occurrences)
                 {
                     if (occurrence <= plan.GenerationNotBeforeUtc) continue;
                     if (await db.PatrolTasks.AsNoTracking().AnyAsync(x => x.PatrolPlanId == plan.Id && x.ScheduledOccurrenceUtc == occurrence, ct)) continue;
+                    standard ??= await db.PatrolStandards.AsNoTracking().Include(x => x.InspectionItems)
+                        .SingleAsync(x => x.Id == plan.PatrolStandardId, ct);
+                    if (standard.InspectionItems.Count == 0 || standard.InspectionItems.Any(x =>
+                        InspectionJudgmentService.ValidateDefinition(x.InspectionType, x.SampleCount,
+                            x.LowerLimitOperator, x.LowerLimitValue, x.UpperLimitOperator, x.UpperLimitValue) is not null))
+                        throw new InvalidOperationException("Referenced Patrol Standard is not executable.");
                     var id = Guid.NewGuid();
                     var task = new PatrolTask { Id = id, TaskNo = $"PT-{id:N}".ToUpperInvariant(),
                         PatrolPlanId = plan.Id, PatrolStandardId = plan.PatrolStandardId,
@@ -47,15 +52,15 @@ public sealed class PatrolTaskGenerationService(IpqcDbContext db, TimeProvider c
                         AssignedInspectorKey = assignee.User.Username, ScheduledOccurrenceUtc = occurrence,
                         GeneratedAtUtc = now, CreatedAtUtc = now, UpdatedAtUtc = now,
                         PlanNoSnapshot = plan.PlanNo, PlanNameSnapshot = plan.PlanName,
-                        StandardNameSnapshot = plan.PatrolStandard.PatrolStandardName,
-                        FactoryCodeSnapshot = plan.FactoryCode.Length > 0 ? plan.FactoryCode : plan.PatrolStandard.FactoryCode,
-                        FactoryNameSnapshot = plan.FactoryName.Length > 0 ? plan.FactoryName : plan.PatrolStandard.FactoryName,
-                        WorkshopCodeSnapshot = plan.PatrolStandard.WorkshopCode,
-                        LineCodeSnapshot = plan.LineCode.Length > 0 ? plan.LineCode : plan.PatrolStandard.LineCode,
-                        LineNameSnapshot = plan.LineName.Length > 0 ? plan.LineName : plan.PatrolStandard.LineName,
-                        MaterialCodeSnapshot = plan.PatrolStandard.MaterialCode,
-                        SourceStandardUpdatedAtUtc = plan.PatrolStandard.UpdatedAtUtc,
-                        Items = plan.PatrolStandard.InspectionItems.OrderBy(x => x.SequenceNo).Select(x => new PatrolTaskItem
+                        StandardNameSnapshot = standard.PatrolStandardName,
+                        FactoryCodeSnapshot = plan.FactoryCode.Length > 0 ? plan.FactoryCode : standard.FactoryCode,
+                        FactoryNameSnapshot = plan.FactoryName.Length > 0 ? plan.FactoryName : standard.FactoryName,
+                        WorkshopCodeSnapshot = standard.WorkshopCode,
+                        LineCodeSnapshot = plan.LineCode.Length > 0 ? plan.LineCode : standard.LineCode,
+                        LineNameSnapshot = plan.LineName.Length > 0 ? plan.LineName : standard.LineName,
+                        MaterialCodeSnapshot = standard.MaterialCode,
+                        SourceStandardUpdatedAtUtc = standard.UpdatedAtUtc,
+                        Items = standard.InspectionItems.OrderBy(x => x.SequenceNo).Select(x => new PatrolTaskItem
                         {
                             Id = Guid.NewGuid(), SourcePatrolStandardItemId = x.Id, SequenceNo = x.SequenceNo,
                             ProcessCode = x.ProcessCode, ProcessName = x.ProcessName,

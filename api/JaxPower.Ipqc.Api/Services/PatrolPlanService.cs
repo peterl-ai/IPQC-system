@@ -12,6 +12,20 @@ public sealed class PatrolPlanService(IpqcDbContext db, TimeProvider clock)
     public async Task<bool> ValidAssigneeAsync(Guid? userId, CancellationToken ct) =>
         userId is { } id && await db.ApplicationUsers.AnyAsync(x => x.Id == id && x.IsActive && x.Role == "IPQA", ct);
 
+    public async Task<string?> StandardReadinessIssueAsync(Guid standardId, CancellationToken ct)
+    {
+        var items = await db.PatrolStandardItems.AsNoTracking()
+            .Where(x => x.PatrolStandardId == standardId).OrderBy(x => x.SequenceNo).ToListAsync(ct);
+        if (items.Count == 0) return "An enabled plan requires a Standard with inspection items.";
+        foreach (var item in items)
+        {
+            var issue = InspectionJudgmentService.ValidateDefinition(item.InspectionType, item.SampleCount,
+                item.LowerLimitOperator, item.LowerLimitValue, item.UpperLimitOperator, item.UpperLimitValue);
+            if (issue is not null) return $"Inspection item {item.SequenceNo}: {issue}";
+        }
+        return null;
+    }
+
     public static Dictionary<string, string[]> Validate(PlanInput input)
     {
         var errors = new Dictionary<string, string[]>();
@@ -84,6 +98,8 @@ public sealed class PatrolPlanService(IpqcDbContext db, TimeProvider clock)
 
     public async Task<PlanOutput> CreateAsync(PlanInput input, DateTime start, DateTime? end, string actor, CancellationToken ct)
     {
+        if (input.IsEnabled && await StandardReadinessIssueAsync(input.PatrolStandardId, ct) is { } issue)
+            throw new PlanStandardNotReadyException(issue);
         var assignee = await ResolveAssigneeAsync(input.AssigneeUserId, ct);
         var now = clock.GetUtcNow().UtcDateTime;
         var row = new PatrolPlan { Id = Guid.NewGuid(), CreatedBy = actor, CreatedAtUtc = now,
@@ -96,6 +112,8 @@ public sealed class PatrolPlanService(IpqcDbContext db, TimeProvider clock)
 
     public async Task<PlanOutput?> UpdateAsync(Guid id, PlanInput input, DateTime start, DateTime? end, string actor, CancellationToken ct)
     {
+        if (input.IsEnabled && await StandardReadinessIssueAsync(input.PatrolStandardId, ct) is { } issue)
+            throw new PlanStandardNotReadyException(issue);
         var assignee = await ResolveAssigneeAsync(input.AssigneeUserId, ct);
         var row = await db.PatrolPlans.Include(x => x.Assignees).FirstOrDefaultAsync(x => x.Id == id, ct);
         if (row is null) return null;
@@ -126,6 +144,8 @@ public sealed class PatrolPlanService(IpqcDbContext db, TimeProvider clock)
     {
         var row = await db.PatrolPlans.Include(x => x.Assignees).FirstOrDefaultAsync(x => x.Id == id, ct);
         if (row is null) return null;
+        if (enabled && await StandardReadinessIssueAsync(row.PatrolStandardId, ct) is { } issue)
+            throw new PlanStandardNotReadyException(issue);
         if (enabled && (row.Assignees.Count(x => x.IsActive && x.UserId != null) != 1 ||
             !await ValidAssigneeAsync(row.Assignees.Single(x => x.IsActive).UserId, ct)))
             throw new InvalidOperationException("An enabled plan requires exactly one active IPQA assignee.");
@@ -223,3 +243,4 @@ public sealed class PatrolPlanService(IpqcDbContext db, TimeProvider clock)
 public sealed class DuplicatePlanNoException(Exception innerException)
     : Exception("Plan No. is already in use.", innerException);
 public sealed class PlanAssignmentException() : Exception("Select an active IPQA user.");
+public sealed class PlanStandardNotReadyException(string message) : Exception(message);

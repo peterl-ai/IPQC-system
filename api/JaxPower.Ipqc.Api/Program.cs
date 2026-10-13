@@ -141,9 +141,13 @@ group.MapPost("", async (StandardInput input, PatrolStandardService service, Htt
     var row = await service.CreateAsync(input, IpqcPermissions.Username(http.User), ct);
     return Results.Created($"/api/patrol-standards/{row.Id}", row);
 }).RequireAuthorization(IpqcPermissions.StandardsWrite);
-group.MapPut("/{id:guid}", async (Guid id, StandardInput input, PatrolStandardService service, HttpContext http, CancellationToken ct) =>
+group.MapPut("/{id:guid}", async (Guid id, StandardInput input, PatrolStandardService service,
+    IpqcDbContext db, HttpContext http, CancellationToken ct) =>
 {
     var errors = PatrolStandardService.Validate(input);
+    if (await db.PatrolPlans.AnyAsync(x => x.PatrolStandardId == id && x.IsEnabled, ct) &&
+        PatrolStandardService.ExecutabilityIssue(input) is { } issue)
+        errors["InspectionItems"] = [issue];
     if (errors.Count > 0) return Results.ValidationProblem(errors);
     return await service.UpdateAsync(id, input, IpqcPermissions.Username(http.User), ct) is { } row
         ? Results.Ok(row) : Results.Problem(statusCode: 404, title: "Patrol Standard not found.");

@@ -50,6 +50,8 @@ public sealed class PatrolStandardsApiTests
         Assert.False(filteredJson.RootElement.GetProperty("items")[0].TryGetProperty("inspectionItems", out _));
         var filtered = await filteredResponse.Content.ReadFromJsonAsync<PagedStandards>();
         Assert.Single(filtered!.Items);
+        Assert.Equal(DateTimeKind.Utc, filtered.Items[0].CreatedAtUtc.Kind);
+        Assert.Equal(DateTimeKind.Utc, filtered.Items[0].UpdatedAtUtc.Kind);
         var page = await client.GetFromJsonAsync<PagedStandards>("/api/patrol-standards?page=2&pageSize=1");
         Assert.Equal(2, page!.Total);
         Assert.Single(page.Items);
@@ -136,6 +138,28 @@ public sealed class PatrolStandardsApiTests
         Assert.Equal(HttpStatusCode.BadRequest, result.StatusCode);
         var list = await app.Client.GetFromJsonAsync<PagedStandards>("/api/patrol-standards");
         Assert.Equal(0, list!.Total);
+    }
+
+    [Theory]
+    [InlineData(">", "1", "<", "1", "1")]
+    [InlineData(">=", "5", "<=", "4", "1")]
+    [InlineData("?", "1", "<", "5", "1")]
+    [InlineData(">=", "bad", "<", "5", "1")]
+    [InlineData(null, null, null, null, "1")]
+    [InlineData(">=", "1", null, null, "0")]
+    [InlineData(">=", "1", null, null, "51")]
+    [InlineData(">=", "1", null, null, "not-a-count")]
+    public async Task Quantitative_standard_rejects_non_executable_definition(string? lowerOp, string? lowerValue,
+        string? upperOp, string? upperValue, string sampleCount)
+    {
+        await using var app = await TestApp.CreateAsync();
+        var input = Draft();
+        input.InspectionItems![0] = input.InspectionItems[0] with { InspectionType = "Quantitative",
+            LowerLimitOperator = lowerOp, LowerLimitValue = lowerValue,
+            UpperLimitOperator = upperOp, UpperLimitValue = upperValue, SampleCount = sampleCount };
+        var result = await app.Client.PostAsJsonAsync("/api/patrol-standards", input);
+        Assert.Equal(HttpStatusCode.BadRequest, result.StatusCode);
+        Assert.Equal(0, (await app.Client.GetFromJsonAsync<PagedStandards>("/api/patrol-standards"))!.Total);
     }
 
     [Fact]

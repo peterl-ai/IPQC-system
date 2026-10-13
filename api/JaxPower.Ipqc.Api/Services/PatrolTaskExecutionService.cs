@@ -50,26 +50,26 @@ public sealed class PatrolTaskExecutionService(IpqcDbContext db, TimeProvider cl
         if (task is null) return null;
         var reviews = task.Reviews.ToDictionary(x => x.RevisionNo);
         return new TaskDetail(Summary(task), task.FactoryCodeSnapshot, task.WorkshopCodeSnapshot,
-            task.LineCodeSnapshot, task.MaterialCodeSnapshot, task.SourceStandardUpdatedAtUtc,
-            task.StartedAtUtc, task.CompletedAtUtc,
+            task.LineCodeSnapshot, task.MaterialCodeSnapshot, Utc(task.SourceStandardUpdatedAtUtc),
+            Utc(task.StartedAtUtc), Utc(task.CompletedAtUtc),
             task.Items.OrderBy(x => x.SequenceNo).Select(x => new TaskItemOutput(x.Id,
                 x.SourcePatrolStandardItemId, x.SequenceNo, x.ProcessCode, x.ProcessName,
                 x.InspectionItemCategory, x.InspectionItem, x.InspectionContent,
                 x.UpperLimitOperator, x.UpperLimitValue, x.LowerLimitOperator, x.LowerLimitValue,
                 x.InspectionType, x.SamplingPlan, x.SampleCount, x.PhotoRequirement, x.DefectLevel,
-                x.IsNa, x.JudgmentResult, x.InspectedAtUtc, x.MachineCode, x.Series, x.Mold, x.AbnormalType,
+                x.IsNa, x.JudgmentResult, Utc(x.InspectedAtUtc), x.MachineCode, x.Series, x.Mold, x.AbnormalType,
                 x.AbnormalCause, x.Remarks, x.Samples.OrderBy(s => s.SequenceNo)
                     .Select(s => new TaskSampleOutput(s.Id, s.SequenceNo, s.InspectionValue,
-                        s.JudgmentResult, s.InspectedAtUtc)).ToList())).ToList(),
+                        s.JudgmentResult, Utc(s.InspectedAtUtc))).ToList())).ToList(),
             task.Submissions.OrderBy(x => x.RevisionNo).Select(x => new SubmissionOutput(x.RevisionNo,
-                x.Shift, x.OverallInspectionResult, x.SubmittedBy, x.SubmittedAtUtc,
+                x.Shift, x.OverallInspectionResult, x.SubmittedBy, Utc(x.SubmittedAtUtc),
                 x.Items.OrderBy(i => i.SequenceNo).Select(i => new SubmissionItemOutput(i.PatrolTaskItemId,
-                    i.SequenceNo, i.IsNa, i.JudgmentResult, i.InspectedAtUtc, i.MachineCode, i.Series, i.Mold,
+                    i.SequenceNo, i.IsNa, i.JudgmentResult, Utc(i.InspectedAtUtc), i.MachineCode, i.Series, i.Mold,
                     i.AbnormalType, i.AbnormalCause, i.Remarks, i.Samples.OrderBy(s => s.SequenceNo)
                         .Select(s => new SubmissionSampleOutput(s.SequenceNo, s.InspectionValue,
-                            s.JudgmentResult, s.InspectedAtUtc)).ToList())).ToList(),
+                            s.JudgmentResult, Utc(s.InspectedAtUtc))).ToList())).ToList(),
                 reviews.TryGetValue(x.RevisionNo, out var review) ? new ReviewOutput(review.RevisionNo,
-                    review.Reviewer, review.Decision, review.Reason, review.ReviewedAtUtc) : null)).ToList());
+                    review.Reviewer, review.Decision, review.Reason, Utc(review.ReviewedAtUtc)) : null)).ToList());
     }
 
     public Task<bool> OwnsAsync(Guid taskId, Guid userId, CancellationToken ct) =>
@@ -250,10 +250,13 @@ public sealed class PatrolTaskExecutionService(IpqcDbContext db, TimeProvider cl
     }
 
     private static TaskSummary Summary(PatrolTask task) => new(task.Id, task.TaskNo, task.Status,
-        task.ScheduledOccurrenceUtc, task.GeneratedAtUtc, task.SubmittedAtUtc,
+        Utc(task.ScheduledOccurrenceUtc), Utc(task.GeneratedAtUtc), Utc(task.SubmittedAtUtc),
         task.OverallInspectionResult, task.AssignedInspectorKey, task.PlanNoSnapshot,
         task.PlanNameSnapshot, task.StandardNameSnapshot, task.FactoryNameSnapshot,
         task.LineNameSnapshot, task.Shift, task.CurrentRevisionNo);
+
+    private static DateTime Utc(DateTime value) => DateTime.SpecifyKind(value, DateTimeKind.Utc);
+    private static DateTime? Utc(DateTime? value) => value is { } time ? Utc(time) : null;
 
     private static bool IsWriteRace(Exception ex) => ex is DbUpdateConcurrencyException ||
         ex is SqliteException { SqliteErrorCode: 5 or 6 } ||

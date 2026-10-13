@@ -14,8 +14,30 @@ public sealed class InspectionJudgmentService
         _ => null
     };
 
-    public static int RequiredSamples(string? value) =>
-        int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var count) && count > 0 ? count : 1;
+    public static bool TryRequiredSamples(string? value, out int required, out string? error)
+    {
+        required = 1;
+        error = null;
+        if (string.IsNullOrWhiteSpace(value)) return true;
+        if (int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var count) &&
+            count is >= 1 and <= MaxSamples)
+        {
+            required = count;
+            return true;
+        }
+        error = $"Sample Count must be a whole number from 1 to {MaxSamples}.";
+        return false;
+    }
+
+    public static string? ValidateDefinition(string? type, string? sampleCount,
+        string? lowerOperator, string? lowerValue, string? upperOperator, string? upperValue)
+    {
+        if (CanonicalType(type) is null) return "Inspection type must be Qualitative or Quantitative.";
+        if (!TryRequiredSamples(sampleCount, out _, out var sampleError)) return sampleError;
+        return CanonicalType(type) == "Quantitative" &&
+            !TryLimits(lowerOperator, lowerValue, upperOperator, upperValue, out _, out _, out var error)
+            ? error : null;
+    }
 
     public Dictionary<string, string[]> Calculate(PatrolTask task, bool strict)
     {
@@ -43,11 +65,10 @@ public sealed class InspectionJudgmentService
                 if (strict) errors[field] = ["Inspection type must be Qualitative or Quantitative in the frozen Standard."];
                 continue;
             }
-            var required = RequiredSamples(item.SampleCount);
-            if (required > MaxSamples)
+            if (!TryRequiredSamples(item.SampleCount, out var required, out var sampleError))
             {
                 item.JudgmentResult = null;
-                if (strict) errors[field] = [$"The frozen sample count exceeds the {MaxSamples} sample limit."];
+                if (strict) errors[field] = [$"The frozen {sampleError}"];
                 continue;
             }
             if (type == "Quantitative" && !TryLimits(item, out _, out _, out var limitError))
@@ -88,28 +109,35 @@ public sealed class InspectionJudgmentService
     public static string Overall(PatrolTask task) => task.Items.Any(x => x.JudgmentResult == "NG") ? "Unqualified" : "Qualified";
 
     private static bool TryLimits(PatrolTaskItem item, out (string Op, decimal Value)? lower,
+        out (string Op, decimal Value)? upper, out string? error) =>
+        TryLimits(item.LowerLimitOperator, item.LowerLimitValue, item.UpperLimitOperator,
+            item.UpperLimitValue, out lower, out upper, out error);
+
+    private static bool TryLimits(string? lowerOperator, string? lowerValue, string? upperOperator,
+        string? upperValue, out (string Op, decimal Value)? lower,
         out (string Op, decimal Value)? upper, out string? error)
     {
         lower = null;
         upper = null;
         error = null;
-        if (!string.IsNullOrWhiteSpace(item.LowerLimitOperator) || !string.IsNullOrWhiteSpace(item.LowerLimitValue))
+        if (!string.IsNullOrWhiteSpace(lowerOperator) || !string.IsNullOrWhiteSpace(lowerValue))
         {
-            if (item.LowerLimitOperator is not (">" or ">=") ||
-                !decimal.TryParse(item.LowerLimitValue, NumberStyles.Float, CultureInfo.InvariantCulture, out var value))
+            if (lowerOperator is not (">" or ">=") ||
+                !decimal.TryParse(lowerValue, NumberStyles.Float, CultureInfo.InvariantCulture, out var value))
                 error = "The frozen lower limit requires > or >= and a numeric value.";
-            else lower = (item.LowerLimitOperator, value);
+            else lower = (lowerOperator, value);
         }
-        if (!string.IsNullOrWhiteSpace(item.UpperLimitOperator) || !string.IsNullOrWhiteSpace(item.UpperLimitValue))
+        if (!string.IsNullOrWhiteSpace(upperOperator) || !string.IsNullOrWhiteSpace(upperValue))
         {
-            if (item.UpperLimitOperator is not ("<" or "<=") ||
-                !decimal.TryParse(item.UpperLimitValue, NumberStyles.Float, CultureInfo.InvariantCulture, out var value))
+            if (upperOperator is not ("<" or "<=") ||
+                !decimal.TryParse(upperValue, NumberStyles.Float, CultureInfo.InvariantCulture, out var value))
                 error = "The frozen upper limit requires < or <= and a numeric value.";
-            else upper = (item.UpperLimitOperator, value);
+            else upper = (upperOperator, value);
         }
         if (lower is null && upper is null && error is null) error = "The frozen Quantitative item has no usable numeric limits.";
-        if (lower is { } lo && upper is { } hi && lo.Value > hi.Value)
-            error = "The frozen lower limit exceeds the upper limit.";
+        if (lower is { } lo && upper is { } hi &&
+            (lo.Value > hi.Value || lo.Value == hi.Value && (lo.Op == ">" || hi.Op == "<")))
+            error = "The lower and upper limits have no valid common value.";
         return error is null;
     }
 

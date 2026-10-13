@@ -7,7 +7,7 @@ export interface CompletedRecordSummary {
   planName: string | null; standardName: string | null; factoryCode: string | null
   factoryName: string | null; workshopCode: string | null; lineCode: string | null
   lineName: string | null; materialCode: string | null; approvedBy: string | null
-  approvedAtUtc: string | null
+  approvedAtUtc: string | null; hasIntegrityIssue: boolean
 }
 export interface CompletedRecordSample {
   sequenceNo: number; inspectionValue: number | null; judgmentResult: string; inspectedAtUtc: string | null
@@ -40,7 +40,7 @@ export interface RecordFilters {
 export class CompletedRecordApiError extends Error {
   constructor(message: string, readonly status: number) { super(message) }
 }
-const base = import.meta.env.VITE_API_BASE_URL || '/api'
+const base = '/api'
 async function request(path: string): Promise<Response> {
   let response: Response
   try {

@@ -27,7 +27,7 @@ export class ApiError extends Error {
   constructor(message: string, readonly status: number, readonly errors?: Record<string, string[]>) { super(message) }
 }
 
-const base = import.meta.env.VITE_API_BASE_URL || '/api'
+const base = '/api'
 
 async function request(path: string, options: RequestInit = {}): Promise<Response> {
   const headers = new Headers(options.headers)

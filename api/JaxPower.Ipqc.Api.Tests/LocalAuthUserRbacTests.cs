@@ -91,6 +91,7 @@ public sealed class LocalAuthUserRbacTests
         Assert.Equal(HttpStatusCode.Created, created.StatusCode);
         var login = await app.LoginAsync("newipqa", "InitialPass123");
         Assert.True(login.User.MustChangePassword);
+        Assert.Empty(login.User.Permissions);
         var client = app.ClientWithToken(login.AccessToken);
         Assert.Equal(HttpStatusCode.BadRequest, (await client.PostAsJsonAsync("/api/auth/change-password",
             new ChangePasswordInput("wrong", "ChangedPass123"))).StatusCode);
@@ -106,7 +107,9 @@ public sealed class LocalAuthUserRbacTests
             Assert.True(user.MustChangePassword);
             Assert.Equal(1, await db.RefreshTokenSessions.CountAsync(x => x.UserId == user.Id && x.RevokedAtUtc == null));
         }
-        Assert.True((await client.GetFromJsonAsync<CurrentUserOutput>("/api/me"))!.MustChangePassword);
+        var forcedMe = (await client.GetFromJsonAsync<CurrentUserOutput>("/api/me"))!;
+        Assert.True(forcedMe.MustChangePassword);
+        Assert.Empty(forcedMe.Permissions);
         Assert.Equal(HttpStatusCode.Forbidden, (await client.GetAsync("/api/completed-patrol-records")).StatusCode);
         Assert.Equal(HttpStatusCode.NoContent, (await client.PostAsJsonAsync("/api/auth/change-password",
             new ChangePasswordInput("InitialPass123", "ChangedPass123"))).StatusCode);
@@ -376,6 +379,45 @@ public sealed class LocalAuthUserRbacTests
         Assert.Equal([HttpStatusCode.Created, HttpStatusCode.Conflict], results.Select(x => x.StatusCode).OrderBy(x => (int)x).ToArray());
     }
 
+    [Fact]
+    public async Task Concurrent_failed_logins_reach_lockout_threshold_without_lost_updates()
+    {
+        await using var app = await Fixture.CreateAsync();
+        var attempts = await Task.WhenAll(Enumerable.Range(0, 5).Select(_ =>
+            app.Anonymous.PostAsJsonAsync("/api/auth/login", new LoginInput("pqe", "WrongPassword123", "Native"))));
+        Assert.All(attempts, response => Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode));
+        Assert.Equal(HttpStatusCode.Unauthorized,
+            (await app.Anonymous.PostAsJsonAsync("/api/auth/login", new LoginInput("pqe", TestAccounts.Password, "Native"))).StatusCode);
+        using var scope = app.Factory.Services.CreateScope();
+        var user = await scope.ServiceProvider.GetRequiredService<IpqcDbContext>().ApplicationUsers
+            .AsNoTracking().SingleAsync(x => x.Username == "pqe");
+        Assert.Equal(0, user.FailedLoginCount);
+        Assert.True(user.LockoutEndUtc > DateTime.UtcNow);
+    }
+
+    [Fact]
+    public async Task Web_refresh_cookie_uses_configured_absolute_session_expiry()
+    {
+        await using var app = await Fixture.CreateAsync(refreshDays: 1);
+        var login = await app.Anonymous.PostAsJsonAsync("/api/auth/login", new LoginInput("pqe", TestAccounts.Password, "Web"));
+        login.EnsureSuccessStatusCode();
+        var cookie = Assert.Single(login.Headers.GetValues("Set-Cookie"));
+        Assert.Contains("httponly", cookie, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("samesite=strict", cookie, StringComparison.OrdinalIgnoreCase);
+        var expiry = DateTimeOffset.Parse(cookie.Split("expires=", StringSplitOptions.None)[1].Split(';')[0],
+            System.Globalization.CultureInfo.InvariantCulture);
+        Assert.InRange(expiry, DateTimeOffset.UtcNow.AddHours(23), DateTimeOffset.UtcNow.AddHours(25));
+        using var request = new HttpRequestMessage(HttpMethod.Post, "/api/auth/refresh") {
+            Content = JsonContent.Create(new RefreshInput()) };
+        request.Headers.Add("Cookie", cookie.Split(';')[0]);
+        var rotated = await app.Anonymous.SendAsync(request);
+        rotated.EnsureSuccessStatusCode();
+        var rotatedCookie = Assert.Single(rotated.Headers.GetValues("Set-Cookie"));
+        var rotatedExpiry = DateTimeOffset.Parse(rotatedCookie.Split("expires=", StringSplitOptions.None)[1].Split(';')[0],
+            System.Globalization.CultureInfo.InvariantCulture);
+        Assert.Equal(expiry, rotatedExpiry);
+    }
+
     private sealed class Fixture(WebApplicationFactory<Program> factory, string path, HttpClient admin,
         HttpClient pqe, HttpClient ipqa, HttpClient anonymous) : IAsyncDisposable
     {
@@ -384,14 +426,16 @@ public sealed class LocalAuthUserRbacTests
         public HttpClient Pqe { get; } = pqe;
         public HttpClient Ipqa { get; } = ipqa;
         public HttpClient Anonymous { get; } = anonymous;
-        public static async Task<Fixture> CreateAsync()
+        public static async Task<Fixture> CreateAsync(int refreshDays = 14)
         {
             var path = Path.Combine(Path.GetTempPath(), $"ipqc-auth-{Guid.NewGuid():N}.db");
             var factory = new WebApplicationFactory<Program>().WithWebHostBuilder(web =>
             {
                 web.UseEnvironment("Development");
+                web.UseSetting("Authentication:RefreshDays", refreshDays.ToString());
                 web.ConfigureLogging(x => x.ClearProviders());
-                web.ConfigureAppConfiguration((_, config) => config.AddInMemoryCollection(new Dictionary<string, string?> { ["Scheduler:Enabled"] = "false" }));
+                web.ConfigureAppConfiguration((_, config) => config.AddInMemoryCollection(new Dictionary<string, string?> {
+                    ["Scheduler:Enabled"] = "false", ["Authentication:RefreshDays"] = refreshDays.ToString() }));
                 web.ConfigureTestServices(services =>
                 {
                     services.RemoveAll<DbContextOptions<IpqcDbContext>>();
