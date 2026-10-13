@@ -288,6 +288,108 @@ public sealed class PatrolTaskWorkflowTests
         Assert.Equal(HttpStatusCode.OK, (await app.Ipqa.PostAsync($"/api/patrol-tasks/{task.Summary.Id}/submit", null)).StatusCode);
     }
 
+    [Theory]
+    [InlineData("not-a-count")]
+    [InlineData("0")]
+    [InlineData("-1")]
+    [InlineData("51")]
+    public async Task Submit_rejects_invalid_frozen_sample_count_without_creating_revision(string frozenCount)
+    {
+        await using var app = await Fixture.CreateAsync();
+        var standard = await app.StandardAsync("Standard", [Item("Visual")]);
+        await app.PlanAsync(standard.Id);
+        await app.GenerateAsync();
+        var task = await app.DetailAsync((await app.TasksAsync()).Single().Id);
+        using (var scope = app.Factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<IpqcDbContext>();
+            var frozen = await db.PatrolTaskItems.SingleAsync(x => x.PatrolTaskId == task.Summary.Id);
+            frozen.SampleCount = frozenCount;
+            await db.SaveChangesAsync();
+        }
+
+        var draft = await app.Ipqa.PutAsJsonAsync($"/api/patrol-tasks/{task.Summary.Id}/draft",
+            new TaskDraftInput("Day", [new TaskItemDraft(task.Items[0].Id, false,
+                [new TaskSampleDraft(null, "OK")])]));
+        Assert.Equal(HttpStatusCode.OK, draft.StatusCode);
+        task = await app.DetailAsync(task.Summary.Id);
+        Assert.Equal(frozenCount, task.Items[0].SampleCount);
+        Assert.Null(task.Items[0].JudgmentResult);
+
+        var submit = await app.Ipqa.PostAsync($"/api/patrol-tasks/{task.Summary.Id}/submit", null);
+        Assert.Equal(HttpStatusCode.BadRequest, submit.StatusCode);
+        Assert.Contains("Sample Count", await submit.Content.ReadAsStringAsync());
+        task = await app.DetailAsync(task.Summary.Id);
+        Assert.Equal("InProgress", task.Summary.Status);
+        Assert.Equal(0, task.Summary.CurrentRevisionNo);
+        Assert.Empty(task.Submissions);
+        Assert.Equal(frozenCount, task.Items[0].SampleCount);
+        using var verification = app.Factory.Services.CreateScope();
+        var verifiedDb = verification.ServiceProvider.GetRequiredService<IpqcDbContext>();
+        Assert.False(await verifiedDb.PatrolTaskSubmissions.AnyAsync(x => x.PatrolTaskId == task.Summary.Id));
+        Assert.Equal(HttpStatusCode.OK, (await app.Ipqa.PutAsJsonAsync($"/api/patrol-tasks/{task.Summary.Id}/draft",
+            new TaskDraftInput(null, [new TaskItemDraft(task.Items[0].Id, false,
+                [new TaskSampleDraft(null, "NG")])]))).StatusCode);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("  ")]
+    public async Task Blank_frozen_sample_count_defaults_to_one_on_submit(string frozenCount)
+    {
+        await using var app = await Fixture.CreateAsync();
+        var standard = await app.StandardAsync("Standard", [Item("Visual")]);
+        await app.PlanAsync(standard.Id);
+        await app.GenerateAsync();
+        var task = await app.DetailAsync((await app.TasksAsync()).Single().Id);
+        using (var scope = app.Factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<IpqcDbContext>();
+            (await db.PatrolTaskItems.SingleAsync(x => x.PatrolTaskId == task.Summary.Id)).SampleCount = frozenCount;
+            await db.SaveChangesAsync();
+        }
+        Assert.Equal(HttpStatusCode.OK, (await app.Ipqa.PutAsJsonAsync($"/api/patrol-tasks/{task.Summary.Id}/draft",
+            new TaskDraftInput("Day", [new TaskItemDraft(task.Items[0].Id, false,
+                [new TaskSampleDraft(null, "OK")])]))).StatusCode);
+        Assert.Equal(HttpStatusCode.OK,
+            (await app.Ipqa.PostAsync($"/api/patrol-tasks/{task.Summary.Id}/submit", null)).StatusCode);
+        task = await app.DetailAsync(task.Summary.Id);
+        Assert.Equal("PendingApproval", task.Summary.Status);
+        Assert.Equal(1, task.Summary.CurrentRevisionNo);
+        Assert.Single(task.Submissions);
+        Assert.Equal(frozenCount, task.Items[0].SampleCount);
+    }
+
+    [Fact]
+    public void Null_sample_count_defaults_to_one()
+    {
+        Assert.True(InspectionJudgmentService.TryRequiredSamples(null, out var required, out var error));
+        Assert.Equal(1, required);
+        Assert.Null(error);
+    }
+
+    [Fact]
+    public async Task Na_item_ignores_invalid_frozen_sample_count()
+    {
+        await using var app = await Fixture.CreateAsync();
+        var standard = await app.StandardAsync("Standard", [Item("Visual")]);
+        await app.PlanAsync(standard.Id);
+        await app.GenerateAsync();
+        var task = await app.DetailAsync((await app.TasksAsync()).Single().Id);
+        using (var scope = app.Factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<IpqcDbContext>();
+            (await db.PatrolTaskItems.SingleAsync(x => x.PatrolTaskId == task.Summary.Id)).SampleCount = "bad";
+            await db.SaveChangesAsync();
+        }
+        Assert.Equal(HttpStatusCode.OK, (await app.Ipqa.PutAsJsonAsync($"/api/patrol-tasks/{task.Summary.Id}/draft",
+            new TaskDraftInput("Day", [new TaskItemDraft(task.Items[0].Id, true, [])]))).StatusCode);
+        Assert.Equal(HttpStatusCode.OK,
+            (await app.Ipqa.PostAsync($"/api/patrol-tasks/{task.Summary.Id}/submit", null)).StatusCode);
+        task = await app.DetailAsync(task.Summary.Id);
+        Assert.Equal("NA", task.Submissions.Single().Items.Single().JudgmentResult);
+    }
+
     [Fact]
     public void Quantitative_comparisons_and_bad_configuration_are_server_authoritative()
     {

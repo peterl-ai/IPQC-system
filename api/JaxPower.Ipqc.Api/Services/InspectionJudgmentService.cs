@@ -14,17 +14,26 @@ public sealed class InspectionJudgmentService
         _ => null
     };
 
-    public static int RequiredSamples(string? value) =>
-        int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var count) && count > 0 ? count : 1;
+    public static bool TryRequiredSamples(string? value, out int required, out string? error)
+    {
+        required = 1;
+        error = null;
+        if (string.IsNullOrWhiteSpace(value)) return true;
+        if (int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var count) &&
+            count is >= 1 and <= MaxSamples)
+        {
+            required = count;
+            return true;
+        }
+        error = $"Sample Count must be a whole number from 1 to {MaxSamples}.";
+        return false;
+    }
 
     public static string? ValidateDefinition(string? type, string? sampleCount,
         string? lowerOperator, string? lowerValue, string? upperOperator, string? upperValue)
     {
         if (CanonicalType(type) is null) return "Inspection type must be Qualitative or Quantitative.";
-        if (!string.IsNullOrWhiteSpace(sampleCount) &&
-            (!int.TryParse(sampleCount, NumberStyles.Integer, CultureInfo.InvariantCulture, out var count) ||
-             count is < 1 or > MaxSamples))
-            return $"Sample Count must be a whole number from 1 to {MaxSamples}.";
+        if (!TryRequiredSamples(sampleCount, out _, out var sampleError)) return sampleError;
         return CanonicalType(type) == "Quantitative" &&
             !TryLimits(lowerOperator, lowerValue, upperOperator, upperValue, out _, out _, out var error)
             ? error : null;
@@ -56,11 +65,10 @@ public sealed class InspectionJudgmentService
                 if (strict) errors[field] = ["Inspection type must be Qualitative or Quantitative in the frozen Standard."];
                 continue;
             }
-            var required = RequiredSamples(item.SampleCount);
-            if (required > MaxSamples)
+            if (!TryRequiredSamples(item.SampleCount, out var required, out var sampleError))
             {
                 item.JudgmentResult = null;
-                if (strict) errors[field] = [$"The frozen sample count exceeds the {MaxSamples} sample limit."];
+                if (strict) errors[field] = [$"The frozen {sampleError}"];
                 continue;
             }
             if (type == "Quantitative" && !TryLimits(item, out _, out _, out var limitError))

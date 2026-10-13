@@ -6,7 +6,7 @@ Date: 2026-10-11 (America/New_York). Branch: `phase-1h-uat-hardening`. This docu
 
 | Item | Disposition | Evidence / reason |
 |---|---|---|
-| H1 Quantitative readiness | Fixed | Standard create/update reject invalid quantitative bounds/counts; enabled Plan create/update/enable checks the referenced Standard; updates cannot make a Standard on an enabled Plan non-executable. Frozen Task submit validation remains. HTTP tests cover malformed bounds/counts, empty/corrupt Standards, and enabled-plan update. |
+| H1 Quantitative readiness | Fixed | Standard create/update reject invalid quantitative bounds/counts; enabled Plan create/update/enable checks the referenced Standard; updates cannot make a Standard on an enabled Plan non-executable. Submit also rejects malformed frozen non-N/A Task sample counts without creating a revision or advancing status; blank counts still require one sample and N/A behavior is unchanged. HTTP tests exercise frozen Task snapshots as well as Standard/Plan readiness. |
 | H2 Scheduler eager load | Fixed | Poll loads enabled Plan/assignee candidates; Standard and items load only when a missing due occurrence requires a Task snapshot. Existing idempotency, concurrent generation, catch-up, disable/re-enable, schedule edit, DST, and broken-plan tests pass. |
 | H3 Qualitative `OK · OK` | Fixed | Detail and HTML preview format qualitative sample once; quantitative samples retain value plus judgment. Browser inspected the completed UAT record. Authoritative report DTO unchanged. |
 | H4 Shared detail/report DTO | Verified, retained | Detail and report use one authoritative immutable final-revision resolver. No demonstrated performance benefit justified two DTOs and extra consistency risk. |
@@ -23,7 +23,7 @@ Date: 2026-10-11 (America/New_York). Branch: `phase-1h-uat-hardening`. This docu
 | `dotnet restore api/JaxPower.Ipqc.slnx` | Passed; projects up to date |
 | `dotnet tool restore` | Passed; pinned `dotnet-ef` 10.0.12 |
 | `dotnet build api/JaxPower.Ipqc.slnx --configuration Release` | Passed; 0 warnings, 0 errors |
-| `dotnet test api/JaxPower.Ipqc.slnx --configuration Release --no-build` | Passed; 59 tests, 0 failed/skipped |
+| `dotnet test api/JaxPower.Ipqc.slnx --configuration Release --no-build` | Passed; 67 tests, 0 failed/skipped |
 | `npm ci` | Passed; 248 packages, 0 reported vulnerabilities; npm emitted dependency install-script notices |
 | `npm run lint` | Passed; 0 lint warnings |
 | `npm run test` | Passed; 44 tests in 12 files |
@@ -32,7 +32,7 @@ Date: 2026-10-11 (America/New_York). Branch: `phase-1h-uat-hardening`. This docu
 | Fresh SQLite `dotnet-ef database update` | Passed through Phase 1G migration on a disposable database; no Phase 1H schema change |
 | `dotnet-ef migrations has-pending-model-changes` | No pending changes |
 | PostgreSQL idempotent migration SQL | Generated and inspected locally; 26,544 bytes, includes task occurrence unique index |
-| GitHub Actions CI on PR #8 | Push and pull request runs completed; backend and frontend jobs succeeded in both runs |
+| GitHub Actions CI on PR #8 | Backend and frontend jobs succeeded on the earlier Phase 1H head; checks for the frozen Task sample-count fix remain to be verified after push |
 
 The initial sandboxed .NET/Vitest commands encountered local named-pipe/`EPERM` restrictions. The reported passing commands ran outside that sandbox against the same checkout. No tests were deleted.
 
@@ -43,7 +43,7 @@ A disposable local SQLite database, local API, and Vite Web app were used. Devel
 | Scenario | Observed result |
 |---|---|
 | Admin login and bilingual Web | Admin login reached Home. English and Simplified Chinese toggle changed visible navigation and page copy. Chinese User Management loaded and showed plant-local timestamps. |
-| PQE/IPQA Web RBAC | PQE reached Standards and was routed to 403 for Users. IPQA landed on Completed Records and was routed to 403 for Users. Direct backend role tests are part of the 59-test suite. |
+| PQE/IPQA Web RBAC | PQE reached Standards and was routed to 403 for Users. IPQA landed on Completed Records and was routed to 403 for Users. Direct backend role tests are part of the 67-test suite. |
 | Scheduler to final report | API created a three-item Standard and enabled daily Plan. Real scheduler generated one assigned Task at the configured plant-local time. IPQA saved/submitted qualitative OK, two quantitative samples, and N/A: revision 1 Qualified. PQE rejection without reason returned 400; reasoned rejection preserved revision 1. IPQA corrected a quantitative value to NG and resubmitted revision 2 Unqualified. PQE approved. Ledger exposed revision 2 with no integrity flag; report retained two revisions; XLSX download returned 9,475 bytes. |
 | Completed browser detail/preview | Chinese ledger showed the Unqualified completed row and New York completion time. Detail showed both revisions, rejection reason, N/A, and multiple samples. Qualitative detail showed a single result (`样本 1 · 合格`); HTML preview showed `1: 合格`, while quantitative showed value plus judgment. |
 | Browser console | No errors or warnings after authenticated role/report checks. Initial anonymous `/api/auth/refresh` produced an expected 401 resource-console entry during session discovery. |
@@ -53,5 +53,5 @@ Automated backend tests cover scheduler duplicate/concurrent generation, recover
 ## Production validation still open
 
 - No local `docker`, `psql`, `pg_dump`, or `pg_restore` executable was available. **No live PostgreSQL migration/API smoke or restore rehearsal was run.** Generated PostgreSQL SQL and SQLite tests do not replace live provider validation.
-- GitHub Actions passed for commit `ab87e48` on PR #8. Verify checks for the latest PR head before merge.
+- GitHub Actions passed on the earlier Phase 1H head of PR #8; verify the frozen Task sample-count fix on the latest PR head before merge.
 - Production PostgreSQL host, deployment host, reverse proxy/TLS, backup owner/retention, monitoring/log retention, and future file storage remain JAX Power operational decisions. See the deployment checklist and backup runbook.
