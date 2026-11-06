@@ -5,6 +5,7 @@ import PatrolStandardsPage from '@/features/patrol-standards/PatrolStandardsPage
 import PatrolPlansPage from '@/features/patrol-plans/PatrolPlansPage.vue'
 import PatrolTasksPage from '@/features/patrol-tasks/PatrolTasksPage.vue'
 import CompletedRecordsPage from '@/features/completed-records/CompletedRecordsPage.vue'
+import DeviceProvisioningPage from '@/features/device-provisioning/DeviceProvisioningPage.vue'
 import UserManagementPage from '@/features/user-management/UserManagementPage.vue'
 import StatusPage from '@/features/system/StatusPage.vue'
 import { defaultRouteForRole, hasPermission } from '@/services/permissions'
@@ -32,6 +33,7 @@ export const router = createRouter({
         { path: 'plans', name: 'plans', component: PatrolPlansPage, meta: { permission: 'plans:view' } },
         { path: 'tasks', name: 'tasks', component: PatrolTasksPage, meta: { permission: 'tasks:view' } },
         { path: 'records', name: 'records', component: CompletedRecordsPage, meta: { permission: 'records:view' } },
+        { path: 'provisioning', name: 'provisioning', component: DeviceProvisioningPage, meta: { permission: 'provisioning:view' } },
         { path: 'users', name: 'users', component: UserManagementPage, meta: { permission: 'users:view' } },
         { path: 'forbidden', name: 'forbidden', component: StatusPage, meta: { status: 'permission' } },
         { path: ':pathMatch(.*)*', name: 'not-found', component: StatusPage, meta: { status: 'notFound' } },
