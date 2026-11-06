@@ -5,6 +5,7 @@ namespace JaxPower.Ipqc.Api.Data;
 
 public sealed class IpqcDbContext(DbContextOptions<IpqcDbContext> options) : DbContext(options)
 {
+    public DbSet<ProductionLine> ProductionLines => Set<ProductionLine>();
     public DbSet<ApplicationUser> ApplicationUsers => Set<ApplicationUser>();
     public DbSet<RefreshTokenSession> RefreshTokenSessions => Set<RefreshTokenSession>();
     public DbSet<PatrolStandard> PatrolStandards => Set<PatrolStandard>();
@@ -21,6 +22,13 @@ public sealed class IpqcDbContext(DbContextOptions<IpqcDbContext> options) : DbC
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
+        var line = modelBuilder.Entity<ProductionLine>();
+        line.HasKey(x => x.Id);
+        line.Property(x => x.Code).HasMaxLength(100).IsRequired().UsePropertyAccessMode(PropertyAccessMode.Property);
+        line.Property(x => x.NormalizedCode).HasMaxLength(100).IsRequired();
+        line.Property(x => x.Name).HasMaxLength(200).IsRequired();
+        line.HasIndex(x => x.NormalizedCode).IsUnique();
+        line.ToTable(t => t.HasCheckConstraint("CK_ProductionLines_Code", "length(trim(\"Code\")) > 0 AND length(trim(\"NormalizedCode\")) > 0"));
         var user = modelBuilder.Entity<ApplicationUser>();
         user.HasKey(x => x.Id);
         user.Property(x => x.Username).HasMaxLength(100).IsRequired();
@@ -62,6 +70,9 @@ public sealed class IpqcDbContext(DbContextOptions<IpqcDbContext> options) : DbC
             item.Property(property.Name).HasMaxLength(2000);
 
         var plan = modelBuilder.Entity<PatrolPlan>();
+        plan.Property(x => x.WorkflowVersion).HasDefaultValue(WorkflowVersion.LegacyPersonalV1).HasSentinel(WorkflowVersion.LegacyPersonalV1).IsConcurrencyToken();
+        plan.HasOne(x => x.Line).WithMany().HasForeignKey(x => x.LineId).OnDelete(DeleteBehavior.Restrict);
+        plan.ToTable(t => t.HasCheckConstraint("CK_PatrolPlans_Workflow", "\"WorkflowVersion\" IN (1, 2) AND (\"WorkflowVersion\" = 1 OR \"LineId\" IS NOT NULL)"));
         plan.HasKey(x => x.Id);
         plan.Property(x => x.PlanNo).HasMaxLength(50).IsRequired();
         plan.HasIndex(x => x.PlanNo).IsUnique();
@@ -87,6 +98,9 @@ public sealed class IpqcDbContext(DbContextOptions<IpqcDbContext> options) : DbC
         assignee.HasOne(x => x.User).WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Restrict);
 
         var task = modelBuilder.Entity<PatrolTask>();
+        task.Property(x => x.WorkflowVersion).HasDefaultValue(WorkflowVersion.LegacyPersonalV1).HasSentinel(WorkflowVersion.LegacyPersonalV1).IsConcurrencyToken();
+        task.HasOne(x => x.Line).WithMany().HasForeignKey(x => x.LineId).OnDelete(DeleteBehavior.Restrict);
+        task.ToTable(t => t.HasCheckConstraint("CK_PatrolTasks_Workflow", "\"WorkflowVersion\" IN (1, 2) AND (\"WorkflowVersion\" = 1 OR \"LineId\" IS NOT NULL)"));
         task.HasKey(x => x.Id);
         task.Property(x => x.TaskNo).HasMaxLength(50).IsRequired();
         task.HasIndex(x => x.TaskNo).IsUnique();

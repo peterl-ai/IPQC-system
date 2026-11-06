@@ -44,8 +44,15 @@ public sealed class PatrolTaskWorkflowTests
                     PatrolStandardId = standard.Id, EffectiveStartUtc = now, ScheduleDefinition = "{}",
                     GenerationNotBeforeUtc = now, CreatedAtUtc = now, UpdatedAtUtc = now };
                 oldDb.PatrolStandards.Add(standard);
-                oldDb.PatrolPlans.Add(plan);
                 await oldDb.SaveChangesAsync();
+                // Seed using the historical schema, not today's mapped Plan columns.
+                await oldDb.Database.ExecuteSqlInterpolatedAsync($"""
+                    INSERT INTO PatrolPlans (Id, PlanNo, PlanName, PatrolStandardId, FactoryCode, FactoryName,
+                        LineCode, LineName, IsEnabled, EffectiveStartUtc, ScheduleDefinition, TimeZoneId,
+                        GenerationNotBeforeUtc, CreatedBy, CreatedAtUtc, UpdatedBy, UpdatedAtUtc)
+                    VALUES ({plan.Id}, {plan.PlanNo}, {plan.PlanName}, {standard.Id}, {""}, {""}, {""}, {""},
+                        {false}, {now}, {"{}"}, {"America/New_York"}, {now}, {""}, {now}, {""}, {now})
+                    """);
                 var oldTaskId = Guid.NewGuid();
                 await oldDb.Database.ExecuteSqlInterpolatedAsync($"""
                     INSERT INTO PatrolTasks (Id, TaskNo, PatrolPlanId, PatrolStandardId, AssignedInspectorKey,

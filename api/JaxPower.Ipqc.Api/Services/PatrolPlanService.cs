@@ -73,7 +73,7 @@ public sealed class PatrolPlanService(IpqcDbContext db, TimeProvider clock)
     public async Task<PagedPlans> ListAsync(string? planNo, string? planName, Guid? standardId,
         string? factoryCode, string? lineCode, bool? enabled, int page, int pageSize, CancellationToken ct)
     {
-        var query = db.PatrolPlans.AsNoTracking().AsQueryable();
+        var query = db.PatrolPlans.AsNoTracking().Where(x => x.WorkflowVersion == WorkflowVersion.LegacyPersonalV1);
         if (!string.IsNullOrWhiteSpace(planNo)) query = query.Where(x => x.PlanNo.Contains(planNo.Trim()));
         if (!string.IsNullOrWhiteSpace(planName)) query = query.Where(x => x.PlanName.Contains(planName.Trim()));
         if (standardId is { } sid) query = query.Where(x => x.PatrolStandardId == sid);
@@ -92,7 +92,7 @@ public sealed class PatrolPlanService(IpqcDbContext db, TimeProvider clock)
     public async Task<PlanOutput?> GetAsync(Guid id, CancellationToken ct)
     {
         var row = await db.PatrolPlans.AsNoTracking().Include(x => x.PatrolStandard).Include(x => x.Assignees)
-            .FirstOrDefaultAsync(x => x.Id == id, ct);
+            .FirstOrDefaultAsync(x => x.Id == id && x.WorkflowVersion == WorkflowVersion.LegacyPersonalV1, ct);
         return row is null ? null : Output(row);
     }
 
@@ -102,7 +102,7 @@ public sealed class PatrolPlanService(IpqcDbContext db, TimeProvider clock)
             throw new PlanStandardNotReadyException(issue);
         var assignee = await ResolveAssigneeAsync(input.AssigneeUserId, ct);
         var now = clock.GetUtcNow().UtcDateTime;
-        var row = new PatrolPlan { Id = Guid.NewGuid(), CreatedBy = actor, CreatedAtUtc = now,
+        var row = new PatrolPlan { Id = Guid.NewGuid(), WorkflowVersion = WorkflowVersion.LegacyPersonalV1, CreatedBy = actor, CreatedAtUtc = now,
             GenerationNotBeforeUtc = now.AddTicks(-1) };
         Apply(row, input, start, end, now, actor, assignee);
         db.PatrolPlans.Add(row);
@@ -112,11 +112,14 @@ public sealed class PatrolPlanService(IpqcDbContext db, TimeProvider clock)
 
     public async Task<PlanOutput?> UpdateAsync(Guid id, PlanInput input, DateTime start, DateTime? end, string actor, CancellationToken ct)
     {
+        var row = await db.PatrolPlans.Include(x => x.Assignees).FirstOrDefaultAsync(x => x.Id == id, ct);
+        if (row is null) return null;
+        PatrolWorkflowPolicy.RequireLegacy(row.WorkflowVersion);
+        await using var tx = await db.Database.BeginTransactionAsync(ct);
+        await ClaimLegacyAsync(id, ct);
         if (input.IsEnabled && await StandardReadinessIssueAsync(input.PatrolStandardId, ct) is { } issue)
             throw new PlanStandardNotReadyException(issue);
         var assignee = await ResolveAssigneeAsync(input.AssigneeUserId, ct);
-        var row = await db.PatrolPlans.Include(x => x.Assignees).FirstOrDefaultAsync(x => x.Id == id, ct);
-        if (row is null) return null;
         var now = clock.GetUtcNow().UtcDateTime;
         var schedule = PatrolSchedule.Normalize(input.Schedule, new());
         var active = row.Assignees.SingleOrDefault(x => x.IsActive)?.UserId;
@@ -127,6 +130,7 @@ public sealed class PatrolPlanService(IpqcDbContext db, TimeProvider clock)
             row.GenerationNotBeforeUtc = now;
         Apply(row, input, start, end, now, actor, assignee);
         await SaveChangesAsync(ct);
+        await tx.CommitAsync(ct);
         return await GetAsync(id, ct);
     }
 
@@ -134,9 +138,13 @@ public sealed class PatrolPlanService(IpqcDbContext db, TimeProvider clock)
     {
         var row = await db.PatrolPlans.FindAsync([id], ct);
         if (row is null) return "missing";
+        PatrolWorkflowPolicy.RequireLegacy(row.WorkflowVersion);
+        await using var tx = await db.Database.BeginTransactionAsync(ct);
+        await ClaimLegacyAsync(id, ct);
         if (await db.PatrolTasks.AnyAsync(x => x.PatrolPlanId == id, ct)) return "history";
-        db.PatrolPlans.Remove(row);
-        await db.SaveChangesAsync(ct);
+        if (await db.PatrolPlans.Where(x => x.Id == id && x.WorkflowVersion == WorkflowVersion.LegacyPersonalV1)
+            .ExecuteDeleteAsync(ct) != 1) throw new UnsupportedWorkflowException();
+        await tx.CommitAsync(ct);
         return "deleted";
     }
 
@@ -144,6 +152,9 @@ public sealed class PatrolPlanService(IpqcDbContext db, TimeProvider clock)
     {
         var row = await db.PatrolPlans.Include(x => x.Assignees).FirstOrDefaultAsync(x => x.Id == id, ct);
         if (row is null) return null;
+        PatrolWorkflowPolicy.RequireLegacy(row.WorkflowVersion);
+        await using var tx = await db.Database.BeginTransactionAsync(ct);
+        await ClaimLegacyAsync(id, ct);
         if (enabled && await StandardReadinessIssueAsync(row.PatrolStandardId, ct) is { } issue)
             throw new PlanStandardNotReadyException(issue);
         if (enabled && (row.Assignees.Count(x => x.IsActive && x.UserId != null) != 1 ||
@@ -157,7 +168,26 @@ public sealed class PatrolPlanService(IpqcDbContext db, TimeProvider clock)
             if (enabled) row.GenerationNotBeforeUtc = row.UpdatedAtUtc;
             await db.SaveChangesAsync(ct);
         }
+        await tx.CommitAsync(ct);
         return await GetAsync(id, ct);
+    }
+
+    public async Task<bool> CheckLegacyAsync(Guid id, CancellationToken ct)
+    {
+        var version = await db.PatrolPlans.AsNoTracking().Where(x => x.Id == id)
+            .Select(x => (WorkflowVersion?)x.WorkflowVersion).SingleOrDefaultAsync(ct);
+        if (version is null) return false;
+        PatrolWorkflowPolicy.RequireLegacy(version.Value);
+        return true;
+    }
+
+    private async Task ClaimLegacyAsync(Guid id, CancellationToken ct)
+    {
+        // The caller's transaction holds this conditional row lock through all child writes.
+        // Recheck even for no-op enable/disable; a pre-read cannot authorize a later mutation.
+        if (await db.PatrolPlans.Where(x => x.Id == id && x.WorkflowVersion == WorkflowVersion.LegacyPersonalV1)
+            .ExecuteUpdateAsync(u => u.SetProperty(x => x.WorkflowVersion, x => x.WorkflowVersion), ct) != 1)
+            throw new UnsupportedWorkflowException();
     }
 
     private void Apply(PatrolPlan row, PlanInput input, DateTime start, DateTime? end, DateTime now, string actor,

@@ -18,7 +18,9 @@ public sealed class CompletedPatrolRecordService(IpqcDbContext db)
         string? factory, string? line, string? inspector, string? shift, string? result,
         DateOnly? completedFrom, DateOnly? completedTo, int page, int pageSize, CancellationToken ct)
     {
-        var query = db.PatrolTasks.AsNoTracking().AsSplitQuery().Where(x => x.Status == "Completed");
+        // Do not label a shared task's assignee as its Inspector through the legacy report contract.
+        var query = db.PatrolTasks.AsNoTracking().AsSplitQuery()
+            .Where(x => x.Status == "Completed" && x.WorkflowVersion == WorkflowVersion.LegacyPersonalV1);
         if (!string.IsNullOrWhiteSpace(taskNo)) query = query.Where(x => x.TaskNo.Contains(taskNo.Trim()));
         if (!string.IsNullOrWhiteSpace(plan)) query = query.Where(x => x.PlanNameSnapshot!.Contains(plan.Trim()) || x.PlanNoSnapshot!.Contains(plan.Trim()));
         if (!string.IsNullOrWhiteSpace(standard)) query = query.Where(x => x.StandardNameSnapshot!.Contains(standard.Trim()));
@@ -69,7 +71,7 @@ public sealed class CompletedPatrolRecordService(IpqcDbContext db)
     public async Task<CompletedPatrolReport?> GetReportAsync(Guid id, CancellationToken ct)
     {
         var task = await db.PatrolTasks.AsNoTracking()
-            .Where(x => x.Id == id && x.Status == "Completed")
+            .Where(x => x.Id == id && x.Status == "Completed" && x.WorkflowVersion == WorkflowVersion.LegacyPersonalV1)
             .Include(x => x.Items)
             .Include(x => x.Submissions).ThenInclude(x => x.Items).ThenInclude(x => x.Samples)
             .Include(x => x.Reviews)

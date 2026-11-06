@@ -35,11 +35,12 @@ public sealed class PatrolTaskReviewService(IpqcDbContext db, TimeProvider clock
             await using var tx = await db.Database.BeginTransactionAsync(ct);
             var tasks = await db.PatrolTasks.AsNoTracking().Where(x => ids.Contains(x.Id)).ToListAsync(ct);
             if (tasks.Count != ids.Count) throw new KeyNotFoundException("Patrol Task not found.");
+            foreach (var task in tasks) PatrolWorkflowPolicy.RequireLegacy(task.WorkflowVersion);
             if (tasks.Any(x => x.Status != "PendingApproval" || x.CurrentRevisionNo < 1))
                 throw new TaskWorkflowException("All selected Tasks must be Pending Approval.");
             foreach (var task in tasks)
             {
-                var updated = await db.PatrolTasks.Where(x => x.Id == task.Id && x.Status == "PendingApproval" &&
+                var updated = await db.PatrolTasks.Where(x => x.Id == task.Id && x.WorkflowVersion == WorkflowVersion.LegacyPersonalV1 && x.Status == "PendingApproval" &&
                         x.CurrentRevisionNo == task.CurrentRevisionNo)
                     .ExecuteUpdateAsync(x => x.SetProperty(t => t.Status, decision == "Approved" ? "Completed" : "Rejected")
                         .SetProperty(t => t.CompletedAtUtc, decision == "Approved" ? now : (DateTime?)null)
