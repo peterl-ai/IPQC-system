@@ -73,7 +73,7 @@ public sealed class PatrolPlanService(IpqcDbContext db, TimeProvider clock)
     public async Task<PagedPlans> ListAsync(string? planNo, string? planName, Guid? standardId,
         string? factoryCode, string? lineCode, bool? enabled, int page, int pageSize, CancellationToken ct)
     {
-        var query = db.PatrolPlans.AsNoTracking().AsQueryable();
+        var query = db.PatrolPlans.AsNoTracking().Where(x => x.WorkflowVersion == WorkflowVersion.LegacyPersonalV1);
         if (!string.IsNullOrWhiteSpace(planNo)) query = query.Where(x => x.PlanNo.Contains(planNo.Trim()));
         if (!string.IsNullOrWhiteSpace(planName)) query = query.Where(x => x.PlanName.Contains(planName.Trim()));
         if (standardId is { } sid) query = query.Where(x => x.PatrolStandardId == sid);
@@ -92,7 +92,7 @@ public sealed class PatrolPlanService(IpqcDbContext db, TimeProvider clock)
     public async Task<PlanOutput?> GetAsync(Guid id, CancellationToken ct)
     {
         var row = await db.PatrolPlans.AsNoTracking().Include(x => x.PatrolStandard).Include(x => x.Assignees)
-            .FirstOrDefaultAsync(x => x.Id == id, ct);
+            .FirstOrDefaultAsync(x => x.Id == id && x.WorkflowVersion == WorkflowVersion.LegacyPersonalV1, ct);
         return row is null ? null : Output(row);
     }
 

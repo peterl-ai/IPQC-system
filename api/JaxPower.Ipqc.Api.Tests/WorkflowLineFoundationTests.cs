@@ -22,6 +22,109 @@ namespace JaxPower.Ipqc.Api.Tests;
 public sealed class WorkflowLineFoundationTests
 {
     [Theory]
+    [InlineData(WorkflowVersion.LegacyPersonalV1, "draft")]
+    [InlineData(WorkflowVersion.LegacyPersonalV1, "submit")]
+    [InlineData(WorkflowVersion.LineSharedV1, "draft")]
+    [InlineData(WorkflowVersion.LineSharedV1, "submit")]
+    public async Task Execution_ownership_precedes_workflow_classification(WorkflowVersion version, string action)
+    {
+        await using var app = await WorkflowFixture.CreateAsync();
+        var id = await app.SeedAsync(version);
+        using var other = await TestAccounts.ClientAsync(app.Factory, "dev-ipqa-2");
+        var before = await app.StateAsync();
+        var denied = action == "draft"
+            ? await other.PutAsJsonAsync($"/api/patrol-tasks/{id.Task}/draft", new TaskDraftInput("Day", []))
+            : await other.PostAsync($"/api/patrol-tasks/{id.Task}/submit", null);
+        Assert.Equal(HttpStatusCode.Forbidden, denied.StatusCode);
+        Assert.Equal(before, await app.StateAsync());
+
+        var owned = await app.MutateTaskAsync(action, id.Task, id.Item, id.Task);
+        Assert.Equal(version == WorkflowVersion.LegacyPersonalV1 ? HttpStatusCode.OK : HttpStatusCode.Conflict, owned.StatusCode);
+        if (version == WorkflowVersion.LineSharedV1) Assert.Equal(before, await app.StateAsync());
+        else
+        {
+            var detail = (await app.Admin.GetFromJsonAsync<TaskDetail>($"/api/patrol-tasks/{id.Task}"))!;
+            Assert.Equal(action == "draft" ? "InProgress" : "PendingApproval", detail.Summary.Status);
+        }
+    }
+
+    [Fact]
+    public async Task Legacy_plan_and_task_reads_isolate_shared_records_before_pagination_and_projection()
+    {
+        await using var app = await WorkflowFixture.CreateAsync();
+        var legacy = await app.SeedAsync(WorkflowVersion.LegacyPersonalV1);
+        var completed = await app.SeedAsync(WorkflowVersion.LegacyPersonalV1, "Completed");
+        var shared = await app.SeedAsync(WorkflowVersion.LineSharedV1);
+        var sharedCompleted = await app.SeedAsync(WorkflowVersion.LineSharedV1, "Completed");
+        var before = await app.StateAsync();
+        using var pqe = await TestAccounts.ClientAsync(app.Factory, "pqe");
+        foreach (var client in new[] { app.Admin, pqe })
+        {
+            var plans = new List<Guid>(); var tasks = new List<Guid>();
+            foreach (var page in new[] { 1, 2 })
+            {
+                var planPage = (await client.GetFromJsonAsync<PagedPlans>($"/api/patrol-plans?pageSize=1&page={page}"))!;
+                Assert.Equal(2, planPage.Total); plans.Add(Assert.Single(planPage.Items).Id);
+                var taskPage = (await client.GetFromJsonAsync<PagedTasks>($"/api/patrol-tasks?pageSize=1&page={page}"))!;
+                Assert.Equal(2, taskPage.Total); tasks.Add(Assert.Single(taskPage.Items).Id);
+            }
+            Assert.Equal(new[] { legacy.Plan, completed.Plan }.Order(), plans.Order());
+            Assert.Equal(new[] { legacy.Task, completed.Task }.Order(), tasks.Order());
+            foreach (var target in new[] { shared, sharedCompleted })
+            {
+                Assert.Equal(HttpStatusCode.NotFound, (await client.GetAsync($"/api/patrol-plans/{target.Plan}")).StatusCode);
+                Assert.Equal(HttpStatusCode.NotFound, (await client.GetAsync($"/api/patrol-tasks/{target.Task}")).StatusCode);
+                var filtered = (await client.GetFromJsonAsync<PagedTasks>($"/api/patrol-tasks?planId={target.Plan}"))!;
+                Assert.Equal(0, filtered.Total); Assert.Empty(filtered.Items);
+            }
+            Assert.Equal(HttpStatusCode.OK, (await client.GetAsync($"/api/patrol-plans/{legacy.Plan}")).StatusCode);
+            Assert.Equal(HttpStatusCode.OK, (await client.GetAsync($"/api/patrol-tasks/{legacy.Task}")).StatusCode);
+        }
+        var own = (await app.Ipqa.GetFromJsonAsync<PagedTasks>("/api/patrol-tasks/my?pageSize=1"))!;
+        Assert.Equal(1, own.Total); Assert.Equal(legacy.Task, Assert.Single(own.Items).Id);
+        Assert.Equal(HttpStatusCode.NotFound, (await app.Ipqa.GetAsync($"/api/patrol-tasks/{shared.Task}")).StatusCode);
+        using var other = await TestAccounts.ClientAsync(app.Factory, "dev-ipqa-2");
+        Assert.Equal(HttpStatusCode.Forbidden, (await other.GetAsync($"/api/patrol-tasks/{shared.Task}")).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await other.GetAsync($"/api/patrol-tasks/{legacy.Task}")).StatusCode);
+        Assert.Equal(before, await app.StateAsync());
+    }
+
+    [Fact]
+    public async Task Completed_reads_keep_legacy_report_facts_and_never_export_shared_as_personally_assigned()
+    {
+        await using var app = await WorkflowFixture.CreateAsync();
+        var legacy = await app.SeedAsync(WorkflowVersion.LegacyPersonalV1, "Completed");
+        var path = $"/api/completed-patrol-records/{legacy.Task}";
+        var original = await app.Admin.GetStringAsync(path + "/report");
+        var shared = await app.SeedAsync(WorkflowVersion.LineSharedV1, "Completed");
+        var before = await app.StateAsync();
+        using var pqe = await TestAccounts.ClientAsync(app.Factory, "pqe");
+        foreach (var client in new[] { app.Admin, pqe, app.Ipqa })
+        {
+            var list = (await client.GetFromJsonAsync<PagedCompletedRecords>("/api/completed-patrol-records?pageSize=1"))!;
+            Assert.Equal(1, list.Total); Assert.Equal(legacy.Task, Assert.Single(list.Items).Id);
+            Assert.Equal("dev-ipqa-1", list.Items[0].Inspector);
+            Assert.Equal(original, await client.GetStringAsync(path));
+            Assert.Equal(original, await client.GetStringAsync(path + "/report"));
+            foreach (var suffix in new[] { "", "/report", "/report.xlsx" })
+                Assert.Equal(HttpStatusCode.NotFound, (await client.GetAsync($"/api/completed-patrol-records/{shared.Task}{suffix}")).StatusCode);
+            using var download = await client.GetAsync(path + "/report.xlsx");
+            Assert.Equal(HttpStatusCode.OK, download.StatusCode);
+            using var stream = new MemoryStream(await download.Content.ReadAsByteArrayAsync());
+            using var book = new ClosedXML.Excel.XLWorkbook(stream);
+            Assert.Equal("dev-ipqa-1", book.Worksheet("Inspection Report").Cell(11, 2).GetString());
+            Assert.Contains(book.Worksheet("Revision History").CellsUsed(), c => c.GetString() == "historical-inspector");
+        }
+        var report = (await app.Admin.GetFromJsonAsync<CompletedPatrolReport>(path))!;
+        Assert.Equal("historical-inspector", report.FinalSubmittedBy);
+        Assert.True(report.Items.Single().IsNa);
+        Assert.Equal("historical-machine", report.Items.Single().MachineCode);
+        Assert.Equal(WorkflowFixture.Now, report.FinalSubmittedAtUtc);
+        Assert.Equal("Approved", Assert.Single(report.RevisionHistory).ReviewDecision);
+        Assert.Equal(before, await app.StateAsync());
+    }
+
+    [Theory]
     [InlineData(0)]
     [InlineData(2)]
     [InlineData(99)]

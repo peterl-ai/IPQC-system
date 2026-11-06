@@ -19,7 +19,8 @@ public sealed class PatrolTaskExecutionService(IpqcDbContext db, TimeProvider cl
         string? factory, string? line, string? inspector, DateTime? scheduledFrom, DateTime? scheduledTo,
         DateTime? submittedFrom, DateTime? submittedTo, Guid? assignee, int page, int pageSize, CancellationToken ct)
     {
-        var query = db.PatrolTasks.AsNoTracking().AsQueryable();
+        // This DTO implements personal-assignee semantics only. Shared reads need their own projection.
+        var query = db.PatrolTasks.AsNoTracking().Where(x => x.WorkflowVersion == WorkflowVersion.LegacyPersonalV1);
         if (assignee is not null) query = query.Where(x => x.AssignedInspectorUserId == assignee);
         if (!string.IsNullOrWhiteSpace(taskNo)) query = query.Where(x => x.TaskNo.Contains(taskNo.Trim()));
         if (status == "Active") query = assignee is null ? query.Where(x => x.Status != "Completed") :
@@ -42,7 +43,7 @@ public sealed class PatrolTaskExecutionService(IpqcDbContext db, TimeProvider cl
 
     public async Task<TaskDetail?> GetAsync(Guid id, CancellationToken ct)
     {
-        var task = await db.PatrolTasks.AsNoTracking()
+        var task = await db.PatrolTasks.AsNoTracking().Where(x => x.WorkflowVersion == WorkflowVersion.LegacyPersonalV1)
             .Include(x => x.Items).ThenInclude(x => x.Samples)
             .Include(x => x.Submissions).ThenInclude(x => x.Items).ThenInclude(x => x.Samples)
             .Include(x => x.Reviews)
@@ -216,9 +217,9 @@ public sealed class PatrolTaskExecutionService(IpqcDbContext db, TimeProvider cl
     {
         var task = await db.PatrolTasks.Include(x => x.Items).ThenInclude(x => x.Samples)
             .FirstOrDefaultAsync(x => x.Id == id, ct);
-        if (task is not null) PatrolWorkflowPolicy.RequireLegacy(task.WorkflowVersion);
         if (task is not null && task.AssignedInspectorUserId != assignee)
             throw new UnauthorizedAccessException("Task is assigned to another IPQA inspector.");
+        if (task is not null) PatrolWorkflowPolicy.RequireLegacy(task.WorkflowVersion);
         return task;
     }
 
