@@ -144,6 +144,20 @@ Do not ask an agent to build the entire product in one prompt. Keep each PR phas
 
 Phase 1C made **Patrol Standards Management** persistent. Phase 1D added Patrol Plans and server scheduling. Phase 1E added task snapshots, assigned-IPQA execution APIs, immutable submissions, and PQE task review. Phase 1F added Completed Patrol Records and server-generated reports. Phase 1G adds local accounts, persistent User Management, and server-side RBAC. Android UI remains a later-phase module.
 
+## P1-01 workflow and line foundation
+
+`P101WorkflowLineFoundation` adds `ProductionLines` and frozen `WorkflowVersion` / nullable `LineId` on Plans and Tasks. Existing rows default to `LegacyPersonalV1 = 1` with no inferred LineId. `LineSharedV1 = 2` requires a non-null LineId referencing an existing line; unknown versions fail database checks and legacy service policy checks. No production lines are seeded, and no Line management API or LineShared execution is enabled.
+
+ProductionLine codes are unique across this IPQC installation (confirmed by Peter on 2026-11-06), including inactive lines. The domain trims surrounding whitespace and derives an invariant-uppercase `NormalizedCode`; internal characters are preserved. The unique index uses this normalized code. Legacy `FactoryCode` / `LineCode` / `LineName` fields remain independent text snapshots: there is no factory-scoped uniqueness inference or automatic historical mapping. Future multi-factory requirements need an explicit compatibility change.
+
+Legacy Plan mutations reject unsupported workflow before legacy input/assignee validation, after authorization and target lookup. Conditional database writes enforce the legacy version for Plan mutations, Task draft/submit, review/batch, and generation. Plan mutations and generation lock/recheck the Plan within their transaction; a generated Task keeps its own workflow/LineId even if the Plan is subsequently changed. Existing endpoints cannot select or convert workflow/LineId.
+
+Apply migrations only after backing up the intended database and reviewing provider SQL. PostgreSQL adds columns, checks, indexes, and restrictive line FKs. SQLite uses EF-managed Plan/Task table rebuilds; populated Phase 1D/1F/1G upgrade tests compare all original columns and preserve available history/report facts. Preserve nullable pre-1G owners and pre-1E missing snapshots. Do not infer historical identities from labels.
+
+Operational rollback retains the expanded schema and rolls back application code while LineShared remains inactive. Do not use destructive `Down` migration as a recovery procedure: it removes the new identity fields/table and can reject populated line dependencies on SQLite. Restore a verified backup or use a reviewed forward repair when schema recovery is required. Live PostgreSQL migration/concurrency validation remains a separate gate; SQLite and generated SQL do not establish it.
+
+Android, device authentication, shared drafts, new Submit/state-machine behavior, photos, and retention remain deferred. Approved architecture Rev3.1 and its F2 handoff addendum are unchanged.
+
 ## Phase 1C local development
 
 Prerequisites: .NET 10 SDK and Node.js/npm. From the repository root:

@@ -128,6 +128,9 @@ namespace JaxPower.Ipqc.Api.Data.Migrations
                         .HasMaxLength(100)
                         .HasColumnType("TEXT");
 
+                    b.Property<Guid?>("LineId")
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("LineName")
                         .IsRequired()
                         .HasMaxLength(200)
@@ -163,7 +166,16 @@ namespace JaxPower.Ipqc.Api.Data.Migrations
                         .HasMaxLength(100)
                         .HasColumnType("TEXT");
 
+                    b.Property<int>("WorkflowVersion")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(1)
+                        .HasSentinel(1);
+
                     b.HasKey("Id");
+
+                    b.HasIndex("LineId");
 
                     b.HasIndex("PatrolStandardId");
 
@@ -172,7 +184,10 @@ namespace JaxPower.Ipqc.Api.Data.Migrations
 
                     b.HasIndex("IsEnabled", "EffectiveStartUtc", "EffectiveEndUtc");
 
-                    b.ToTable("PatrolPlans");
+                    b.ToTable("PatrolPlans", t =>
+                        {
+                            t.HasCheckConstraint("CK_PatrolPlans_Workflow", "\"WorkflowVersion\" IN (1, 2) AND (\"WorkflowVersion\" = 1 OR \"LineId\" IS NOT NULL)");
+                        });
                 });
 
             modelBuilder.Entity("JaxPower.Ipqc.Api.Domain.PatrolPlanAssignee", b =>
@@ -410,6 +425,9 @@ namespace JaxPower.Ipqc.Api.Data.Migrations
                     b.Property<string>("LineCodeSnapshot")
                         .HasColumnType("TEXT");
 
+                    b.Property<Guid?>("LineId")
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("LineNameSnapshot")
                         .HasColumnType("TEXT");
 
@@ -467,12 +485,21 @@ namespace JaxPower.Ipqc.Api.Data.Migrations
                     b.Property<DateTime>("UpdatedAtUtc")
                         .HasColumnType("TEXT");
 
+                    b.Property<int>("WorkflowVersion")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(1)
+                        .HasSentinel(1);
+
                     b.Property<string>("WorkshopCodeSnapshot")
                         .HasColumnType("TEXT");
 
                     b.HasKey("Id");
 
                     b.HasIndex("AssignedInspectorUserId");
+
+                    b.HasIndex("LineId");
 
                     b.HasIndex("PatrolStandardId");
 
@@ -486,7 +513,10 @@ namespace JaxPower.Ipqc.Api.Data.Migrations
 
                     b.HasIndex("Status", "ScheduledOccurrenceUtc");
 
-                    b.ToTable("PatrolTasks");
+                    b.ToTable("PatrolTasks", t =>
+                        {
+                            t.HasCheckConstraint("CK_PatrolTasks_Workflow", "\"WorkflowVersion\" IN (1, 2) AND (\"WorkflowVersion\" = 1 OR \"LineId\" IS NOT NULL)");
+                        });
                 });
 
             modelBuilder.Entity("JaxPower.Ipqc.Api.Domain.PatrolTaskItem", b =>
@@ -808,6 +838,41 @@ namespace JaxPower.Ipqc.Api.Data.Migrations
                     b.ToTable("PatrolTaskSubmissionSamples");
                 });
 
+            modelBuilder.Entity("JaxPower.Ipqc.Api.Domain.ProductionLine", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Code")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("NormalizedCode")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("NormalizedCode")
+                        .IsUnique();
+
+                    b.ToTable("ProductionLines", t =>
+                        {
+                            t.HasCheckConstraint("CK_ProductionLines_Code", "length(trim(\"Code\")) > 0 AND length(trim(\"NormalizedCode\")) > 0");
+                        });
+                });
+
             modelBuilder.Entity("JaxPower.Ipqc.Api.Domain.RefreshTokenSession", b =>
                 {
                     b.Property<Guid>("Id")
@@ -853,11 +918,18 @@ namespace JaxPower.Ipqc.Api.Data.Migrations
 
             modelBuilder.Entity("JaxPower.Ipqc.Api.Domain.PatrolPlan", b =>
                 {
+                    b.HasOne("JaxPower.Ipqc.Api.Domain.ProductionLine", "Line")
+                        .WithMany()
+                        .HasForeignKey("LineId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("JaxPower.Ipqc.Api.Domain.PatrolStandard", "PatrolStandard")
                         .WithMany()
                         .HasForeignKey("PatrolStandardId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
+
+                    b.Navigation("Line");
 
                     b.Navigation("PatrolStandard");
                 });
@@ -898,6 +970,11 @@ namespace JaxPower.Ipqc.Api.Data.Migrations
                         .HasForeignKey("AssignedInspectorUserId")
                         .OnDelete(DeleteBehavior.Restrict);
 
+                    b.HasOne("JaxPower.Ipqc.Api.Domain.ProductionLine", "Line")
+                        .WithMany()
+                        .HasForeignKey("LineId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("JaxPower.Ipqc.Api.Domain.PatrolPlan", "PatrolPlan")
                         .WithMany("Tasks")
                         .HasForeignKey("PatrolPlanId")
@@ -911,6 +988,8 @@ namespace JaxPower.Ipqc.Api.Data.Migrations
                         .IsRequired();
 
                     b.Navigation("AssignedInspectorUser");
+
+                    b.Navigation("Line");
 
                     b.Navigation("PatrolPlan");
 

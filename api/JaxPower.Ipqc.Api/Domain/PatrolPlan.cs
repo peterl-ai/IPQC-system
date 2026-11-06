@@ -2,6 +2,9 @@ namespace JaxPower.Ipqc.Api.Domain;
 
 public sealed class PatrolPlan
 {
+    public WorkflowVersion WorkflowVersion { get; set; } = WorkflowVersion.LegacyPersonalV1;
+    public Guid? LineId { get; set; }
+    public ProductionLine? Line { get; set; }
     public Guid Id { get; set; }
     public string PlanNo { get; set; } = "";
     public string PlanName { get; set; } = "";
@@ -38,6 +41,9 @@ public sealed class PatrolPlanAssignee
 
 public sealed class PatrolTask
 {
+    public WorkflowVersion WorkflowVersion { get; set; } = WorkflowVersion.LegacyPersonalV1;
+    public Guid? LineId { get; set; }
+    public ProductionLine? Line { get; set; }
     public Guid Id { get; set; }
     public string TaskNo { get; set; } = "";
     public Guid PatrolPlanId { get; set; }

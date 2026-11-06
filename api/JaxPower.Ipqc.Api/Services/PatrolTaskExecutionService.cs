@@ -139,7 +139,7 @@ public sealed class PatrolTaskExecutionService(IpqcDbContext db, TimeProvider cl
         try
         {
             await using var tx = await db.Database.BeginTransactionAsync(ct);
-            var claimed = await db.PatrolTasks.Where(x => x.Id == id && x.AssignedInspectorUserId == assignee &&
+            var claimed = await db.PatrolTasks.Where(x => x.Id == id && x.WorkflowVersion == WorkflowVersion.LegacyPersonalV1 && x.AssignedInspectorUserId == assignee &&
                     x.Status == task.Status && x.CurrentRevisionNo == task.CurrentRevisionNo)
                 .ExecuteUpdateAsync(x => x.SetProperty(t => t.Status,
                         task.Status == "PendingInspection" ? "InProgress" : task.Status)
@@ -192,7 +192,7 @@ public sealed class PatrolTaskExecutionService(IpqcDbContext db, TimeProvider cl
         try
         {
             await using var tx = await db.Database.BeginTransactionAsync(ct);
-            var claimed = await db.PatrolTasks.Where(x => x.Id == id && x.AssignedInspectorUserId == assignee &&
+            var claimed = await db.PatrolTasks.Where(x => x.Id == id && x.WorkflowVersion == WorkflowVersion.LegacyPersonalV1 && x.AssignedInspectorUserId == assignee &&
                     x.CurrentRevisionNo == task.CurrentRevisionNo &&
                     (x.Status == "PendingInspection" || x.Status == "InProgress" || x.Status == "Rejected"))
                 .ExecuteUpdateAsync(x => x.SetProperty(t => t.Status, "PendingApproval")
@@ -216,6 +216,7 @@ public sealed class PatrolTaskExecutionService(IpqcDbContext db, TimeProvider cl
     {
         var task = await db.PatrolTasks.Include(x => x.Items).ThenInclude(x => x.Samples)
             .FirstOrDefaultAsync(x => x.Id == id, ct);
+        if (task is not null) PatrolWorkflowPolicy.RequireLegacy(task.WorkflowVersion);
         if (task is not null && task.AssignedInspectorUserId != assignee)
             throw new UnauthorizedAccessException("Task is assigned to another IPQA inspector.");
         return task;

@@ -71,7 +71,7 @@ public static class PatrolPlanEndpoints
             }
             catch (PlanAssignmentException ex) { return Results.ValidationProblem(new Dictionary<string, string[]> { ["AssigneeUserId"] = [ex.Message] }); }
             catch (PlanStandardNotReadyException ex) { return StandardNotReady(ex); }
-        }).RequireAuthorization(IpqcPermissions.PlansWrite);
+        }).AddEndpointFilter(LegacyMutation).RequireAuthorization(IpqcPermissions.PlansWrite);
         group.MapPost("/{id:guid}/enable", async (Guid id, PatrolPlanService service, HttpContext http, CancellationToken ct) =>
         {
             var current = await service.GetAsync(id, ct);
@@ -84,18 +84,32 @@ public static class PatrolPlanEndpoints
                 return Results.Ok(row);
             }
             catch (PlanStandardNotReadyException ex) { return StandardNotReady(ex); }
-        }).RequireAuthorization(IpqcPermissions.PlansWrite);
+        }).AddEndpointFilter(LegacyMutation).RequireAuthorization(IpqcPermissions.PlansWrite);
         group.MapPost("/{id:guid}/disable", async (Guid id, PatrolPlanService service, HttpContext http, CancellationToken ct) =>
             await service.SetEnabledAsync(id, false, IpqcPermissions.Username(http.User), ct) is { } row
                 ? Results.Ok(row) : Results.Problem(statusCode: 404, title: "Patrol Plan not found."))
-            .RequireAuthorization(IpqcPermissions.PlansWrite);
+            .AddEndpointFilter(LegacyMutation).RequireAuthorization(IpqcPermissions.PlansWrite);
         group.MapDelete("/{id:guid}", async (Guid id, PatrolPlanService service, CancellationToken ct) =>
             await service.DeleteAsync(id, ct) switch
             {
                 "deleted" => Results.NoContent(),
                 "history" => Results.Problem(statusCode: 409, title: "Plan has generated tasks. Disable it instead."),
                 _ => Results.Problem(statusCode: 404, title: "Patrol Plan not found.")
-            }).RequireAuthorization(IpqcPermissions.PlansWrite);
+            }).AddEndpointFilter(LegacyMutation).RequireAuthorization(IpqcPermissions.PlansWrite);
+    }
+
+    private static async ValueTask<object?> LegacyMutation(EndpointFilterInvocationContext context, EndpointFilterDelegate next)
+    {
+        var service = context.HttpContext.RequestServices.GetRequiredService<PatrolPlanService>();
+        var id = Guid.Parse(context.HttpContext.Request.RouteValues["id"]!.ToString()!);
+        try
+        {
+            if (!await service.CheckLegacyAsync(id, context.HttpContext.RequestAborted))
+                return Results.Problem(statusCode: 404, title: "Patrol Plan not found.");
+            return await next(context);
+        }
+        catch (UnsupportedWorkflowException ex) { return Results.Problem(statusCode: 409, title: ex.Message); }
+        catch (DbUpdateConcurrencyException) { return Results.Problem(statusCode: 409, title: "Plan changed; reload it."); }
     }
 
     private static IResult DuplicatePlanNo() => Results.ValidationProblem(

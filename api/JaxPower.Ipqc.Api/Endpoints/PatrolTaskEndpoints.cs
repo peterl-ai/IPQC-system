@@ -76,10 +76,11 @@ public static class PatrolTaskEndpoints
 
     private static IResult Forbidden() => Results.Problem(statusCode: 403, title: "Task assignment is not authorized.");
     private static bool IsWorkflowError(Exception ex) => ex is TaskValidationException or TaskWorkflowException
-        or UnauthorizedAccessException or KeyNotFoundException;
+        or UnauthorizedAccessException or KeyNotFoundException or UnsupportedWorkflowException;
     private static IResult Error(Exception ex) => ex switch
     {
         TaskValidationException validation => Results.ValidationProblem(validation.Errors),
+        UnsupportedWorkflowException unsupported => Results.Problem(statusCode: 409, title: unsupported.Message),
         TaskWorkflowException conflict => Results.Problem(statusCode: 409, title: conflict.Message),
         UnauthorizedAccessException => Forbidden(),
         KeyNotFoundException => Results.NotFound(),

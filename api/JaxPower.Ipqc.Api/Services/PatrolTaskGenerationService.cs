@@ -26,6 +26,7 @@ public sealed class PatrolTaskGenerationService(IpqcDbContext db, TimeProvider c
             var planCreated = 0;
             try
             {
+                if (!PatrolWorkflowPolicy.IsLegacy(plan.WorkflowVersion)) continue;
                 var assignee = plan.Assignees.SingleOrDefault(x => x.IsActive);
                 if (assignee?.UserId is null || assignee.User is not { IsActive: true, Role: "IPQA" })
                     continue; // Legacy or invalid assignments cannot create executable tasks.
@@ -47,6 +48,7 @@ public sealed class PatrolTaskGenerationService(IpqcDbContext db, TimeProvider c
                         throw new InvalidOperationException("Referenced Patrol Standard is not executable.");
                     var id = Guid.NewGuid();
                     var task = new PatrolTask { Id = id, TaskNo = $"PT-{id:N}".ToUpperInvariant(),
+                        WorkflowVersion = plan.WorkflowVersion, LineId = plan.LineId,
                         PatrolPlanId = plan.Id, PatrolStandardId = plan.PatrolStandardId,
                         AssignedInspectorUserId = assignee.UserId,
                         AssignedInspectorKey = assignee.User.Username, ScheduledOccurrenceUtc = occurrence,
@@ -74,7 +76,17 @@ public sealed class PatrolTaskGenerationService(IpqcDbContext db, TimeProvider c
                     db.PatrolTasks.Add(task);
                     try
                     {
+                        await using var tx = await db.Database.BeginTransactionAsync(ct);
+                        // Lock and recheck policy/line identity at insertion, not only at poll time.
+                        if (await db.PatrolPlans.Where(x => x.Id == plan.Id && x.IsEnabled &&
+                            x.WorkflowVersion == WorkflowVersion.LegacyPersonalV1 && x.LineId == plan.LineId)
+                            .ExecuteUpdateAsync(u => u.SetProperty(x => x.WorkflowVersion, x => x.WorkflowVersion), ct) != 1)
+                        {
+                            db.ChangeTracker.Clear();
+                            break;
+                        }
                         await db.SaveChangesAsync(ct);
+                        await tx.CommitAsync(ct);
                         planCreated++;
                     }
                     catch (DbUpdateException ex) when (IsOccurrenceUniqueViolation(ex))
