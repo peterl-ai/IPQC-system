@@ -176,6 +176,8 @@ Provisioning transactions deliberately serialize low-volume mutations, including
 
 P1-03 must integrate credential/trust changes with the same provisioning transaction protocol and validate the current DeviceId, line identity, and BindingVersion on every future Native authorization. Enrollment must prove Keystore possession before establishing an effective binding; stale/revoked/replaced identities must fail. Public pairing, certificate issuance, mTLS/trusted-proxy identity handling, NativeSession, OfflineGrant, Android, shared drafts, LineShared task activation, and new Submit states are not implemented here. Reservation alone cannot pass existing legacy workflow guards. Architecture Rev3.1 and the binding F2 handoff addendum remain unchanged.
 
+The shared EF snapshot resolves inferred store types through the active provider rather than retaining SQLite's inferred TEXT/INTEGER types for PostgreSQL. Three existing long submission FK/index names are explicitly preserved to match historical migrations instead of introducing provider-specific naming differences; this changes no historical DDL. When scaffolding future migrations, retain the snapshot's provider-default normalization step and run pending-model checks for **both** SQLite and PostgreSQL, plus provider SQL review. Explicit custom store types require revisiting this normalization. No pending-model warning is suppressed. This is a bounded compatibility measure for the current shared migrations, not evidence of live PostgreSQL execution.
+
 ## Phase 1C local development
 
 Prerequisites: .NET 10 SDK and Node.js/npm. From the repository root:

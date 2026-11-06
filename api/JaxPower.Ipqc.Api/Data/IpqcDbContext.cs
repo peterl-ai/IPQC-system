@@ -185,14 +185,19 @@ public sealed class IpqcDbContext(DbContextOptions<IpqcDbContext> options) : DbC
         var submissionItem = modelBuilder.Entity<PatrolTaskSubmissionItem>();
         submissionItem.HasKey(x => x.Id);
         submissionItem.HasIndex(x => new { x.PatrolTaskSubmissionId, x.SequenceNo }).IsUnique();
-        submissionItem.HasOne(x => x.PatrolTaskSubmission).WithMany(x => x.Items).HasForeignKey(x => x.PatrolTaskSubmissionId).OnDelete(DeleteBehavior.Cascade);
+        // Preserve names already used by the shared historical migrations instead of
+        // introducing Npgsql's different convention-based truncation into model diffs.
+        submissionItem.HasOne(x => x.PatrolTaskSubmission).WithMany(x => x.Items).HasForeignKey(x => x.PatrolTaskSubmissionId)
+            .HasConstraintName("FK_PatrolTaskSubmissionItems_PatrolTaskSubmissions_PatrolTaskSubmissionId").OnDelete(DeleteBehavior.Cascade);
         foreach (var property in typeof(PatrolTaskSubmissionItem).GetProperties().Where(p => p.PropertyType == typeof(string)))
             submissionItem.Property(property.Name).HasMaxLength(2000);
 
         var submissionSample = modelBuilder.Entity<PatrolTaskSubmissionSample>();
         submissionSample.HasKey(x => x.Id);
-        submissionSample.HasIndex(x => new { x.PatrolTaskSubmissionItemId, x.SequenceNo }).IsUnique();
-        submissionSample.HasOne(x => x.PatrolTaskSubmissionItem).WithMany(x => x.Samples).HasForeignKey(x => x.PatrolTaskSubmissionItemId).OnDelete(DeleteBehavior.Cascade);
+        submissionSample.HasIndex(x => new { x.PatrolTaskSubmissionItemId, x.SequenceNo })
+            .HasDatabaseName("IX_PatrolTaskSubmissionSamples_PatrolTaskSubmissionItemId_SequenceNo").IsUnique();
+        submissionSample.HasOne(x => x.PatrolTaskSubmissionItem).WithMany(x => x.Samples).HasForeignKey(x => x.PatrolTaskSubmissionItemId)
+            .HasConstraintName("FK_PatrolTaskSubmissionSamples_PatrolTaskSubmissionItems_PatrolTaskSubmissionItemId").OnDelete(DeleteBehavior.Cascade);
 
         var review = modelBuilder.Entity<PatrolTaskReview>();
         review.HasKey(x => x.Id);

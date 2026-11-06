@@ -5,12 +5,27 @@ using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
+using Microsoft.EntityFrameworkCore.Metadata;
 using Xunit;
 
 namespace JaxPower.Ipqc.Api.Tests;
 
 public sealed class ProvisioningMigrationTests
 {
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Shared_snapshot_has_no_pending_model_changes_for_either_provider(bool postgres)
+    {
+        var options = new DbContextOptionsBuilder<IpqcDbContext>();
+        if (postgres) options.UseNpgsql("Host=localhost;Database=model_check_only;Username=unused");
+        else options.UseSqlite("Data Source=:memory:");
+        using var db = new IpqcDbContext(options.Options);
+        var snapshot = db.GetService<IModelRuntimeInitializer>().Initialize(db.GetService<IMigrationsAssembly>().ModelSnapshot!.Model, designTime: true);
+        var changes = db.GetService<IMigrationsModelDiffer>().GetDifferences(snapshot.GetRelationalModel(), db.GetService<IDesignTimeModel>().Model.GetRelationalModel());
+        Assert.True(changes.Count == 0, string.Join(Environment.NewLine, changes.Select(x => x.GetType().Name + ": " + System.Text.Json.JsonSerializer.Serialize(x, x.GetType()))));
+    }
+
     [Fact]
     public async Task Populated_P101_upgrade_preserves_every_original_fact_and_does_not_fabricate_provisioning_history()
     {

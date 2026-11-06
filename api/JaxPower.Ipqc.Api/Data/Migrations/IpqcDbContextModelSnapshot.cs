@@ -1312,6 +1312,13 @@ namespace JaxPower.Ipqc.Api.Data.Migrations
                 {
                     b.Navigation("Samples");
                 });
+            // This repository shares provider-aware migrations. Scaffolding records SQLite's
+            // inferred store types above; let the active provider resolve those defaults.
+            // Keep model facets (length, defaults, checks, concurrency) intact. Both providers'
+            // pending-model checks must pass; revisit this if explicit store types are added.
+            foreach (var entity in modelBuilder.Model.GetEntityTypes())
+                foreach (var property in entity.GetProperties())
+                    property.SetColumnType(null);
 #pragma warning restore 612, 618
         }
     }
