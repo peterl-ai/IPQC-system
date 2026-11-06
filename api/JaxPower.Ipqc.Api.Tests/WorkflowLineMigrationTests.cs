@@ -90,11 +90,11 @@ public sealed class WorkflowLineMigrationTests
         public ValueTask DisposeAsync() { SqliteConnection.ClearAllPools(); File.Delete(path); return ValueTask.CompletedTask; }
     }
 
-    private static async Task CopyHistoricalFactsAsync(string source, string target)
+    internal static async Task CopyHistoricalFactsAsync(string source, string target)
     {
         await using var src = new SqliteConnection($"Data Source={source}"); await src.OpenAsync();
         await using var dst = new SqliteConnection($"Data Source={target}"); await dst.OpenAsync();
-        foreach (var table in new[] { "ApplicationUsers", "PatrolStandards", "PatrolStandardItems", "PatrolPlans", "PatrolPlanAssignees",
+        foreach (var table in new[] { "ApplicationUsers", "ProductionLines", "PatrolStandards", "PatrolStandardItems", "PatrolPlans", "PatrolPlanAssignees",
             "PatrolTasks", "PatrolTaskItems", "PatrolTaskItemSamples", "PatrolTaskSubmissions", "PatrolTaskSubmissionItems", "PatrolTaskSubmissionSamples", "PatrolTaskReviews" })
         {
             await using var info = dst.CreateCommand(); info.CommandText = $"PRAGMA table_info(\"{table}\")";
@@ -116,7 +116,7 @@ public sealed class WorkflowLineMigrationTests
     // Capture all original columns, with deterministic ordering, without querying today's EF model.
     // Extra post-upgrade tables and columns are excluded using the remembered schema manifest.
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, Dictionary<string, string[]>> Schemas = new();
-    private static async Task<string> CaptureAsync(string path, bool historicalColumns = false)
+    internal static async Task<string> CaptureAsync(string path, bool historicalColumns = false)
     {
         await using var connection = new SqliteConnection($"Data Source={path}"); await connection.OpenAsync();
         var schema = new Dictionary<string, string[]>();

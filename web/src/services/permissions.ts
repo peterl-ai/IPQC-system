@@ -1,7 +1,7 @@
 import type { Permission, Role } from '@/types/auth'
 
 export const rolePermissions: Readonly<Record<Role, readonly Permission[]>> = {
-  admin: ['home:view', 'standards:view', 'plans:view', 'tasks:view', 'records:view', 'users:view'],
+  admin: ['home:view', 'standards:view', 'plans:view', 'tasks:view', 'records:view', 'users:view', 'provisioning:view'],
   pqe: ['home:view', 'standards:view', 'plans:view', 'tasks:view', 'records:view'],
   ipqa: ['records:view'],
 }
@@ -13,6 +13,7 @@ const serverPermission: Record<Permission, string> = {
   'tasks:view': 'PatrolTasks.Review',
   'records:view': 'CompletedRecords.Read',
   'users:view': 'Users.Read',
+  'provisioning:view': 'DeviceRegistry.Read',
 }
 
 export function hasPermission(granted: readonly string[] | Role, permission?: Permission): boolean {

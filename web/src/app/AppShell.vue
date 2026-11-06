@@ -71,11 +71,14 @@ const menuItems = computed<ItemType[]>(() => {
     hasPermission(permissions, 'records:view') ? { key: '/records', icon: icon(FileDoneOutlined), label: t('nav.records') } : null,
   ].filter(Boolean) as ItemType[]
   if (patrolChildren.length) items.push({ key: 'ipqc', icon: icon(SafetyCertificateOutlined), label: t('nav.ipqc'), children: [{ key: 'line-patrol', icon: icon(AuditOutlined), label: t('nav.linePatrol'), children: patrolChildren }] })
-  if (hasPermission(permissions, 'users:view')) items.push({ key: 'system', icon: icon(SettingOutlined), label: t('nav.system'), children: [{ key: '/users', icon: icon(TeamOutlined), label: t('nav.users') }] })
+  const systemChildren: ItemType[] = []
+  if (hasPermission(permissions, 'users:view')) systemChildren.push({ key: '/users', icon: icon(TeamOutlined), label: t('nav.users') })
+  if (hasPermission(permissions, 'provisioning:view')) systemChildren.push({ key: '/provisioning', icon: icon(SettingOutlined), label: t('provisioning.title') })
+  if (systemChildren.length) items.push({ key: 'system', icon: icon(SettingOutlined), label: t('nav.system'), children: systemChildren })
   return items
 })
 
-const titleKeys: Record<string, string> = { '/home': 'nav.home', '/standards': 'nav.standards', '/plans': 'nav.plans', '/tasks': 'nav.tasks', '/records': 'nav.records', '/users': 'nav.users' }
+const titleKeys: Record<string, string> = { '/home': 'nav.home', '/standards': 'nav.standards', '/plans': 'nav.plans', '/tasks': 'nav.tasks', '/records': 'nav.records', '/users': 'nav.users', '/provisioning': 'provisioning.title' }
 const currentTitle = computed(() => t(titleKeys[route.path] ?? 'product.name'))
 const initials = computed(() => (authSession.user.value?.displayName ?? '').split(' ').map((part) => part[0]).join(''))
 

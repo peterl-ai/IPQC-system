@@ -8,6 +8,12 @@ function routeWith(permission: RouteLocationNormalized['meta']['permission']) {
 }
 
 describe('route authorization helper', () => {
+  it('requires the provisioning permission even when navigating directly', () => {
+    authSession.user.value = { id: '1', username: 'pqe', displayName: 'PQE', role: 'PQE', isActive: true, mustChangePassword: false, permissions: ['PatrolTasks.Review'] }
+    expect(routeIsAuthorized(routeWith('provisioning:view'))).toBe(false)
+    authSession.user.value = { ...authSession.user.value, role: 'Admin', permissions: ['DeviceRegistry.Read'] }
+    expect(routeIsAuthorized(routeWith('provisioning:view'))).toBe(true)
+  })
   it('allows an authorized role', () => {
     authSession.user.value = { id: '1', username: 'pqe', displayName: 'PQE', role: 'PQE', isActive: true, mustChangePassword: false, permissions: ['PatrolTasks.Review'] }
     expect(routeIsAuthorized(routeWith('tasks:view'))).toBe(true)

@@ -7,3 +7,4 @@ export type Permission =
   | 'tasks:view'
   | 'records:view'
   | 'users:view'
+  | 'provisioning:view'

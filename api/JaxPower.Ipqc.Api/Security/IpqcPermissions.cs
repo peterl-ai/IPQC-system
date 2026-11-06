@@ -14,16 +14,20 @@ public static class IpqcPermissions
     public const string RecordsExport = "CompletedRecords.Export";
     public const string UsersRead = "Users.Read";
     public const string UsersWrite = "Users.Write";
+    public const string LinesRead = "ProductionLines.Read";
+    public const string LinesWrite = "ProductionLines.Write";
+    public const string DevicesRead = "DeviceRegistry.Read";
+    public const string DevicesWrite = "DeviceRegistry.Write";
     public const string ClaimType = "ipqc_permission";
 
     public static readonly string[] All = [StandardsRead, StandardsWrite, PlansRead, PlansWrite,
-        TasksReview, TasksExecuteOwn, RecordsRead, RecordsExport, UsersRead, UsersWrite];
+        TasksReview, TasksExecuteOwn, RecordsRead, RecordsExport, UsersRead, UsersWrite, LinesRead, LinesWrite, DevicesRead, DevicesWrite];
     private static readonly string[] Business = [StandardsRead, StandardsWrite, PlansRead, PlansWrite,
         TasksReview, RecordsRead, RecordsExport];
 
     public static IReadOnlyList<string> ForRole(string role) => role switch
     {
-        "Admin" => [.. Business, UsersRead, UsersWrite],
+        "Admin" => [.. Business, UsersRead, UsersWrite, LinesRead, LinesWrite, DevicesRead, DevicesWrite],
         "PQE" => Business,
         "IPQA" => [TasksExecuteOwn, RecordsRead, RecordsExport],
         _ => []
