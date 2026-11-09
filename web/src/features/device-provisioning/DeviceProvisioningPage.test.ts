@@ -37,6 +37,18 @@ beforeEach(() => {
 })
 afterEach(() => { app?.unmount(); host?.remove() })
 describe('Admin provisioning page', () => {
+  it.each(['en', 'zh-CN'])('shows enrollment actor provenance and stable credential identities (%s)', async locale => {
+    const snapshot: Snapshot = { name: 'PAD A', revision: 7, code: null, isActive: null, model: null, serial: null, status: 'PendingCredential', lineId: 'line', bindingVersion: 4, replacedByDeviceId: null, enrollmentState: 'IssuedUnconfirmed', credentialState: 'IssuedUnconfirmed', spkiSha256: 'public-fingerprint' }
+    const base: Audit = { id: 'issuer-event', changeId: 'change', deviceId: 'pad', action: 'CredentialCandidateIssued', actorUserId: null, actorUsername: 'EnrollmentIssuer', actorKind: 'System', enrollmentId: 'enrollment-id', credentialId: 'credential-id', occurredAtUtc: '2026-11-09T12:00:00Z', reason: null, before: snapshot, after: snapshot }
+    vi.mocked(provisioningApi.audit).mockResolvedValue({ items: [base, { ...base, id: 'applicant-event', actorKind: 'ApplicantKey', actorDeviceId: 'pad', actorUsername: 'ApplicantKey:public-fingerprint', action: 'EnrollmentProofVerified' }], total: 2, page: 1, pageSize: 20 })
+    const labels = locale === 'en' ? en : zh
+    await mount(locale); await click(labels.provisioning.audit)
+    const entries = [...host.querySelectorAll('aside article')]
+    expect(entries[0]!.textContent).toContain(labels.enrollment.actor.System)
+    expect(entries[1]!.textContent).toContain(labels.enrollment.actor.ApplicantKey)
+    for (const entry of entries) { expect(entry.textContent).toContain('enrollment-id'); expect(entry.textContent).toContain('credential-id'); expect(entry.textContent).toContain('pad'); expect(entry.textContent).toContain(labels.enrollment.credential.IssuedUnconfirmed) }
+    expect(host.textContent).not.toContain('enrollment.actor.'); expect(host.textContent).not.toContain('provisioning.auditAction.')
+  })
   it('supports keyboard tabs and only offers active lines for an unassigned pending device', async () => {
     vi.mocked(provisioningApi.devices).mockResolvedValue({ items: [{ ...pending, lineId: null }], total: 1, page: 1, pageSize: 20 })
     await mount()
