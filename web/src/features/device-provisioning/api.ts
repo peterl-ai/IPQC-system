@@ -13,9 +13,12 @@ export interface Snapshot {
   name: string; revision: number; code: string | null; isActive: boolean | null
   model: string | null; serial: string | null; status: Device['status'] | null
   lineId: string | null; bindingVersion: number | null; replacedByDeviceId: string | null
+  enrollmentId?: string | null; enrollmentState?: string | null; enrollmentRevision?: number | null
+  credentialId?: string | null; credentialState?: string | null; spkiSha256?: string | null; certificateSha256?: string | null
 }
 export interface Audit {
-  id: string; changeId: string; deviceId: string | null; action: string; actorUserId: string; actorUsername: string
+  id: string; changeId: string; deviceId: string | null; action: string; actorUserId: string | null; actorUsername: string
+  actorKind?: 'Admin' | 'Device' | 'ApplicantKey' | 'System'; actorDeviceId?: string | null; enrollmentId?: string | null; credentialId?: string | null
   occurredAtUtc: string; reason: string | null; before: Snapshot | null; after: Snapshot
 }
 export type DeviceAction = 'bind' | 'rebind' | 'unbind' | 'revoke' | 'replace'
@@ -28,7 +31,7 @@ export function errorCode(error: unknown): string {
   if (error.status === 401 || error.status === 403) return 'Forbidden'
   return knownErrors.includes(error.code) ? error.code : error.status === 400 ? 'InvalidInput' : 'Unavailable'
 }
-async function request<T>(path: string, method = 'GET', body?: unknown): Promise<T> {
+export async function request<T>(path: string, method = 'GET', body?: unknown): Promise<T> {
   const response = await authFetch(`/api/admin${path}`, { method, headers: { 'Content-Type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) })
   if (!response.ok) {
     const problem = await response.json().catch(() => ({})) as { code?: string }

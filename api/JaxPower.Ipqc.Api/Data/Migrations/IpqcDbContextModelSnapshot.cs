@@ -87,6 +87,252 @@ namespace JaxPower.Ipqc.Api.Data.Migrations
                     b.ToTable("ApplicationUsers");
                 });
 
+            modelBuilder.Entity("JaxPower.Ipqc.Api.Domain.DeviceCredential", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("BindingVersion")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("CertificatePem")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("CertificateSha256")
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("DeviceId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("EnrollmentId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("ExternalRevocationPending")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<Guid>("IssuanceOperationId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("IssuedAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("IssuerId")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("LastErrorCode")
+                        .HasMaxLength(80)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("LeaseId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("LeaseUntilUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("LineId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("NotAfterUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("NotBeforeUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("Revision")
+                        .IsConcurrencyToken()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("RootCertificatePem")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SpkiBase64")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("State")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CertificateSha256")
+                        .IsUnique();
+
+                    b.HasIndex("DeviceId");
+
+                    b.HasIndex("EnrollmentId")
+                        .IsUnique();
+
+                    b.HasIndex("IssuanceOperationId")
+                        .IsUnique();
+
+                    b.HasIndex("LineId");
+
+                    b.HasIndex("State", "LeaseUntilUtc");
+
+                    b.ToTable("DeviceCredentials", t =>
+                        {
+                            t.HasCheckConstraint("CK_Candidate_State", "\"State\" BETWEEN 1 AND 5 AND \"Revision\" >= 1 AND \"BindingVersion\" >= 2 AND \"NotBeforeUtc\" < \"NotAfterUtc\" AND (\"State\" <> 3 OR (\"CertificatePem\" IS NOT NULL AND \"CertificateSha256\" IS NOT NULL AND \"IssuedAtUtc\" IS NOT NULL))");
+                        });
+                });
+
+            modelBuilder.Entity("JaxPower.Ipqc.Api.Domain.DeviceEnrollment", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ApprovalContentHash")
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("ApprovalOperationId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("ApprovedAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("ApprovedByUserId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("CreatedByUserId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("CsrDerBase64")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("CsrSha256")
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("DeviceId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Environment")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("ExpiresAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("InvitationConsumedAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("InvitationExpiresAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("InvitationHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("LineId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("ProofVerifiedAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("Revision")
+                        .IsConcurrencyToken()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("SourceBindingVersion")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("SpkiBase64")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SpkiSha256")
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("State")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("TargetBindingVersion")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("TerminalReason")
+                        .HasMaxLength(2000)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ApprovalOperationId")
+                        .IsUnique()
+                        .HasDatabaseName("UX_Enrollment_ApprovalOperation");
+
+                    b.HasIndex("ApprovedByUserId");
+
+                    b.HasIndex("CreatedByUserId");
+
+                    b.HasIndex("DeviceId")
+                        .IsUnique()
+                        .HasDatabaseName("UX_Enrollment_OpenDevice")
+                        .HasFilter("\"State\" IN (1, 2, 3, 4, 5, 6)");
+
+                    b.HasIndex("LineId");
+
+                    b.ToTable("DeviceEnrollments", t =>
+                        {
+                            t.HasCheckConstraint("CK_Enrollment_State", "\"State\" BETWEEN 1 AND 8 AND \"Revision\" >= 1 AND \"SourceBindingVersion\" >= 1 AND \"TargetBindingVersion\" = \"SourceBindingVersion\" + 1 AND length(\"InvitationHash\") = 64 AND length(trim(\"Environment\")) > 0 AND \"CreatedAtUtc\" < \"InvitationExpiresAtUtc\" AND \"InvitationExpiresAtUtc\" <= \"ExpiresAtUtc\" AND (\"State\" NOT IN (3,4,5,6) OR (\"InvitationConsumedAtUtc\" IS NOT NULL AND \"ProofVerifiedAtUtc\" IS NOT NULL AND \"SpkiBase64\" IS NOT NULL AND \"CsrDerBase64\" IS NOT NULL)) AND (\"State\" NOT IN (4,5,6) OR (\"ApprovedByUserId\" IS NOT NULL AND \"ApprovalOperationId\" IS NOT NULL AND \"ApprovedAtUtc\" IS NOT NULL))");
+                        });
+                });
+
+            modelBuilder.Entity("JaxPower.Ipqc.Api.Domain.EnrollmentChallenge", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("ConsumedAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("EnrollmentId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("ExpiresAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("NonceHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("PayloadHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("Purpose")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("Revision")
+                        .IsConcurrencyToken()
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("EnrollmentId", "Purpose", "ExpiresAtUtc")
+                        .HasDatabaseName("IX_Challenge_RequestPurposeExpiry");
+
+                    b.ToTable("EnrollmentChallenges", t =>
+                        {
+                            t.HasCheckConstraint("CK_Challenge_State", "\"Purpose\" IN (1,2) AND \"Revision\" >= 1 AND length(\"NonceHash\") = 64 AND length(\"PayloadHash\") = 64");
+                        });
+                });
+
             modelBuilder.Entity("JaxPower.Ipqc.Api.Domain.PatrolPlan", b =>
                 {
                     b.Property<Guid>("Id")
@@ -831,7 +1077,8 @@ namespace JaxPower.Ipqc.Api.Data.Migrations
                     b.HasKey("Id");
 
                     b.HasIndex("PatrolTaskSubmissionItemId", "SequenceNo")
-                        .IsUnique();
+                        .IsUnique()
+                        .HasDatabaseName("IX_PatrolTaskSubmissionSamples_PatrolTaskSubmissionItemId_SequenceNo");
 
                     b.ToTable("PatrolTaskSubmissionSamples");
                 });
@@ -890,7 +1137,15 @@ namespace JaxPower.Ipqc.Api.Data.Migrations
                         .HasMaxLength(80)
                         .HasColumnType("TEXT");
 
-                    b.Property<Guid>("ActorUserId")
+                    b.Property<Guid?>("ActorDeviceId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("ActorKind")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(1);
+
+                    b.Property<Guid?>("ActorUserId")
                         .HasColumnType("TEXT");
 
                     b.Property<string>("ActorUsername")
@@ -908,7 +1163,13 @@ namespace JaxPower.Ipqc.Api.Data.Migrations
                     b.Property<Guid>("ChangeId")
                         .HasColumnType("TEXT");
 
+                    b.Property<Guid?>("CredentialId")
+                        .HasColumnType("TEXT");
+
                     b.Property<Guid?>("DeviceId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("EnrollmentId")
                         .HasColumnType("TEXT");
 
                     b.Property<Guid?>("NewLineId")
@@ -929,9 +1190,15 @@ namespace JaxPower.Ipqc.Api.Data.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("ActorDeviceId");
+
                     b.HasIndex("ActorUserId");
 
                     b.HasIndex("ChangeId");
+
+                    b.HasIndex("CredentialId");
+
+                    b.HasIndex("EnrollmentId");
 
                     b.HasIndex("NewLineId");
 
@@ -944,6 +1211,8 @@ namespace JaxPower.Ipqc.Api.Data.Migrations
                     b.ToTable("ProvisioningAuditEvents", t =>
                         {
                             t.HasCheckConstraint("CK_ProvisioningAuditEvents_Aggregate", "(\"DeviceId\" IS NOT NULL AND \"ProductionLineId\" IS NULL) OR (\"DeviceId\" IS NULL AND \"ProductionLineId\" IS NOT NULL)");
+
+                            t.HasCheckConstraint("CK_ProvisioningAudit_Actor", "(\"ActorKind\" = 1 AND \"ActorUserId\" IS NOT NULL AND \"ActorDeviceId\" IS NULL) OR (\"ActorKind\" IN (2,3) AND \"ActorUserId\" IS NULL AND \"ActorDeviceId\" IS NOT NULL) OR (\"ActorKind\" = 4 AND \"ActorUserId\" IS NULL AND \"ActorDeviceId\" IS NULL)");
                         });
                 });
 
@@ -1059,6 +1328,64 @@ namespace JaxPower.Ipqc.Api.Data.Migrations
                         {
                             t.HasCheckConstraint("CK_RegisteredDevices_Provisioning", "\"Status\" IN (1, 2, 3) AND \"Revision\" >= 1 AND \"BindingVersion\" >= 1 AND ((\"Status\" = 1 AND \"TerminalAtUtc\" IS NULL AND \"TerminalReason\" IS NULL) OR (\"Status\" IN (2, 3) AND \"LineId\" IS NULL AND \"TerminalAtUtc\" IS NOT NULL AND \"TerminalReason\" IS NOT NULL AND length(trim(\"TerminalReason\")) > 0)) AND ((\"Status\" = 3 AND \"ReplacedByDeviceId\" IS NOT NULL AND \"ReplacedByDeviceId\" <> \"Id\") OR (\"Status\" <> 3 AND \"ReplacedByDeviceId\" IS NULL))");
                         });
+                });
+
+            modelBuilder.Entity("JaxPower.Ipqc.Api.Domain.DeviceCredential", b =>
+                {
+                    b.HasOne("JaxPower.Ipqc.Api.Domain.RegisteredDevice", null)
+                        .WithMany()
+                        .HasForeignKey("DeviceId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("JaxPower.Ipqc.Api.Domain.DeviceEnrollment", null)
+                        .WithMany()
+                        .HasForeignKey("EnrollmentId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("JaxPower.Ipqc.Api.Domain.ProductionLine", null)
+                        .WithMany()
+                        .HasForeignKey("LineId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("JaxPower.Ipqc.Api.Domain.DeviceEnrollment", b =>
+                {
+                    b.HasOne("JaxPower.Ipqc.Api.Domain.ApplicationUser", null)
+                        .WithMany()
+                        .HasForeignKey("ApprovedByUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("FK_Enrollment_Approver");
+
+                    b.HasOne("JaxPower.Ipqc.Api.Domain.ApplicationUser", null)
+                        .WithMany()
+                        .HasForeignKey("CreatedByUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_Enrollment_Creator");
+
+                    b.HasOne("JaxPower.Ipqc.Api.Domain.RegisteredDevice", null)
+                        .WithMany()
+                        .HasForeignKey("DeviceId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("JaxPower.Ipqc.Api.Domain.ProductionLine", null)
+                        .WithMany()
+                        .HasForeignKey("LineId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("JaxPower.Ipqc.Api.Domain.EnrollmentChallenge", b =>
+                {
+                    b.HasOne("JaxPower.Ipqc.Api.Domain.DeviceEnrollment", null)
+                        .WithMany()
+                        .HasForeignKey("EnrollmentId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("JaxPower.Ipqc.Api.Domain.PatrolPlan", b =>
@@ -1191,7 +1518,8 @@ namespace JaxPower.Ipqc.Api.Data.Migrations
                         .WithMany("Items")
                         .HasForeignKey("PatrolTaskSubmissionId")
                         .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
+                        .IsRequired()
+                        .HasConstraintName("FK_PatrolTaskSubmissionItems_PatrolTaskSubmissions_PatrolTaskSubmissionId");
 
                     b.Navigation("PatrolTaskSubmission");
                 });
@@ -1202,23 +1530,41 @@ namespace JaxPower.Ipqc.Api.Data.Migrations
                         .WithMany("Samples")
                         .HasForeignKey("PatrolTaskSubmissionItemId")
                         .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
+                        .IsRequired()
+                        .HasConstraintName("FK_PatrolTaskSubmissionSamples_PatrolTaskSubmissionItems_PatrolTaskSubmissionItemId");
 
                     b.Navigation("PatrolTaskSubmissionItem");
                 });
 
             modelBuilder.Entity("JaxPower.Ipqc.Api.Domain.ProvisioningAuditEvent", b =>
                 {
+                    b.HasOne("JaxPower.Ipqc.Api.Domain.RegisteredDevice", null)
+                        .WithMany()
+                        .HasForeignKey("ActorDeviceId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("FK_ProvisioningAudit_ActorDevice");
+
                     b.HasOne("JaxPower.Ipqc.Api.Domain.ApplicationUser", null)
                         .WithMany()
                         .HasForeignKey("ActorUserId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("JaxPower.Ipqc.Api.Domain.DeviceCredential", null)
+                        .WithMany()
+                        .HasForeignKey("CredentialId")
                         .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
+                        .HasConstraintName("FK_ProvisioningAudit_Credential");
 
                     b.HasOne("JaxPower.Ipqc.Api.Domain.RegisteredDevice", null)
                         .WithMany()
                         .HasForeignKey("DeviceId")
                         .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("JaxPower.Ipqc.Api.Domain.DeviceEnrollment", null)
+                        .WithMany()
+                        .HasForeignKey("EnrollmentId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("FK_ProvisioningAudit_Enrollment");
 
                     b.HasOne("JaxPower.Ipqc.Api.Domain.ProductionLine", null)
                         .WithMany()
@@ -1312,13 +1658,9 @@ namespace JaxPower.Ipqc.Api.Data.Migrations
                 {
                     b.Navigation("Samples");
                 });
-            // This repository shares provider-aware migrations. Scaffolding records SQLite's
-            // inferred store types above; let the active provider resolve those defaults.
-            // Keep model facets (length, defaults, checks, concurrency) intact. Both providers'
-            // pending-model checks must pass; revisit this if explicit store types are added.
+            // Shared migrations use provider-native defaults; preserve this after scaffolding.
             foreach (var entity in modelBuilder.Model.GetEntityTypes())
-                foreach (var property in entity.GetProperties())
-                    property.SetColumnType(null);
+                foreach (var property in entity.GetProperties()) property.SetColumnType(null);
 #pragma warning restore 612, 618
         }
     }

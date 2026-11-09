@@ -1,4 +1,52 @@
 export default {
+  enrollment: {
+  "title": "设备凭据注册",
+  "boundary": "候选证书不授予巡检权限。设备启用需要后续经验证的 mTLS 确认。",
+  "invite": "签发邀请",
+  "secretWarning": "仅在此视图显示一次。请安全交付指定 PAD 操作员，勿通过聊天或审计备注发送。",
+  "secret": "邀请密钥",
+  "dismissSecret": "隐藏密钥",
+  "expires": "到期时间（工厂时间）",
+  "id": "注册 ID",
+  "environment": "环境",
+  "versions": "预分配 / 目标绑定版本",
+  "spki": "公钥 SHA-256",
+  "csr": "CSR SHA-256",
+  "candidate": "候选凭据",
+  "credentialId": "凭据 ID",
+  "operationId": "证书签发操作 ID",
+  "certHash": "证书 SHA-256",
+  "validUntil": "候选证书有效期至",
+  "verify": "我已现场核验此 PAD、环境、设备 ID、产线、绑定版本，并与注册探针核对公钥及 CSR 指纹。",
+  "approve": "批准候选证书签发",
+  "cancel": "取消注册",
+  "revocationPending": "外部撤销或签发结果清理仍在进行。",
+  "issuerRecovery": "签发需要恢复。请与 IT 核查原签发操作，勿使用新操作 ID 重复批准。",
+  "rateLimited": "请求过多，请稍后重试。",
+  "actor": {
+    "Admin": "管理员",
+    "Device": "已验证设备",
+    "ApplicantKey": "申请公钥（设备未获信任）",
+    "System": "系统"
+  },
+  "state": {
+    "Invited": "已签发邀请",
+    "Challenged": "已签发公钥质询",
+    "PendingApproval": "等待管理员核验",
+    "Approved": "已批准候选证书签发",
+    "Issuing": "等待签发结果",
+    "IssuedUnconfirmed": "已签发，mTLS 未确认",
+    "Cancelled": "已取消",
+    "Expired": "已过期"
+  },
+  "credential": {
+    "PendingIssuance": "待签发",
+    "OutcomeUnknown": "签发结果未知",
+    "IssuedUnconfirmed": "已签发，mTLS 未确认",
+    "Revoked": "候选凭据已撤销",
+    "Failed": "签发结果被拒绝"
+  }
+},
   provisioning: {
   "title": "设备预配置",
   "boundary": "预配置资料和产线预分配不代表 PAD 已完成凭据注册，也不授予巡检执行权限。",
@@ -69,6 +117,19 @@ export default {
     "Forbidden": "您的账号无权管理设备预配置。"
   },
   "auditAction": {
+    "EnrollmentInvited": "已签发注册邀请",
+    "EnrollmentChallenged": "已签发公钥质询",
+    "EnrollmentProofVerified": "已验证申请公钥持有证明",
+    "EnrollmentApproved": "已批准候选签发",
+    "EnrollmentCancelled": "已取消注册",
+    "EnrollmentExpired": "注册已过期",
+    "CredentialIssuanceStarted": "已开始签发操作",
+    "CredentialRevocationStarted": "已开始外部撤销",
+    "CredentialRevocationRecorded": "已记录外部撤销",
+    "CredentialIssuanceFailed": "签发结果已拒绝",
+    "CredentialLateResultRevoked": "迟到签发结果保留为已撤销",
+    "CredentialCandidateIssued": "已签发候选证书（未确认）",
+    "CredentialIssuanceDeferred": "等待恢复签发结果",
     "LineCreated": "已创建产线",
     "LineRenamed": "已修改产线名称",
     "LineActivated": "已启用产线",

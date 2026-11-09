@@ -129,7 +129,9 @@ public sealed class ProductionLineManagementTests
         Assert.Equal(before, await app.StateAsync());
         Assert.Equal(HttpStatusCode.BadRequest, (await app.Admin.PostAsJsonAsync("/api/admin/devices", new { displayName = "Forged", status = "Trusted", bindingVersion = 99, lineId = task.Line, fingerprint = "fake" })).StatusCode);
         var routes = app.Factory.Services.GetRequiredService<EndpointDataSource>().Endpoints.OfType<RouteEndpoint>().Select(x => x.RoutePattern.RawText ?? "").ToList();
-        Assert.DoesNotContain(routes, x => x.Contains("pair", StringComparison.OrdinalIgnoreCase) || x.Contains("enroll", StringComparison.OrdinalIgnoreCase) || x.Contains("certificate", StringComparison.OrdinalIgnoreCase) || x.Contains("offline-grant", StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain(routes, x => x.Contains("native", StringComparison.OrdinalIgnoreCase) || x.Contains("offline-grant", StringComparison.OrdinalIgnoreCase));
+        // New bootstrap routes stay disabled by default; none can activate legacy or LineShared work.
+        Assert.Equal(HttpStatusCode.NotFound, (await app.Admin.PostAsJsonAsync($"/bootstrap/v1/enrollments/{d.Id}/receipt-challenge", new { })).StatusCode);
         foreach (var path in new[] { "/api/pairing", "/api/devices/enroll", "/api/native/session" }) Assert.Equal(HttpStatusCode.NotFound, (await app.Admin.PostAsJsonAsync(path, new { deviceId = d.Id })).StatusCode);
         Assert.DoesNotContain(routes, x => x.Contains("{id:guid}/audit") && x.Contains("delete", StringComparison.OrdinalIgnoreCase));
     }

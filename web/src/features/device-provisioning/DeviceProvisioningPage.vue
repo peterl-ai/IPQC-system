@@ -34,7 +34,7 @@
                     <a-button v-if="device.lineId" @click="open('unbind', device)">{{ t('provisioning.unbind') }}</a-button>
                     <a-button v-if="device.lineId" @click="open('replace', device)">{{ t('provisioning.replace') }}</a-button>
                     <a-button danger @click="open('revoke', device)">{{ t('provisioning.revoke') }}</a-button>
-                  </template><a-button @click="showAudit('devices', device.id)">{{ t('provisioning.audit') }}</a-button>
+                  </template><a-button @click="enrollmentDevice = device">{{ t('enrollment.title') }}</a-button><a-button @click="showAudit('devices', device.id)">{{ t('provisioning.audit') }}</a-button>
                 </a-space>
               </td>
             </tr>
@@ -65,15 +65,19 @@
     <a-drawer :open="auditOpen" :title="t('provisioning.audit')" width="min(800px, 95vw)" @close="auditOpen = false">
       <p v-if="auditLoading" role="status">{{ t('provisioning.loading') }}</p><a-alert v-if="auditError" role="alert" type="error" :message="auditError" />
       <article v-for="entry in auditRows" :key="entry.id" class="audit-entry">
-        <h3>{{ t(`provisioning.auditAction.${entry.action}`) }}</h3><p>{{ entry.actorUsername }} · {{ plantDate(entry.occurredAtUtc) }}</p><p v-if="entry.reason">{{ entry.reason }}</p>
+        <h3>{{ t(`provisioning.auditAction.${entry.action}`) }}</h3><p>{{ t(`enrollment.actor.${entry.actorKind ?? 'Admin'}`) }} · {{ entry.actorUsername }} · {{ plantDate(entry.occurredAtUtc) }}</p><p v-if="entry.reason">{{ entry.reason }}</p>
         <dl class="audit-identifiers">
           <template v-if="entry.deviceId"><dt>{{ t('provisioning.deviceId') }}</dt><dd>{{ entry.deviceId }}</dd></template>
           <dt>{{ t('provisioning.changeId') }}</dt><dd>{{ entry.changeId }}</dd>
+          <template v-if="entry.enrollmentId"><dt>{{ t('enrollment.id') }}</dt><dd>{{ entry.enrollmentId }}</dd></template>
+          <template v-if="entry.credentialId"><dt>{{ t('enrollment.credentialId') }}</dt><dd>{{ entry.credentialId }}</dd></template>
         </dl>
         <div class="audit-comparison">
           <section v-for="side in ['before', 'after'] as const" :key="side">
             <strong>{{ t(`provisioning.${side}`) }}</strong><dl v-if="entry[side]">
               <dt>{{ t('provisioning.name') }}</dt><dd>{{ entry[side]!.name }}</dd><dt>{{ t('provisioning.revision') }}</dt><dd>{{ entry[side]!.revision }}</dd>
+              <template v-if="entry[side]!.enrollmentState"><dt>{{ t('enrollment.title') }}</dt><dd>{{ t(`enrollment.state.${entry[side]!.enrollmentState}`) }}</dd><dt>{{ t('enrollment.spki') }}</dt><dd>{{ entry[side]!.spkiSha256 || '—' }}</dd></template>
+              <template v-if="entry[side]!.credentialState"><dt>{{ t('enrollment.candidate') }}</dt><dd>{{ t(`enrollment.credential.${entry[side]!.credentialState}`) }}</dd></template>
               <template v-if="entry[side]!.status"><dt>{{ t('provisioning.status') }}</dt><dd>{{ t(`provisioning.state.${entry[side]!.status}`) }}</dd><dt>{{ t('provisioning.reservation') }}</dt><dd>{{ lineLabel(entry[side]!.lineId) }}</dd><dt>{{ t('provisioning.bindingVersion') }}</dt><dd>{{ entry[side]!.bindingVersion }}</dd></template>
               <template v-else><dt>{{ t('provisioning.code') }}</dt><dd>{{ entry[side]!.code }}</dd><dt>{{ t('provisioning.status') }}</dt><dd>{{ t(entry[side]!.isActive ? 'common.active' : 'common.inactive') }}</dd></template>
             </dl><p v-else>—</p>
@@ -82,6 +86,7 @@
       </article>
       <a-button v-if="auditRows.length < auditTotal" :loading="auditLoading" @click="moreAudit">{{ t('provisioning.more') }}</a-button>
     </a-drawer>
+    <DeviceEnrollmentPanel v-if="enrollmentDevice" :key="enrollmentDevice.id" :device="enrollmentDevice" @close="enrollmentDevice = null" @changed="load" />
   </section>
 </template>
 
@@ -90,10 +95,12 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import PageHeader from '@/components/PageHeader.vue'
+import DeviceEnrollmentPanel from './DeviceEnrollmentPanel.vue'
 import { errorCode, provisioningApi, type Audit, type Device, type DeviceAction, type Line } from './api'
 const { t } = useI18n()
 type Operation = 'lineCreate' | 'lineRename' | 'lineActivate' | 'lineDeactivate' | 'deviceCreate' | 'deviceEdit' | DeviceAction
 const tab = ref<'lines' | 'devices'>('lines')
+const enrollmentDevice = ref<Device | null>(null)
 const lines = ref<Line[]>([]), devices = ref<Device[]>([]), lineOptions = ref<Line[]>([]), deviceOptions = ref<Device[]>([])
 const linePage = ref(1), devicePage = ref(1), lineTotal = ref(0), deviceTotal = ref(0)
 const currentPage = computed(() => tab.value === 'lines' ? linePage.value : devicePage.value)

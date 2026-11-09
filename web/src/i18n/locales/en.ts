@@ -1,4 +1,52 @@
 export default {
+  enrollment: {
+  "title": "Device Enrollment",
+  "boundary": "Candidate certificates do not authorize patrol. Device activation requires the future verified mTLS confirmation.",
+  "invite": "Issue Invitation",
+  "secretWarning": "Shown once in this view. Deliver securely to the intended PAD operator. Never send it through chat or audit notes.",
+  "secret": "Invitation secret",
+  "dismissSecret": "Hide Secret",
+  "expires": "Expires (plant time)",
+  "id": "Enrollment ID",
+  "environment": "Environment",
+  "versions": "Reserved / target binding version",
+  "spki": "Public-key SHA-256",
+  "csr": "CSR SHA-256",
+  "candidate": "Candidate credential",
+  "credentialId": "Credential ID",
+  "operationId": "Issuance operation ID",
+  "certHash": "Certificate SHA-256",
+  "validUntil": "Candidate valid until",
+  "verify": "I physically verified this PAD, environment, device ID, line, binding versions and public-key / CSR fingerprints against the enrollment probe.",
+  "approve": "Approve Candidate Issuance",
+  "cancel": "Cancel Enrollment",
+  "revocationPending": "External revocation or issuance outcome cleanup is pending.",
+  "issuerRecovery": "Issuance needs recovery. Check the issuance operation with IT; approval must not be repeated under a new operation ID.",
+  "rateLimited": "Too many requests. Wait before retrying.",
+  "actor": {
+    "Admin": "Admin",
+    "Device": "Verified Device",
+    "ApplicantKey": "Applicant Key (untrusted device)",
+    "System": "System"
+  },
+  "state": {
+    "Invited": "Invitation issued",
+    "Challenged": "Key challenge issued",
+    "PendingApproval": "Awaiting Admin verification",
+    "Approved": "Approved for candidate issuance",
+    "Issuing": "Issuance outcome pending",
+    "IssuedUnconfirmed": "Issued, mTLS unconfirmed",
+    "Cancelled": "Cancelled",
+    "Expired": "Expired"
+  },
+  "credential": {
+    "PendingIssuance": "Pending issuance",
+    "OutcomeUnknown": "Issuance outcome unknown",
+    "IssuedUnconfirmed": "Issued, mTLS unconfirmed",
+    "Revoked": "Revoked candidate",
+    "Failed": "Issuer result rejected"
+  }
+},
   provisioning: {
   "title": "Device Provisioning",
   "boundary": "Provisioning metadata and line reservations do not enroll a PAD or authorize patrol execution.",
@@ -69,6 +117,19 @@ export default {
     "Forbidden": "Your account cannot manage provisioning."
   },
   "auditAction": {
+    "EnrollmentInvited": "Enrollment invitation issued",
+    "EnrollmentChallenged": "Enrollment key challenge issued",
+    "EnrollmentProofVerified": "Applicant key proof verified",
+    "EnrollmentApproved": "Candidate issuance approved",
+    "EnrollmentCancelled": "Enrollment cancelled",
+    "EnrollmentExpired": "Enrollment expired",
+    "CredentialIssuanceStarted": "Issuance operation started",
+    "CredentialRevocationStarted": "External revocation started",
+    "CredentialRevocationRecorded": "External revocation recorded",
+    "CredentialIssuanceFailed": "Issuer result rejected",
+    "CredentialLateResultRevoked": "Late issuance retained as revoked",
+    "CredentialCandidateIssued": "Candidate certificate issued (unconfirmed)",
+    "CredentialIssuanceDeferred": "Issuance outcome recovery pending",
     "LineCreated": "Line created",
     "LineRenamed": "Line renamed",
     "LineActivated": "Line activated",
