@@ -31,7 +31,8 @@ public sealed class DeviceEnrollmentLifecycle(IpqcDbContext db, ProvisioningStor
         { c.ConsumedAtUtc = clock.GetUtcNow().UtcDateTime; c.Revision++; }
         if (k is not null)
         {
-            k.ExternalRevocationPending = k.CertificatePem is not null || k.State == CandidateCredentialState.OutcomeUnknown;
+            // Closure cannot acknowledge an outstanding signer operation, even without a stored certificate.
+            k.ExternalRevocationPending |= k.CertificatePem is not null || k.State == CandidateCredentialState.OutcomeUnknown;
             k.State = CandidateCredentialState.Revoked; k.Revision++;
         }
         Audit(e, d, terminal == EnrollmentState.Expired ? "EnrollmentExpired" : "EnrollmentCancelled", actor, before, k, reason, change);

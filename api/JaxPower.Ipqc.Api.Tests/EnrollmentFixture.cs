@@ -36,6 +36,10 @@ internal sealed class ControlledIssuer(DevelopmentDeviceCertificateIssuer inner)
     public bool Available { get; set; } = true;
     public bool LoseResponseOnce { get; set; }
     public bool Unknown { get; set; }
+    public bool FailRevocation { get; set; }
+    public List<Guid> Revocations { get; } = [];
+    public List<Guid> RevocationAcknowledgements { get; } = [];
+    public Func<Task>? BeforeRevoke { get; set; }
     public int Issues { get; private set; }
     public string? Failure { get; private set; }
     public Func<Task>? BeforeIssue { get; set; }
@@ -53,7 +57,14 @@ internal sealed class ControlledIssuer(DevelopmentDeviceCertificateIssuer inner)
         if (LoseResponseOnce) { LoseResponseOnce = false; throw new IOException("Injected lost signer response."); }
         return Transform?.Invoke(request, result) ?? result;
     }
-    public Task RevokeAsync(Guid operation, CancellationToken ct) { OutsideTransaction?.Invoke(); return inner.RevokeAsync(operation, ct); }
+    public async Task RevokeAsync(Guid operation, CancellationToken ct)
+    {
+        OutsideTransaction?.Invoke(); Revocations.Add(operation);
+        if (BeforeRevoke is not null) await BeforeRevoke();
+        if (FailRevocation) throw new IOException("Injected unresolved signer revocation.");
+        await inner.RevokeAsync(operation, ct);
+        RevocationAcknowledgements.Add(operation);
+    }
 }
 internal sealed class EnrollmentFixture : IAsyncDisposable
 {
