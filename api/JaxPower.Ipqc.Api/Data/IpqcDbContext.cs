@@ -3,7 +3,7 @@ using Microsoft.EntityFrameworkCore;
 
 namespace JaxPower.Ipqc.Api.Data;
 
-public sealed class IpqcDbContext(DbContextOptions<IpqcDbContext> options) : DbContext(options)
+public sealed partial class IpqcDbContext(DbContextOptions<IpqcDbContext> options) : DbContext(options)
 {
     public DbSet<ProductionLine> ProductionLines => Set<ProductionLine>();
     public DbSet<RegisteredDevice> RegisteredDevices => Set<RegisteredDevice>();
@@ -36,6 +36,7 @@ public sealed class IpqcDbContext(DbContextOptions<IpqcDbContext> options) : DbC
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
+        ConfigureEnrollment(modelBuilder);
         var line = modelBuilder.Entity<ProductionLine>();
         line.HasKey(x => x.Id);
         line.Property(x => x.Revision).HasDefaultValue(1L).HasSentinel(1L).IsConcurrencyToken();

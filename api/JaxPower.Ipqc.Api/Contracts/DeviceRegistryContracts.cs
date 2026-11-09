@@ -18,7 +18,9 @@ public sealed record DeviceOutput(Guid Id, string DisplayName, string? Model, st
     string CredentialStatus = "NotEnrolled", bool CanExecuteLineShared = false);
 public sealed record ProvisioningSnapshot(string Name, long Revision, string? Code = null, bool? IsActive = null,
     string? Model = null, string? Serial = null, string? Status = null, Guid? LineId = null,
-    long? BindingVersion = null, Guid? ReplacedByDeviceId = null);
-public sealed record ProvisioningAuditOutput(Guid Id, Guid ChangeId, string Action, Guid ActorUserId,
+    long? BindingVersion = null, Guid? ReplacedByDeviceId = null, Guid? EnrollmentId = null,
+    string? EnrollmentState = null, long? EnrollmentRevision = null, Guid? CredentialId = null,
+    string? CredentialState = null, string? SpkiSha256 = null, string? CertificateSha256 = null);
+public sealed record ProvisioningAuditOutput(Guid Id, Guid ChangeId, string Action, Guid? ActorUserId,
     string ActorUsername, DateTime OccurredAtUtc, string? Reason, ProvisioningSnapshot? Before, ProvisioningSnapshot After,
-    Guid? DeviceId);
+    Guid? DeviceId, string ActorKind, Guid? ActorDeviceId, Guid? EnrollmentId, Guid? CredentialId);

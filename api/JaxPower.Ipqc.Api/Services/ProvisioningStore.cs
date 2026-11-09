@@ -67,10 +67,16 @@ public sealed class ProvisioningStore(IpqcDbContext db, TimeProvider clock)
     }
     public void Audit(Guid? line, Guid? device, string action, Guid actor, string username,
         ProvisioningSnapshot? before, ProvisioningSnapshot after, string? reason = null, Guid? changeId = null)
+        => Audit(line, device, action, ProvisioningActor.Admin(actor, username), before, after, reason, changeId);
+
+    public void Audit(Guid? line, Guid? device, string action, ProvisioningActor actor,
+        ProvisioningSnapshot? before, ProvisioningSnapshot after, string? reason = null, Guid? changeId = null,
+        Guid? enrollmentId = null, Guid? credentialId = null)
     {
         db.ProvisioningAuditEvents.Add(new ProvisioningAuditEvent { Id = Guid.NewGuid(), ChangeId = changeId ?? Guid.NewGuid(),
             ProductionLineId = line, DeviceId = device, OldLineId = before?.LineId, NewLineId = after.LineId,
-            Action = action, ActorUserId = actor, ActorUsername = username,
+            Action = action, ActorUserId = actor.UserId, ActorKind = actor.Kind, ActorDeviceId = actor.DeviceId, ActorUsername = actor.Name,
+            EnrollmentId = enrollmentId, CredentialId = credentialId,
             OccurredAtUtc = clock.GetUtcNow().UtcDateTime, Reason = reason,
             BeforeJson = before is null ? null : JsonSerializer.Serialize(before), AfterJson = JsonSerializer.Serialize(after) });
     }
@@ -84,6 +90,7 @@ public sealed class ProvisioningStore(IpqcDbContext db, TimeProvider clock)
         return new(rows.Select(x => new ProvisioningAuditOutput(x.Id, x.ChangeId, x.Action, x.ActorUserId, x.ActorUsername,
             DateTime.SpecifyKind(x.OccurredAtUtc, DateTimeKind.Utc), x.Reason,
             x.BeforeJson is null ? null : JsonSerializer.Deserialize<ProvisioningSnapshot>(x.BeforeJson),
-            JsonSerializer.Deserialize<ProvisioningSnapshot>(x.AfterJson)!, x.DeviceId)).ToList(), page, size, total);
+            JsonSerializer.Deserialize<ProvisioningSnapshot>(x.AfterJson)!, x.DeviceId, x.ActorKind.ToString(),
+            x.ActorDeviceId, x.EnrollmentId, x.CredentialId)).ToList(), page, size, total);
     }
 }

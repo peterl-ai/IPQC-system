@@ -5,7 +5,7 @@ using Microsoft.EntityFrameworkCore;
 
 namespace JaxPower.Ipqc.Api.Services;
 
-public sealed class DeviceRegistryService(IpqcDbContext db, ProvisioningStore store, TimeProvider clock)
+public sealed class DeviceRegistryService(IpqcDbContext db, ProvisioningStore store, TimeProvider clock, DeviceEnrollmentLifecycle enrollment)
 {
     public static DeviceOutput Output(RegisteredDevice x) => new(x.Id, x.DisplayName, x.Model, x.Serial, x.Status.ToString(),
         x.LineId, x.Revision, x.BindingVersion, x.ReplacedByDeviceId, Utc(x.CreatedAtUtc), Utc(x.UpdatedAtUtc),
@@ -47,8 +47,10 @@ public sealed class DeviceRegistryService(IpqcDbContext db, ProvisioningStore st
         if ((row.LineId is not null) != rebind || row.LineId == input.LineId) throw new ProvisioningException("InvalidTransition");
         var reason = rebind ? ProvisioningStore.Text(input.Reason, 2000) : null;
         await AvailableLineAsync(input.LineId, ct);
+        var change = Guid.NewGuid();
+        await enrollment.InvalidateDeviceAsync(row, "ReservationChanged", ProvisioningActor.Admin(actor, username), change, ct);
         var before = Snapshot(row); row.LineId = input.LineId; Advance(row, actor);
-        store.Audit(null, id, rebind ? "ReservationRebound" : "ReservationBound", actor, username, before, Snapshot(row), reason);
+        store.Audit(null, id, rebind ? "ReservationRebound" : "ReservationBound", actor, username, before, Snapshot(row), reason, change);
         return Output(row);
     }, ct);
     public Task<DeviceOutput> ReleaseAsync(Guid id, DeviceReasonInput input, bool revoke, Guid actor, string username, CancellationToken ct) => store.WriteAsync(async () =>
@@ -56,10 +58,12 @@ public sealed class DeviceRegistryService(IpqcDbContext db, ProvisioningStore st
         var row = await PendingAsync(id, input.ExpectedRevision, ct);
         var reason = ProvisioningStore.Text(input.Reason, 2000);
         if (!revoke && row.LineId is null) throw new ProvisioningException("InvalidTransition");
+        var change = Guid.NewGuid();
+        await enrollment.InvalidateDeviceAsync(row, revoke ? "DeviceRevoked" : "ReservationReleased", ProvisioningActor.Admin(actor, username), change, ct);
         var before = Snapshot(row); row.LineId = null;
         if (revoke) { row.Status = DeviceProvisioningStatus.Revoked; row.TerminalAtUtc = clock.GetUtcNow().UtcDateTime; row.TerminalReason = reason; }
         Advance(row, actor);
-        store.Audit(null, id, revoke ? "DeviceRevoked" : "ReservationUnbound", actor, username, before, Snapshot(row), reason);
+        store.Audit(null, id, revoke ? "DeviceRevoked" : "ReservationUnbound", actor, username, before, Snapshot(row), reason, change);
         return Output(row);
     }, ct);
     public Task<DeviceOutput> ReplaceAsync(Guid id, DeviceReplaceInput input, Guid actor, string username, CancellationToken ct) => store.WriteAsync(async () =>
@@ -72,6 +76,8 @@ public sealed class DeviceRegistryService(IpqcDbContext db, ProvisioningStore st
         var directory = await db.ProductionLines.SingleAsync(x => x.Id == line, ct);
         if (!directory.IsActive) throw new ProvisioningException("InactiveLine");
         var beforeOld = Snapshot(old); var beforeNew = Snapshot(replacement); var change = Guid.NewGuid();
+        await enrollment.InvalidateDeviceAsync(old, "DeviceReplaced", ProvisioningActor.Admin(actor, username), change, ct);
+        await enrollment.InvalidateDeviceAsync(replacement, "ReplacementReservation", ProvisioningActor.Admin(actor, username), change, ct);
         old.LineId = null; old.Status = DeviceProvisioningStatus.Replaced; old.ReplacedByDeviceId = replacement.Id;
         old.TerminalAtUtc = clock.GetUtcNow().UtcDateTime; old.TerminalReason = reason; Advance(old, actor);
         // Release the unique slot before assigning it; both saves and both audit events are one transaction.

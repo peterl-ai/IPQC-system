@@ -24,6 +24,16 @@ builder.Services.AddScoped<ApplicationUserService>();
 builder.Services.AddScoped<ProvisioningStore>();
 builder.Services.AddScoped<ProductionLineService>();
 builder.Services.AddScoped<DeviceRegistryService>();
+var enrollmentOptions = builder.Configuration.GetSection("Enrollment").Get<DeviceEnrollmentOptions>() ?? new();
+enrollmentOptions.Validate(builder.Environment);
+builder.Services.AddSingleton(enrollmentOptions);
+builder.Services.AddSingleton<IDeviceCertificateIssuer>(services => enrollmentOptions.DevelopmentIssuerEnabled
+    ? new DevelopmentDeviceCertificateIssuer(enrollmentOptions, services.GetRequiredService<IHostEnvironment>())
+    : new UnconfiguredDeviceCertificateIssuer());
+builder.Services.AddScoped<DeviceEnrollmentLifecycle>();
+builder.Services.AddScoped<DeviceEnrollmentService>();
+builder.Services.AddScoped<DeviceCredentialIssuance>();
+builder.Services.AddHostedService<DeviceCredentialIssuanceWorker>();
 builder.Services.AddScoped<PatrolStandardService>();
 builder.Services.AddScoped<PatrolPlanService>();
 builder.Services.AddScoped<PatrolTaskGenerationService>();
@@ -89,6 +99,12 @@ builder.Services.AddAuthorization(options =>
 });
 builder.Services.AddRateLimiter(options =>
 {
+    options.AddPolicy("enrollment-bootstrap", context => RateLimitPartition.GetFixedWindowLimiter(
+        context.Connection.RemoteIpAddress?.ToString() ?? "unknown", _ => new FixedWindowRateLimiterOptions {
+            PermitLimit = 20, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 }));
+    options.AddPolicy("enrollment-admin", context => RateLimitPartition.GetFixedWindowLimiter(
+        context.User.FindFirstValue(ClaimTypes.NameIdentifier) ?? context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+        _ => new FixedWindowRateLimiterOptions { PermitLimit = 60, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 }));
     options.AddPolicy("login", context => RateLimitPartition.GetFixedWindowLimiter(
         context.Connection.RemoteIpAddress?.ToString() ?? "unknown", _ => new FixedWindowRateLimiterOptions {
             PermitLimit = 20, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 }));
@@ -118,14 +134,24 @@ if (app.Environment.IsDevelopment())
     app.UseCors("LocalVite");
 }
 if (!app.Environment.IsDevelopment()) app.UseExceptionHandler();
-app.UseRateLimiter();
+app.Use(async (context, next) =>
+{
+    if (DeviceEnrollmentEndpoints.IsEnrollmentPath(context.Request.Path))
+    {
+        DeviceEnrollmentEndpoints.LimitEnrollmentBody(context);
+        if (context.Request.ContentLength > 32768) { context.Response.StatusCode = 413; return; }
+    }
+    await next(context);
+});
 app.UseAuthentication();
+app.UseRateLimiter();
 app.UseAuthorization();
 
 app.MapAuth();
 app.MapUsers();
 app.MapProductionLines();
 app.MapDeviceRegistry();
+app.MapDeviceEnrollment();
 
 var group = app.MapGroup("/api/patrol-standards").RequireAuthorization(IpqcPermissions.StandardsRead);
 group.MapGet("", async (string? standardName, string? factoryCode, string? lineCode, int? page, int? pageSize,

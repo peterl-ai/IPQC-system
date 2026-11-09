@@ -201,7 +201,7 @@ internal sealed class ProvisioningFixture : IAsyncDisposable
     public required WebApplicationFactory<Program> Factory { get; init; }
     public required HttpClient Admin { get; init; }
     public required string Path { get; init; }
-    public static async Task<ProvisioningFixture> CreateAsync(SaveChangesInterceptor? interceptor = null)
+    public static async Task<ProvisioningFixture> CreateAsync(SaveChangesInterceptor? interceptor = null, Action<IServiceCollection>? configure = null)
     {
         var path = System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"ipqc-provisioning-{Guid.NewGuid():N}.db");
         var factory = new WebApplicationFactory<Program>().WithWebHostBuilder(web =>
@@ -212,6 +212,7 @@ internal sealed class ProvisioningFixture : IAsyncDisposable
             {
                 services.RemoveAll<DbContextOptions<IpqcDbContext>>();
                 services.AddDbContext<IpqcDbContext>(o => { o.UseSqlite($"Data Source={path};Default Timeout=5"); if (interceptor is not null) o.AddInterceptors(interceptor); });
+                configure?.Invoke(services);
             });
         });
         using (var scope = factory.Services.CreateScope()) await scope.ServiceProvider.GetRequiredService<IpqcDbContext>().Database.MigrateAsync();
