@@ -3,6 +3,7 @@ namespace JaxPower.Ipqc.Api.Domain;
 public sealed class ProductionLine
 {
     public Guid Id { get; set; }
+    public long Revision { get; set; } = 1;
     private string code = "";
     public string Code
     {

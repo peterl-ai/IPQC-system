@@ -170,8 +170,7 @@ namespace JaxPower.Ipqc.Api.Data.Migrations
                         .IsConcurrencyToken()
                         .ValueGeneratedOnAdd()
                         .HasColumnType("INTEGER")
-                        .HasDefaultValue(1)
-                        .HasSentinel(1);
+                        .HasDefaultValue(1);
 
                     b.HasKey("Id");
 
@@ -489,8 +488,7 @@ namespace JaxPower.Ipqc.Api.Data.Migrations
                         .IsConcurrencyToken()
                         .ValueGeneratedOnAdd()
                         .HasColumnType("INTEGER")
-                        .HasDefaultValue(1)
-                        .HasSentinel(1);
+                        .HasDefaultValue(1);
 
                     b.Property<string>("WorkshopCodeSnapshot")
                         .HasColumnType("TEXT");
@@ -862,6 +860,12 @@ namespace JaxPower.Ipqc.Api.Data.Migrations
                         .HasMaxLength(100)
                         .HasColumnType("TEXT");
 
+                    b.Property<long>("Revision")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(1L);
+
                     b.HasKey("Id");
 
                     b.HasIndex("NormalizedCode")
@@ -870,6 +874,76 @@ namespace JaxPower.Ipqc.Api.Data.Migrations
                     b.ToTable("ProductionLines", t =>
                         {
                             t.HasCheckConstraint("CK_ProductionLines_Code", "length(trim(\"Code\")) > 0 AND length(trim(\"NormalizedCode\")) > 0");
+
+                            t.HasCheckConstraint("CK_ProductionLines_Revision", "\"Revision\" >= 1");
+                        });
+                });
+
+            modelBuilder.Entity("JaxPower.Ipqc.Api.Domain.ProvisioningAuditEvent", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Action")
+                        .IsRequired()
+                        .HasMaxLength(80)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("ActorUserId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ActorUsername")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("AfterJson")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("BeforeJson")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("ChangeId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("DeviceId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("NewLineId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("OccurredAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("OldLineId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("ProductionLineId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Reason")
+                        .HasMaxLength(2000)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ActorUserId");
+
+                    b.HasIndex("ChangeId");
+
+                    b.HasIndex("NewLineId");
+
+                    b.HasIndex("OldLineId");
+
+                    b.HasIndex("DeviceId", "OccurredAtUtc");
+
+                    b.HasIndex("ProductionLineId", "OccurredAtUtc");
+
+                    b.ToTable("ProvisioningAuditEvents", t =>
+                        {
+                            t.HasCheckConstraint("CK_ProvisioningAuditEvents_Aggregate", "(\"DeviceId\" IS NOT NULL AND \"ProductionLineId\" IS NULL) OR (\"DeviceId\" IS NULL AND \"ProductionLineId\" IS NOT NULL)");
                         });
                 });
 
@@ -914,6 +988,77 @@ namespace JaxPower.Ipqc.Api.Data.Migrations
                     b.HasIndex("UserId", "RevokedAtUtc");
 
                     b.ToTable("RefreshTokenSessions");
+                });
+
+            modelBuilder.Entity("JaxPower.Ipqc.Api.Domain.RegisteredDevice", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("BindingVersion")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("CreatedByUserId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("DisplayName")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("LineId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Model")
+                        .HasMaxLength(200)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("ReplacedByDeviceId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("Revision")
+                        .IsConcurrencyToken()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Serial")
+                        .HasMaxLength(200)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime?>("TerminalAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("TerminalReason")
+                        .HasMaxLength(2000)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("UpdatedAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("UpdatedByUserId")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CreatedByUserId");
+
+                    b.HasIndex("LineId")
+                        .IsUnique();
+
+                    b.HasIndex("ReplacedByDeviceId");
+
+                    b.HasIndex("UpdatedByUserId");
+
+                    b.ToTable("RegisteredDevices", t =>
+                        {
+                            t.HasCheckConstraint("CK_RegisteredDevices_Provisioning", "\"Status\" IN (1, 2, 3) AND \"Revision\" >= 1 AND \"BindingVersion\" >= 1 AND ((\"Status\" = 1 AND \"TerminalAtUtc\" IS NULL AND \"TerminalReason\" IS NULL) OR (\"Status\" IN (2, 3) AND \"LineId\" IS NULL AND \"TerminalAtUtc\" IS NOT NULL AND \"TerminalReason\" IS NOT NULL AND length(trim(\"TerminalReason\")) > 0)) AND ((\"Status\" = 3 AND \"ReplacedByDeviceId\" IS NOT NULL AND \"ReplacedByDeviceId\" <> \"Id\") OR (\"Status\" <> 3 AND \"ReplacedByDeviceId\" IS NULL))");
+                        });
                 });
 
             modelBuilder.Entity("JaxPower.Ipqc.Api.Domain.PatrolPlan", b =>
@@ -1062,6 +1207,35 @@ namespace JaxPower.Ipqc.Api.Data.Migrations
                     b.Navigation("PatrolTaskSubmissionItem");
                 });
 
+            modelBuilder.Entity("JaxPower.Ipqc.Api.Domain.ProvisioningAuditEvent", b =>
+                {
+                    b.HasOne("JaxPower.Ipqc.Api.Domain.ApplicationUser", null)
+                        .WithMany()
+                        .HasForeignKey("ActorUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("JaxPower.Ipqc.Api.Domain.RegisteredDevice", null)
+                        .WithMany()
+                        .HasForeignKey("DeviceId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("JaxPower.Ipqc.Api.Domain.ProductionLine", null)
+                        .WithMany()
+                        .HasForeignKey("NewLineId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("JaxPower.Ipqc.Api.Domain.ProductionLine", null)
+                        .WithMany()
+                        .HasForeignKey("OldLineId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("JaxPower.Ipqc.Api.Domain.ProductionLine", null)
+                        .WithMany()
+                        .HasForeignKey("ProductionLineId")
+                        .OnDelete(DeleteBehavior.Restrict);
+                });
+
             modelBuilder.Entity("JaxPower.Ipqc.Api.Domain.RefreshTokenSession", b =>
                 {
                     b.HasOne("JaxPower.Ipqc.Api.Domain.ApplicationUser", "User")
@@ -1071,6 +1245,31 @@ namespace JaxPower.Ipqc.Api.Data.Migrations
                         .IsRequired();
 
                     b.Navigation("User");
+                });
+
+            modelBuilder.Entity("JaxPower.Ipqc.Api.Domain.RegisteredDevice", b =>
+                {
+                    b.HasOne("JaxPower.Ipqc.Api.Domain.ApplicationUser", null)
+                        .WithMany()
+                        .HasForeignKey("CreatedByUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("JaxPower.Ipqc.Api.Domain.ProductionLine", null)
+                        .WithMany()
+                        .HasForeignKey("LineId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("JaxPower.Ipqc.Api.Domain.RegisteredDevice", null)
+                        .WithMany()
+                        .HasForeignKey("ReplacedByDeviceId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("JaxPower.Ipqc.Api.Domain.ApplicationUser", null)
+                        .WithMany()
+                        .HasForeignKey("UpdatedByUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("JaxPower.Ipqc.Api.Domain.ApplicationUser", b =>
@@ -1113,6 +1312,13 @@ namespace JaxPower.Ipqc.Api.Data.Migrations
                 {
                     b.Navigation("Samples");
                 });
+            // This repository shares provider-aware migrations. Scaffolding records SQLite's
+            // inferred store types above; let the active provider resolve those defaults.
+            // Keep model facets (length, defaults, checks, concurrency) intact. Both providers'
+            // pending-model checks must pass; revisit this if explicit store types are added.
+            foreach (var entity in modelBuilder.Model.GetEntityTypes())
+                foreach (var property in entity.GetProperties())
+                    property.SetColumnType(null);
 #pragma warning restore 612, 618
         }
     }

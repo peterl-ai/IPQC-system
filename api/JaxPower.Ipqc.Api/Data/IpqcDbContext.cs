@@ -6,6 +6,8 @@ namespace JaxPower.Ipqc.Api.Data;
 public sealed class IpqcDbContext(DbContextOptions<IpqcDbContext> options) : DbContext(options)
 {
     public DbSet<ProductionLine> ProductionLines => Set<ProductionLine>();
+    public DbSet<RegisteredDevice> RegisteredDevices => Set<RegisteredDevice>();
+    public DbSet<ProvisioningAuditEvent> ProvisioningAuditEvents => Set<ProvisioningAuditEvent>();
     public DbSet<ApplicationUser> ApplicationUsers => Set<ApplicationUser>();
     public DbSet<RefreshTokenSession> RefreshTokenSessions => Set<RefreshTokenSession>();
     public DbSet<PatrolStandard> PatrolStandards => Set<PatrolStandard>();
@@ -20,15 +22,56 @@ public sealed class IpqcDbContext(DbContextOptions<IpqcDbContext> options) : DbC
     public DbSet<PatrolTaskSubmissionSample> PatrolTaskSubmissionSamples => Set<PatrolTaskSubmissionSample>();
     public DbSet<PatrolTaskReview> PatrolTaskReviews => Set<PatrolTaskReview>();
 
+    private void EnsureAppendOnlyAudit()
+    {
+        if (ChangeTracker.Entries<ProvisioningAuditEvent>().Any(x => x.State is EntityState.Modified or EntityState.Deleted))
+            throw new InvalidOperationException("Provisioning audit events are append-only.");
+    }
+
+    public override int SaveChanges(bool acceptAllChangesOnSuccess)
+    { EnsureAppendOnlyAudit(); return base.SaveChanges(acceptAllChangesOnSuccess); }
+
+    public override Task<int> SaveChangesAsync(bool acceptAllChangesOnSuccess, CancellationToken cancellationToken = default)
+    { EnsureAppendOnlyAudit(); return base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken); }
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         var line = modelBuilder.Entity<ProductionLine>();
         line.HasKey(x => x.Id);
+        line.Property(x => x.Revision).HasDefaultValue(1L).HasSentinel(1L).IsConcurrencyToken();
+        line.ToTable(t => t.HasCheckConstraint("CK_ProductionLines_Revision", "\"Revision\" >= 1"));
         line.Property(x => x.Code).HasMaxLength(100).IsRequired().UsePropertyAccessMode(PropertyAccessMode.Property);
         line.Property(x => x.NormalizedCode).HasMaxLength(100).IsRequired();
         line.Property(x => x.Name).HasMaxLength(200).IsRequired();
         line.HasIndex(x => x.NormalizedCode).IsUnique();
         line.ToTable(t => t.HasCheckConstraint("CK_ProductionLines_Code", "length(trim(\"Code\")) > 0 AND length(trim(\"NormalizedCode\")) > 0"));
+        var device = modelBuilder.Entity<RegisteredDevice>();
+        device.HasKey(x => x.Id);
+        device.Property(x => x.DisplayName).HasMaxLength(200).IsRequired();
+        device.Property(x => x.Model).HasMaxLength(200);
+        device.Property(x => x.Serial).HasMaxLength(200);
+        device.Property(x => x.TerminalReason).HasMaxLength(2000);
+        device.Property(x => x.Revision).IsConcurrencyToken();
+        device.HasIndex(x => x.LineId).IsUnique();
+        device.HasOne<ProductionLine>().WithMany().HasForeignKey(x => x.LineId).OnDelete(DeleteBehavior.Restrict);
+        device.HasOne<RegisteredDevice>().WithMany().HasForeignKey(x => x.ReplacedByDeviceId).OnDelete(DeleteBehavior.Restrict);
+        device.HasOne<ApplicationUser>().WithMany().HasForeignKey(x => x.CreatedByUserId).OnDelete(DeleteBehavior.Restrict);
+        device.HasOne<ApplicationUser>().WithMany().HasForeignKey(x => x.UpdatedByUserId).OnDelete(DeleteBehavior.Restrict);
+        device.ToTable(t => t.HasCheckConstraint("CK_RegisteredDevices_Provisioning", "\"Status\" IN (1, 2, 3) AND \"Revision\" >= 1 AND \"BindingVersion\" >= 1 AND ((\"Status\" = 1 AND \"TerminalAtUtc\" IS NULL AND \"TerminalReason\" IS NULL) OR (\"Status\" IN (2, 3) AND \"LineId\" IS NULL AND \"TerminalAtUtc\" IS NOT NULL AND \"TerminalReason\" IS NOT NULL AND length(trim(\"TerminalReason\")) > 0)) AND ((\"Status\" = 3 AND \"ReplacedByDeviceId\" IS NOT NULL AND \"ReplacedByDeviceId\" <> \"Id\") OR (\"Status\" <> 3 AND \"ReplacedByDeviceId\" IS NULL))"));
+        var audit = modelBuilder.Entity<ProvisioningAuditEvent>();
+        audit.HasKey(x => x.Id);
+        audit.Property(x => x.Action).HasMaxLength(80).IsRequired();
+        audit.Property(x => x.ActorUsername).HasMaxLength(100).IsRequired();
+        audit.Property(x => x.Reason).HasMaxLength(2000);
+        audit.HasIndex(x => new { x.DeviceId, x.OccurredAtUtc });
+        audit.HasIndex(x => new { x.ProductionLineId, x.OccurredAtUtc });
+        audit.HasIndex(x => x.ChangeId);
+        audit.HasOne<ProductionLine>().WithMany().HasForeignKey(x => x.ProductionLineId).OnDelete(DeleteBehavior.Restrict);
+        audit.HasOne<ProductionLine>().WithMany().HasForeignKey(x => x.OldLineId).OnDelete(DeleteBehavior.Restrict);
+        audit.HasOne<ProductionLine>().WithMany().HasForeignKey(x => x.NewLineId).OnDelete(DeleteBehavior.Restrict);
+        audit.HasOne<RegisteredDevice>().WithMany().HasForeignKey(x => x.DeviceId).OnDelete(DeleteBehavior.Restrict);
+        audit.HasOne<ApplicationUser>().WithMany().HasForeignKey(x => x.ActorUserId).OnDelete(DeleteBehavior.Restrict);
+        audit.ToTable(t => t.HasCheckConstraint("CK_ProvisioningAuditEvents_Aggregate", "(\"DeviceId\" IS NOT NULL AND \"ProductionLineId\" IS NULL) OR (\"DeviceId\" IS NULL AND \"ProductionLineId\" IS NOT NULL)"));
         var user = modelBuilder.Entity<ApplicationUser>();
         user.HasKey(x => x.Id);
         user.Property(x => x.Username).HasMaxLength(100).IsRequired();
@@ -142,14 +185,19 @@ public sealed class IpqcDbContext(DbContextOptions<IpqcDbContext> options) : DbC
         var submissionItem = modelBuilder.Entity<PatrolTaskSubmissionItem>();
         submissionItem.HasKey(x => x.Id);
         submissionItem.HasIndex(x => new { x.PatrolTaskSubmissionId, x.SequenceNo }).IsUnique();
-        submissionItem.HasOne(x => x.PatrolTaskSubmission).WithMany(x => x.Items).HasForeignKey(x => x.PatrolTaskSubmissionId).OnDelete(DeleteBehavior.Cascade);
+        // Preserve names already used by the shared historical migrations instead of
+        // introducing Npgsql's different convention-based truncation into model diffs.
+        submissionItem.HasOne(x => x.PatrolTaskSubmission).WithMany(x => x.Items).HasForeignKey(x => x.PatrolTaskSubmissionId)
+            .HasConstraintName("FK_PatrolTaskSubmissionItems_PatrolTaskSubmissions_PatrolTaskSubmissionId").OnDelete(DeleteBehavior.Cascade);
         foreach (var property in typeof(PatrolTaskSubmissionItem).GetProperties().Where(p => p.PropertyType == typeof(string)))
             submissionItem.Property(property.Name).HasMaxLength(2000);
 
         var submissionSample = modelBuilder.Entity<PatrolTaskSubmissionSample>();
         submissionSample.HasKey(x => x.Id);
-        submissionSample.HasIndex(x => new { x.PatrolTaskSubmissionItemId, x.SequenceNo }).IsUnique();
-        submissionSample.HasOne(x => x.PatrolTaskSubmissionItem).WithMany(x => x.Samples).HasForeignKey(x => x.PatrolTaskSubmissionItemId).OnDelete(DeleteBehavior.Cascade);
+        submissionSample.HasIndex(x => new { x.PatrolTaskSubmissionItemId, x.SequenceNo })
+            .HasDatabaseName("IX_PatrolTaskSubmissionSamples_PatrolTaskSubmissionItemId_SequenceNo").IsUnique();
+        submissionSample.HasOne(x => x.PatrolTaskSubmissionItem).WithMany(x => x.Samples).HasForeignKey(x => x.PatrolTaskSubmissionItemId)
+            .HasConstraintName("FK_PatrolTaskSubmissionSamples_PatrolTaskSubmissionItems_PatrolTaskSubmissionItemId").OnDelete(DeleteBehavior.Cascade);
 
         var review = modelBuilder.Entity<PatrolTaskReview>();
         review.HasKey(x => x.Id);

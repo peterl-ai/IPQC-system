@@ -4,6 +4,16 @@ import en from './locales/en'
 import zhCN from './locales/zh-CN'
 
 describe('language preference persistence', () => {
+  it('provides matching non-empty bilingual provisioning keys without fake paired status', () => {
+    function keys(value: object, prefix = ''): string[] {
+      return Object.entries(value).flatMap(([key, child]) => typeof child === 'string' ? [`${prefix}${key}`] : keys(child, `${prefix}${key}.`))
+    }
+    expect(keys(en.provisioning)).toEqual(keys(zhCN.provisioning))
+    expect(en.provisioning.state.PendingCredential).toContain('Pending')
+    expect(zhCN.provisioning.state.PendingCredential).toBe('待凭据注册')
+    for (const locale of [en.provisioning, zhCN.provisioning]) expect(Object.values(locale.error).every(Boolean)).toBe(true)
+    expect(Object.keys(en.provisioning.state)).toEqual(['PendingCredential', 'Revoked', 'Replaced'])
+  })
   it('defaults to English for an unsupported or missing value', () => {
     const storage = { getItem: () => null }
     expect(getSavedLocale(storage)).toBe('en')

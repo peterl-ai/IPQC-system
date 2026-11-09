@@ -21,6 +21,9 @@ builder.Services.AddSingleton(new AuthenticationClock(TimeProvider.System));
 builder.Services.AddScoped<IPasswordHasher<ApplicationUser>, PasswordHasher<ApplicationUser>>();
 builder.Services.AddScoped<LocalAuthService>();
 builder.Services.AddScoped<ApplicationUserService>();
+builder.Services.AddScoped<ProvisioningStore>();
+builder.Services.AddScoped<ProductionLineService>();
+builder.Services.AddScoped<DeviceRegistryService>();
 builder.Services.AddScoped<PatrolStandardService>();
 builder.Services.AddScoped<PatrolPlanService>();
 builder.Services.AddScoped<PatrolTaskGenerationService>();
@@ -121,6 +124,8 @@ app.UseAuthorization();
 
 app.MapAuth();
 app.MapUsers();
+app.MapProductionLines();
+app.MapDeviceRegistry();
 
 var group = app.MapGroup("/api/patrol-standards").RequireAuthorization(IpqcPermissions.StandardsRead);
 group.MapGet("", async (string? standardName, string? factoryCode, string? lineCode, int? page, int? pageSize,

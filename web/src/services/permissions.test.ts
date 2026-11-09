@@ -2,6 +2,13 @@ import { describe, expect, it } from 'vitest'
 import { defaultRouteForRole, hasPermission, rolePermissions } from './permissions'
 
 describe('role permission mapping', () => {
+  it('keeps provisioning outside PQE and IPQA business permissions', () => {
+    expect(hasPermission('admin', 'provisioning:view')).toBe(true)
+    expect(hasPermission('pqe', 'provisioning:view')).toBe(false)
+    expect(hasPermission('ipqa', 'provisioning:view')).toBe(false)
+    expect(hasPermission(['DeviceRegistry.Read'], 'provisioning:view')).toBe(true)
+    expect(hasPermission(['PatrolStandards.Read', 'Users.Read'], 'provisioning:view')).toBe(false)
+  })
   it('grants Admin every Phase 1A web permission', () => {
     expect(rolePermissions.admin).toEqual(expect.arrayContaining([
       'standards:view', 'plans:view', 'tasks:view', 'records:view', 'users:view',
