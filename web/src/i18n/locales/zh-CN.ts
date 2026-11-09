@@ -20,6 +20,8 @@ export default {
   "deactivate": "停用",
   "activate": "启用",
   "audit": "审计历史",
+  "deviceId": "设备 ID",
+  "changeId": "变更 ID",
   "bind": "预分配产线",
   "rebind": "更改预分配",
   "unbind": "释放预分配",

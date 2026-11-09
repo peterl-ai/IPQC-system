@@ -20,6 +20,8 @@ export default {
   "deactivate": "Deactivate",
   "activate": "Activate",
   "audit": "Audit History",
+  "deviceId": "Device ID",
+  "changeId": "Change ID",
   "bind": "Reserve Line",
   "rebind": "Change Reservation",
   "unbind": "Release Reservation",

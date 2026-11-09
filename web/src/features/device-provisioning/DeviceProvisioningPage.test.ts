@@ -5,7 +5,7 @@ import { createI18n } from 'vue-i18n'
 import en from '@/i18n/locales/en'
 import zh from '@/i18n/locales/zh-CN'
 import DeviceProvisioningPage from './DeviceProvisioningPage.vue'
-import { provisioningApi, ProvisioningApiError, type Device, type Line } from './api'
+import { provisioningApi, ProvisioningApiError, type Audit, type Device, type Line, type Snapshot } from './api'
 vi.mock('./api', async (original) => ({ ...await original<typeof import('./api')>(), provisioningApi: {
   lines: vi.fn(), devices: vi.fn(), lineOptions: vi.fn(), deviceOptions: vi.fn(), createLine: vi.fn(), renameLine: vi.fn(), setLineActive: vi.fn(),
   createDevice: vi.fn(), editDevice: vi.fn(), deviceAction: vi.fn(), audit: vi.fn(),
@@ -54,6 +54,28 @@ describe('Admin provisioning page', () => {
     await fill('provision-reason', 'Release reservation'); await click('Confirm')
     expect(provisioningApi.deviceAction).toHaveBeenCalledWith(pending, 'unbind', { reason: 'Release reservation' })
   })
+  it.each(['bind', 'rebind'] as const)('filters occupied line choices for %s using device IDs, including inventory outside the visible page', async (action) => {
+    const self = { ...pending, lineId: action === 'bind' ? null : active.id }
+    const free = { ...active, id: 'free', code: 'FREE' }, occupied = { ...active, id: 'occupied', code: 'TAKEN' }
+    vi.mocked(provisioningApi.devices).mockResolvedValue({ items: [self], total: 1, page: 1, pageSize: 20 })
+    vi.mocked(provisioningApi.deviceOptions).mockResolvedValue([self, { ...pending, id: 'other-pad', displayName: self.displayName, lineId: occupied.id }])
+    vi.mocked(provisioningApi.lineOptions).mockResolvedValue([active, free, occupied, inactive])
+    await mount(); await click('Devices'); await click(action === 'bind' ? 'Reserve Line' : 'Change Reservation')
+    expect([...host.querySelectorAll('#provision-line option')].map(x => x.getAttribute('value'))).toEqual(action === 'bind' ? ['', active.id, free.id] : ['', free.id])
+    await fill('provision-line', free.id)
+    if (action === 'rebind') await fill('provision-reason', 'Move')
+    await click('Confirm')
+    expect(provisioningApi.deviceAction).toHaveBeenCalledWith(self, action, { lineId: free.id, ...(action === 'rebind' ? { reason: 'Move' } : {}) })
+  })
+  it('retains server conflict handling when a selectable line becomes occupied after inventory was loaded', async () => {
+    const self = { ...pending, lineId: null }
+    vi.mocked(provisioningApi.devices).mockResolvedValue({ items: [self], total: 1, page: 1, pageSize: 20 })
+    vi.mocked(provisioningApi.deviceOptions).mockResolvedValue([self])
+    vi.mocked(provisioningApi.deviceAction).mockRejectedValue(new ProvisioningApiError('LineOccupied', 409))
+    await mount(); await click('Devices'); await click('Reserve Line'); await fill('provision-line', active.id); await click('Confirm')
+    expect(host.textContent).toContain(en.provisioning.error.LineOccupied)
+    expect(provisioningApi.deviceAction).toHaveBeenCalledTimes(1); expect(host.querySelector('[role=dialog]')).not.toBeNull()
+  })
   it('creates a line with validated input, then refreshes', async () => {
     await mount(); await click('Add'); await click('Confirm'); expect(provisioningApi.createLine).not.toHaveBeenCalled()
     await fill('provision-code', 'L3'); await fill('provision-name', 'Third line'); await click('Confirm')
@@ -78,8 +100,29 @@ describe('Admin provisioning page', () => {
     expect(host.textContent).not.toContain('预分配产线'); expect(host.textContent).not.toContain('重新启用')
   })
   it('loads audit actor, time, prior line and binding version, and reports list errors', async () => {
-    vi.mocked(provisioningApi.audit).mockResolvedValue({ items: [{ id: 'event', changeId: 'change', action: 'DeviceRevoked', actorUserId: 'user', actorUsername: 'admin', occurredAtUtc: '2026-11-06T12:00:00Z', reason: 'Retire', before: { name: 'PAD A', revision: 7, code: null, isActive: null, model: null, serial: null, status: 'PendingCredential', lineId: 'line', bindingVersion: 4, replacedByDeviceId: null }, after: { name: 'PAD A', revision: 8, code: null, isActive: null, model: null, serial: null, status: 'Revoked', lineId: null, bindingVersion: 5, replacedByDeviceId: null } }], total: 1, page: 1, pageSize: 20 })
+    vi.mocked(provisioningApi.audit).mockResolvedValue({ items: [{ id: 'event', changeId: 'change', deviceId: pending.id, action: 'DeviceRevoked', actorUserId: 'user', actorUsername: 'admin', occurredAtUtc: '2026-11-06T12:00:00Z', reason: 'Retire', before: { name: 'PAD A', revision: 7, code: null, isActive: null, model: null, serial: null, status: 'PendingCredential', lineId: 'line', bindingVersion: 4, replacedByDeviceId: null }, after: { name: 'PAD A', revision: 8, code: null, isActive: null, model: null, serial: null, status: 'Revoked', lineId: null, bindingVersion: 5, replacedByDeviceId: null } }], total: 1, page: 1, pageSize: 20 })
     await mount(); await click('Devices'); await click('Audit History'); expect(host.querySelector('aside')?.textContent).toContain('admin'); expect(host.querySelector('aside')?.textContent).toContain('L1')
     vi.mocked(provisioningApi.lines).mockRejectedValue(new Error('offline')); await click('Refresh'); expect(host.textContent).toContain(en.provisioning.error.Unavailable)
+  })
+  it.each(['en', 'zh-CN'])('identifies same-name replacement devices and their shared change ID in line history (%s)', async (locale) => {
+    const snapshot: Snapshot = { name: 'Same PAD name', revision: 2, code: null, isActive: null, model: null, serial: null, status: 'PendingCredential', lineId: active.id, bindingVersion: 2, replacedByDeviceId: null }
+    const replaced: Audit = { id: 'old-event', changeId: 'correlated-replacement', deviceId: 'old-device-id', action: 'DeviceReplaced', actorUserId: 'admin-id', actorUsername: 'admin', occurredAtUtc: '2026-11-06T12:00:00Z', reason: 'Replace hardware', before: snapshot, after: { ...snapshot, revision: 3, bindingVersion: 3, status: 'Replaced', lineId: null, replacedByDeviceId: 'new-device-id' } }
+    const reserved: Audit = { ...replaced, id: 'new-event', deviceId: 'new-device-id', action: 'ReplacementReserved', before: { ...snapshot, revision: 1, bindingVersion: 1, lineId: null }, after: snapshot }
+    vi.mocked(provisioningApi.audit).mockResolvedValueOnce({ items: [replaced], total: 2, page: 1, pageSize: 20 }).mockResolvedValueOnce({ items: [reserved], total: 2, page: 2, pageSize: 20 })
+    const labels = locale === 'en' ? en.provisioning : zh.provisioning
+    await mount(locale); await click(labels.audit)
+    expect(provisioningApi.audit).toHaveBeenCalledWith('production-lines', active.id, 1)
+    await click(labels.more)
+    expect(provisioningApi.audit).toHaveBeenCalledWith('production-lines', active.id, 2)
+    const entries = [...host.querySelectorAll('aside article')]
+    expect(entries).toHaveLength(2)
+    for (const [index, entry] of entries.entries()) {
+      expect(entry.textContent).toContain(index === 0 ? replaced.deviceId : reserved.deviceId)
+      expect(entry.textContent).toContain(labels.deviceId); expect(entry.textContent).toContain(labels.changeId)
+      expect(entry.textContent).toContain(replaced.changeId); expect(entry.textContent).toContain('Same PAD name')
+      expect(entry.textContent).toContain('admin'); expect(entry.textContent).toContain('2026-11-06'); expect(entry.textContent).toContain(replaced.reason)
+      expect(entry.textContent).toContain(labels.before); expect(entry.textContent).toContain(labels.after)
+      expect(entry.textContent).toContain(labels.bindingVersion); expect(entry.textContent).toContain(active.code)
+    }
   })
 })

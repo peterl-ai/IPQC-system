@@ -15,7 +15,7 @@ export interface Snapshot {
   lineId: string | null; bindingVersion: number | null; replacedByDeviceId: string | null
 }
 export interface Audit {
-  id: string; changeId: string; action: string; actorUserId: string; actorUsername: string
+  id: string; changeId: string; deviceId: string | null; action: string; actorUserId: string; actorUsername: string
   occurredAtUtc: string; reason: string | null; before: Snapshot | null; after: Snapshot
 }
 export type DeviceAction = 'bind' | 'rebind' | 'unbind' | 'revoke' | 'replace'

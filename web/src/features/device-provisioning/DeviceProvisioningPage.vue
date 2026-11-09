@@ -57,7 +57,7 @@
           <label for="provision-model">{{ t('provisioning.model') }}<input id="provision-model" v-model="draft.model" maxlength="200" :disabled="busy"></label>
           <label for="provision-serial">{{ t('provisioning.serial') }}<input id="provision-serial" v-model="draft.serial" maxlength="200" :disabled="busy"></label>
         </template>
-        <label v-if="operation === 'bind' || operation === 'rebind'" for="provision-line">{{ t('provisioning.reservation') }}<select id="provision-line" v-model="draft.lineId" required :disabled="busy"><option value="" disabled>{{ t('provisioning.select') }}</option><option v-for="line in lineOptions.filter(x => x.isActive && x.id !== deviceTarget?.lineId)" :key="line.id" :value="line.id">{{ line.code }} — {{ line.name }}</option></select></label>
+        <label v-if="operation === 'bind' || operation === 'rebind'" for="provision-line">{{ t('provisioning.reservation') }}<select id="provision-line" v-model="draft.lineId" required :disabled="busy"><option value="" disabled>{{ t('provisioning.select') }}</option><option v-for="line in availableLines" :key="line.id" :value="line.id">{{ line.code }} — {{ line.name }}</option></select></label>
         <label v-if="operation === 'replace'" for="provision-replacement">{{ t('provisioning.replacement') }}<select id="provision-replacement" v-model="draft.replacementId" required :disabled="busy"><option value="" disabled>{{ t('provisioning.select') }}</option><option v-for="d in deviceOptions.filter(x => x.status === 'PendingCredential' && !x.lineId && x.id !== deviceTarget?.id)" :key="d.id" :value="d.id">{{ d.displayName }}</option></select></label>
         <label v-if="needsReason" for="provision-reason">{{ t('provisioning.reason') }}<textarea id="provision-reason" v-model="draft.reason" maxlength="2000" required :disabled="busy" /></label>
       </form>
@@ -66,6 +66,10 @@
       <p v-if="auditLoading" role="status">{{ t('provisioning.loading') }}</p><a-alert v-if="auditError" role="alert" type="error" :message="auditError" />
       <article v-for="entry in auditRows" :key="entry.id" class="audit-entry">
         <h3>{{ t(`provisioning.auditAction.${entry.action}`) }}</h3><p>{{ entry.actorUsername }} · {{ plantDate(entry.occurredAtUtc) }}</p><p v-if="entry.reason">{{ entry.reason }}</p>
+        <dl class="audit-identifiers">
+          <template v-if="entry.deviceId"><dt>{{ t('provisioning.deviceId') }}</dt><dd>{{ entry.deviceId }}</dd></template>
+          <dt>{{ t('provisioning.changeId') }}</dt><dd>{{ entry.changeId }}</dd>
+        </dl>
         <div class="audit-comparison">
           <section v-for="side in ['before', 'after'] as const" :key="side">
             <strong>{{ t(`provisioning.${side}`) }}</strong><dl v-if="entry[side]">
@@ -96,6 +100,10 @@ const currentPage = computed(() => tab.value === 'lines' ? linePage.value : devi
 const loading = ref(false), error = ref(''), busy = ref(false), modalError = ref('')
 const operation = ref<Operation | null>(null), target = ref<Line | Device | null>(null)
 const deviceTarget = computed(() => target.value && 'displayName' in target.value ? target.value : null)
+const availableLines = computed(() => {
+  const occupied = new Set(deviceOptions.value.filter(x => x.id !== deviceTarget.value?.id).map(x => x.lineId))
+  return lineOptions.value.filter(x => x.isActive && x.id !== deviceTarget.value?.lineId && !occupied.has(x.id))
+})
 const lineTarget = computed(() => target.value && 'code' in target.value ? target.value : null)
 const editsName = computed(() => ['lineCreate', 'lineRename', 'deviceCreate', 'deviceEdit'].includes(operation.value ?? ''))
 const needsReason = computed(() => ['rebind', 'unbind', 'revoke', 'replace'].includes(operation.value ?? ''))
@@ -169,5 +177,5 @@ onMounted(load)
 .audit-entry { padding: 16px 0; border-bottom: 1px solid #e5e7eb; }
 .audit-comparison { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
 .audit-comparison dt { color: #6b7280; }
-.audit-comparison dd { margin: 0 0 8px; overflow-wrap: anywhere; }
+.audit-comparison dd, .audit-identifiers dd { margin: 0 0 8px; overflow-wrap: anywhere; }
 </style>

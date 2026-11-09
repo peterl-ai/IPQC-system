@@ -20,4 +20,5 @@ public sealed record ProvisioningSnapshot(string Name, long Revision, string? Co
     string? Model = null, string? Serial = null, string? Status = null, Guid? LineId = null,
     long? BindingVersion = null, Guid? ReplacedByDeviceId = null);
 public sealed record ProvisioningAuditOutput(Guid Id, Guid ChangeId, string Action, Guid ActorUserId,
-    string ActorUsername, DateTime OccurredAtUtc, string? Reason, ProvisioningSnapshot? Before, ProvisioningSnapshot After);
+    string ActorUsername, DateTime OccurredAtUtc, string? Reason, ProvisioningSnapshot? Before, ProvisioningSnapshot After,
+    Guid? DeviceId);

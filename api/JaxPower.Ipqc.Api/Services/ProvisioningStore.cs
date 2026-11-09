@@ -76,12 +76,14 @@ public sealed class ProvisioningStore(IpqcDbContext db, TimeProvider clock)
     }
     public async Task<ProvisioningPage<ProvisioningAuditOutput>> AuditAsync(Guid id, bool device, int page, int size, CancellationToken ct)
     {
-        var query = db.ProvisioningAuditEvents.AsNoTracking().Where(x => device ? x.DeviceId == id : x.ProductionLineId == id);
+        // One predicate preserves one row per event even when both snapshots reference this line.
+        var query = db.ProvisioningAuditEvents.AsNoTracking().Where(x => device ? x.DeviceId == id :
+            x.ProductionLineId == id || x.OldLineId == id || x.NewLineId == id);
         var total = await query.CountAsync(ct);
         var rows = await query.OrderByDescending(x => x.OccurredAtUtc).ThenBy(x => x.Id).Skip((page - 1) * size).Take(size).ToListAsync(ct);
         return new(rows.Select(x => new ProvisioningAuditOutput(x.Id, x.ChangeId, x.Action, x.ActorUserId, x.ActorUsername,
             DateTime.SpecifyKind(x.OccurredAtUtc, DateTimeKind.Utc), x.Reason,
             x.BeforeJson is null ? null : JsonSerializer.Deserialize<ProvisioningSnapshot>(x.BeforeJson),
-            JsonSerializer.Deserialize<ProvisioningSnapshot>(x.AfterJson)!)).ToList(), page, size, total);
+            JsonSerializer.Deserialize<ProvisioningSnapshot>(x.AfterJson)!, x.DeviceId)).ToList(), page, size, total);
     }
 }
