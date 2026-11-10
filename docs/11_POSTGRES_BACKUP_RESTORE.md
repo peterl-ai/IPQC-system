@@ -1,5 +1,9 @@
 # PostgreSQL backup and restore runbook (Web v1)
 
+## R32-02 authority recovery before reopening
+
+An older backup can resurrect refresh rows revoked after that backup. Keep ingress closed, scheduler/outbound integration and optional enrollment cleanup disabled during restore. Reconcile account security; rotate/reconcile personal JWT signing trust and revoke restored refresh authority before reopening authentication/new personal reads, recording the maintenance operation through the approved operating process. Require fresh online login/verification; an old client receipt is never online authority. Do not remove family columns, infer historical lineage or introduce a device epoch. Restored accepted business/audit history stays intact. Later WorkContext/Submit/evidence recovery adds its own reconciliation before those writes are enabled. No automatic production script or completed IT drill is claimed. R32-02 Down refuses destructive personal-family removal; application rollback retains schema and disables new personal business ingress. See [contract](16_R3202_PERSONAL_ACCESS.md).
+
 This is an operational template, not a claim that JAX Power backups are configured or tested. Operations must assign an owner, schedule, retention period, secure storage, and a non-production restore target before pilot use. A daily logical backup is a starting recommendation; choose frequency from the acceptable data-loss window.
 
 ## Backup

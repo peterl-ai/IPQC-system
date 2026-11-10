@@ -20,6 +20,12 @@ builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddSingleton(new AuthenticationClock(TimeProvider.System));
 builder.Services.AddScoped<IPasswordHasher<ApplicationUser>, PasswordHasher<ApplicationUser>>();
 builder.Services.AddScoped<LocalAuthService>();
+builder.Services.AddScoped<PersonalSessionStore>();
+builder.Services.AddScoped<PersonalAccess>();
+builder.Services.AddScoped<LinePatrolReadService>();
+builder.Services.AddSingleton(new PersonalAccessOptions {
+    EnvironmentId = builder.Configuration["PersonalAccess:EnvironmentId"],
+    LineIds = builder.Configuration.GetSection("LinePatrol:LineIds").Get<string[]>() ?? [] });
 builder.Services.AddScoped<ApplicationUserService>();
 builder.Services.AddScoped<ProvisioningStore>();
 builder.Services.AddScoped<ProductionLineService>();
@@ -102,6 +108,7 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme).AddJw
 });
 builder.Services.AddAuthorization(options =>
 {
+    options.AddPolicy(PersonalAccess.CurrentPolicy, policy => policy.RequireAuthenticatedUser());
     foreach (var permission in IpqcPermissions.All)
         options.AddPolicy(permission, policy => policy.RequireAuthenticatedUser()
             .RequireClaim(IpqcPermissions.ClaimType, permission));
@@ -145,9 +152,35 @@ if (app.Environment.IsDevelopment())
     app.UseCors("LocalVite");
 }
 if (!app.Environment.IsDevelopment()) app.UseExceptionHandler();
+app.Use(async (context, next) =>
+{
+    if (context.Request.Path.StartsWithSegments("/api/auth") || context.Request.Path.StartsWithSegments("/api/line-patrol"))
+        context.Response.Headers.CacheControl = "no-store";
+    try { await next(context); }
+    catch (PersonalAccessException ex) when (!context.Response.HasStarted)
+    {
+        context.Response.Headers.CacheControl = "no-store";
+        await Results.Problem(statusCode: ex.Status, title: ex.Message,
+            extensions: new Dictionary<string, object?> { ["code"] = ex.Message }).ExecuteAsync(context);
+    }
+    catch (Exception ex) when (PersonalSessionStore.IsTransient(ex) && !context.Response.HasStarted)
+    {
+        await Results.Problem(statusCode: 503, title: "Personal access temporarily unavailable.",
+            extensions: new Dictionary<string, object?> { ["code"] = "PersonalAccessTemporarilyUnavailable" }).ExecuteAsync(context);
+    }
+});
 app.UseAuthentication();
 app.UseRateLimiter();
 app.UseAuthorization();
+app.Use(async (context, next) =>
+{
+    // Current-family authorization precedes minimal-API query/body binding.
+    // Role authorization has already preserved normal 401/403 ordering.
+    if (context.GetEndpoint()?.Metadata.GetMetadata<PersonalAccessRequirement>() is { } requirement)
+        context.Items[typeof(PersonalAuthority)] = await context.RequestServices.GetRequiredService<PersonalAccess>()
+            .ValidateAsync(context.User, requirement.Business, context.RequestAborted);
+    await next(context);
+});
 app.Use(async (context, next) =>
 {
     // Retired routes do not bind or read bodies; authorization must precede limits on retained cancellation.
@@ -161,6 +194,7 @@ app.Use(async (context, next) =>
 });
 
 app.MapAuth();
+app.MapLinePatrol();
 app.MapUsers();
 app.MapProductionLines();
 app.MapDeviceRegistry();

@@ -10,6 +10,10 @@ Device provisioning/enrollment is retired at both routes and services. Retired A
 
 `Enrollment:CleanupEnabled` defaults false; old enabling flags cannot reopen enrollment or signing. Explicit cleanup only closes/reconciles original operations, outside DB transactions for Recover/Revoke, and clears pending only after signer acknowledgement plus atomic audit commit. No production signer is configured. Keep the original environment, issuer keys and receipt journal until old obligations are resolved. See [current cleanup and verification evidence](docs/15_R3201_VERIFICATION.md). The P1-02/P1-03A descriptions below record historical implementation, not commands to re-enable it.
 
+## R32-02 personal session and read foundation
+
+The R32-02 implementation adds stable personal refresh families, atomic account/session lifecycle, a 72-hour local-policy receipt contract and personally authorized **non-executing** line/task reads. See [exact contracts and verification](docs/16_R3202_PERSONAL_ACCESS.md). Configure `PersonalAccess:EnvironmentId` and the two real `LinePatrol:LineIds` separately; missing new settings leave legacy login/Web/APIs usable and return visible configuration errors only on the new personal surface. No line IDs or production endpoints are seeded. Existing legacy JWT/cookie/report/ownership behavior and R32-01 retirement remain; new routes require current database family authority and do not use devices. Android, WorkContext, shared writes/Submit and LineShared generation remain deferred. This feature is for PR review, not production activation.
+
 ## Product direction
 
 The product has two major clients:

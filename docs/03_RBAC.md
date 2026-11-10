@@ -1,5 +1,9 @@
 # 03 — Role-Based Access Control
 
+## Rev3.2 personal read foundation
+
+`LinePatrol.Read` is granted only to eligible IPQA accounts. New `/api/line-patrol/*` routes also require a current signed personal family/environment matched to a live unrevoked refresh row and current DB user/AuthVersion. Admin/PQE review permissions are unchanged and do not grant IPQA execution. Old Web navigation and LegacyPersonalV1 APIs keep existing policies and owner semantics. The new directory/read DTOs grant no task write permission. Owner-only `/api/auth/personal-sessions/{id}/revoke` requires current personal-family auth, permits forced-change users to close their own prior family and never closes another user's family. See [contract](16_R3202_PERSONAL_ACCESS.md).
+
 ## Roles
 
 ### Admin

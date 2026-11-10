@@ -5,6 +5,32 @@ on:
   pull_request:
 
 jobs:
+  postgres:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_DB: ipqc_test
+          POSTGRES_USER: ipqc_test
+          POSTGRES_PASSWORD: synthetic-ci-only
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U ipqc_test -d ipqc_test"
+          --health-interval 5s --health-timeout 5s --health-retries 12
+    env:
+      IPQC_TEST_POSTGRES_DISPOSABLE: 'true'
+      IPQC_TEST_POSTGRES_CONNECTION: 'Host=localhost;Port=5432;Database=ipqc_test;Username=ipqc_test;Password=synthetic-ci-only'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - run: dotnet restore api/JaxPower.Ipqc.slnx
+      - run: dotnet build api/JaxPower.Ipqc.slnx --configuration Release --no-restore
+      - run: dotnet test api/JaxPower.Ipqc.slnx --configuration Release --no-build --filter FullyQualifiedName~PersonalSessionPostgresTests
+
   backend:
     runs-on: ubuntu-latest
     steps:

@@ -10,6 +10,22 @@ const json = (body: unknown, status = 200) => new Response(JSON.stringify(body),
 describe('local web session', () => {
   beforeEach(() => { authSession.clear(); vi.unstubAllGlobals() })
 
+  it.each([null, 'synthetic-personal-family'])('keeps cookie authentication compatible with optional family metadata: %s', async (family) => {
+    const response = { ...auth, personalSessionId: family, personalSessionEnvironmentId: family ? 'synthetic-test' : null,
+      personalSessionExpiresAtUtc: family ? '2026-11-24T20:00:00Z' : null }
+    const fetch = vi.fn().mockResolvedValueOnce(json(response)).mockResolvedValueOnce(json(user))
+      .mockResolvedValueOnce(json(response)).mockResolvedValueOnce(json(user))
+      .mockResolvedValueOnce(new Response(null, { status: 204 }))
+    vi.stubGlobal('fetch', fetch)
+    await authSession.login('admin', 'TestOnlyPass123')
+    expect(await authSession.refresh()).toBe(true)
+    expect(fetch.mock.calls[2][1].body).toBe('{}')
+    expect(fetch.mock.calls[2][1].credentials).toBe('same-origin')
+    await authSession.logout()
+    expect(authSession.accessToken.value).toBeNull()
+    expect(authSession.user.value).toBeNull()
+  })
+
   it('logs in with real credentials and accepts /api/me as current-user truth', async () => {
     const fetch = vi.fn().mockResolvedValueOnce(json(auth)).mockResolvedValueOnce(json(user))
     vi.stubGlobal('fetch', fetch)

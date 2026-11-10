@@ -10,7 +10,11 @@ public static class AuthEndpoints
 {
     public static void MapAuth(this WebApplication app)
     {
-        var group = app.MapGroup("/api/auth");
+        var group = app.MapGroup("/api/auth").AddEndpointFilter(async (context, next) =>
+        {
+            context.HttpContext.Response.Headers.CacheControl = "no-store";
+            return await next(context);
+        });
         group.MapPost("/login", async (LoginInput input, LocalAuthService auth,
             HttpContext http, CancellationToken ct) =>
         {
@@ -36,10 +40,17 @@ public static class AuthEndpoints
         group.MapPost("/logout", async (RefreshInput? input, LocalAuthService auth,
             HttpContext http, CancellationToken ct) =>
         {
-            await auth.LogoutAsync(input?.RefreshToken ?? http.Request.Cookies[LocalAuthService.RefreshCookie], ct);
+            await auth.LogoutAsync(IpqcPermissions.UserId(http.User), PersonalAccess.SignedFamily(http.User),
+                input?.RefreshToken ?? http.Request.Cookies[LocalAuthService.RefreshCookie], ct);
             ClearCookie(http);
             return Results.NoContent();
         }).RequireAuthorization();
+        PersonalAccess.RequireCurrent(group.MapPost("/personal-sessions/{personalSessionId:guid}/revoke",
+            async (Guid personalSessionId, LocalAuthService auth, HttpContext http, CancellationToken ct) =>
+            {
+                await auth.LogoutAsync(IpqcPermissions.UserId(http.User), personalSessionId, null, ct);
+                return Results.NoContent();
+            }), business: false);
         group.MapPost("/change-password", async (ChangePasswordInput input, LocalAuthService auth,
             HttpContext http, CancellationToken ct) =>
         {

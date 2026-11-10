@@ -10,6 +10,7 @@ public static class IpqcPermissions
     public const string PlansWrite = "PatrolPlans.Write";
     public const string TasksReview = "PatrolTasks.Review";
     public const string TasksExecuteOwn = "PatrolTasks.ExecuteOwn";
+    public const string LinePatrolRead = "LinePatrol.Read";
     public const string RecordsRead = "CompletedRecords.Read";
     public const string RecordsExport = "CompletedRecords.Export";
     public const string UsersRead = "Users.Read";
@@ -21,7 +22,7 @@ public static class IpqcPermissions
     public const string ClaimType = "ipqc_permission";
 
     public static readonly string[] All = [StandardsRead, StandardsWrite, PlansRead, PlansWrite,
-        TasksReview, TasksExecuteOwn, RecordsRead, RecordsExport, UsersRead, UsersWrite, LinesRead, LinesWrite, DevicesRead, DevicesWrite];
+        TasksReview, TasksExecuteOwn, LinePatrolRead, RecordsRead, RecordsExport, UsersRead, UsersWrite, LinesRead, LinesWrite, DevicesRead, DevicesWrite];
     private static readonly string[] Business = [StandardsRead, StandardsWrite, PlansRead, PlansWrite,
         TasksReview, RecordsRead, RecordsExport];
 
@@ -29,7 +30,7 @@ public static class IpqcPermissions
     {
         "Admin" => [.. Business, UsersRead, UsersWrite, LinesRead, LinesWrite, DevicesRead, DevicesWrite],
         "PQE" => Business,
-        "IPQA" => [TasksExecuteOwn, RecordsRead, RecordsExport],
+        "IPQA" => [TasksExecuteOwn, LinePatrolRead, RecordsRead, RecordsExport],
         _ => []
     };
 
