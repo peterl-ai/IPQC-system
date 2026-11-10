@@ -1,5 +1,7 @@
 # P1-03A candidate device enrollment
 
+> Historical P1-03A reference, superseded by [approved Rev3.2](architecture/IPQC_ANDROID_ARCHITECTURE_V1_REV3_2_2026-11-10.md) and R32-01. Do not execute the old enable/probe steps below. New device mutations, invitations/approvals and all Bootstrap operations are retired unconditionally; P1-03B is cancelled. Admin history, controlled cancel/revoke and original-operation cleanup remain. See [current cleanup configuration and verification](15_R3201_VERIFICATION.md). Historical protocol/migration evidence is retained, not claimed as current enrollment capability.
+
 Implementation reference, subordinate to approved Architecture Rev3.1 and the binding Implementation Handoff (including F2). Neither authority is amended here.
 
 ## Security boundary

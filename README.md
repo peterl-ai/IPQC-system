@@ -2,6 +2,14 @@
 
 Internal JAX Power IPQC platform that replaces the **IPQC / Line Patrol portion** of Jinko GQMS for new JAX Power operations.
 
+## Rev3.2 / R32-01 current direction
+
+[Approved Rev3.2](docs/architecture/IPQC_ANDROID_ARCHITECTURE_V1_REV3_2_2026-11-10.md) and its [Handoff Supersession](docs/architecture/IPQC_ANDROID_ARCHITECTURE_V1_REV3_2_IMPLEMENTATION_HANDOFF_SUPERSESSION_2026-11-10.md) supersede the older device-PKI direction. Future Android uses personal login → server-backed line selection → tasks on both SM-X210/API35 and SM-T500/API30 (one minSdk30 app). P1-03B is cancelled; R32-01 implements no Android, personal-session extension or LineShared execution.
+
+Device provisioning/enrollment is retired at both routes and services. Retired Admin writes retain 401/403 authorization, then return `410 DeviceProvisioningRetired`; the four Bootstrap operations return 404. Admin line management, historical device/enrollment/audit reads, controlled revoke/cancel and all legacy business/auth/report APIs remain available. Existing reservations still block line deactivation until controlled revoke. Historical rows, migrations and typed audit remain intact.
+
+`Enrollment:CleanupEnabled` defaults false; old enabling flags cannot reopen enrollment or signing. Explicit cleanup only closes/reconciles original operations, outside DB transactions for Recover/Revoke, and clears pending only after signer acknowledgement plus atomic audit commit. No production signer is configured. Keep the original environment, issuer keys and receipt journal until old obligations are resolved. See [current cleanup and verification evidence](docs/15_R3201_VERIFICATION.md). The P1-02/P1-03A descriptions below record historical implementation, not commands to re-enable it.
+
 ## Product direction
 
 The product has two major clients:
@@ -82,11 +90,9 @@ Reject/resubmit history must be retained for auditability.
 
 ## Android target device
 
-Current plant tablet reference:
-- Samsung Galaxy Tab A7
-- Model: SM-T500
-- Android 11
-- One UI Core 3.1
+Current plant tablets (reported inventory):
+- Line 1: Samsung Galaxy Tab A9+ / SM-X210, Android 15 / API35.
+- Line 2: Samsung Galaxy Tab A7 / SM-T500, Android 11 / API30.
 
 The future Android app must run correctly on Android 11. See `docs/08_ANDROID_DEVICE_TARGET.md`.
 
@@ -162,13 +168,13 @@ Operational rollback retains the expanded schema and rolls back application code
 
 Android, device authentication, shared drafts, new Submit/state-machine behavior, photos, and retention remain deferred. Approved architecture Rev3.1 and its F2 handoff addendum are unchanged.
 
-## P1-03A candidate enrollment
+## P1-03A candidate enrollment — historical implementation
 
 Admin-only enrollment invitations, P-256 CSR/key proof, explicit physical verification/approval, non-authorizing candidate issuance/recovery and typed enrollment audit are implemented. Devices remain `PendingCredential` / `NotEnrolled`; enrollment never advances their binding version or enables patrol. Bootstrap defaults off and cannot be enabled in production before separately reviewed P1-03B transport. Only an explicit isolated development/test issuer exists; production PKI is unconfigured and fails closed. No mTLS/Native authority is implemented.
 
 See [protocol, API, migration and recovery contracts](docs/13_DEVICE_ENROLLMENT.md) and [outstanding isolated SM-T500 verification procedure](android/enrollment-probe/README.md). Android SDK/real PAD, live PostgreSQL and real IT CA execution are separate environment gates, not simulated PASS results. The approved Rev3.1 and F2 handoff remain unchanged.
 
-## P1-02 provisioning metadata
+## P1-02 provisioning metadata — historical implementation
 
 Admin-only `/provisioning` manages the ProductionLine directory and Device Registry through `/api/admin/production-lines` and `/api/admin/devices`. PQE/IPQA have no provisioning permissions. English and Simplified Chinese are supported. ProductionLine codes keep the P1-01 installation-wide normalized uniqueness rule, including inactive lines; codes cannot be changed after creation. Lines and devices have no hard-delete API.
 

@@ -1,25 +1,29 @@
 # 08 — Android Device Target
 
-## Current reference tablet
-Observed from plant device screenshots:
-- Device family: Samsung Galaxy Tab A7
-- Model number: SM-T500
-- Android version: 11
-- One UI Core: 3.1
+## Current plant tablet inventory
+
+Reported on-site inventory, corrected by Peter and incorporated into approved Rev3.2:
+
+| Line | Model | OS | Reported patch |
+| --- | --- | --- | --- |
+| 1 | Samsung Galaxy Tab A9+ / SM-X210 | Android 15 / API35, One UI 7.0 | 2025-07-01 |
+| 2 | Samsung Galaxy Tab A7 / SM-T500 | Android 11 / API30, One UI Core 3.1 | 2022-04-01 |
+
+IT must assess updates/security before production use, especially the older Line 2 patch. IP/MAC/SSID/model are not authenticated identity. Endpoint, TLS trust and actual reachability remain PENDING external verification. See [approved Rev3.2](architecture/IPQC_ANDROID_ARCHITECTURE_V1_REV3_2_2026-11-10.md).
 
 ## Compatibility requirement
 The future IPQA Android application must run correctly on Android 11 and must not depend exclusively on newer Android APIs.
 
 Recommended development constraint when Android work begins:
-- choose a `minSdk` compatible with Android 11 (API 30) or lower
+- retain `minSdk 30` in one codebase/APK for both models
 - compile/target with the then-current supported SDK while retaining Android 11 runtime compatibility
-- test on the physical SM-T500 tablet before release
+- test on both physical tablets independently before release; OS versions need not match
 
 ## App language
 English only.
 
 ## Planned Line Patrol capabilities
-- assigned task list
+- personal login, server-backed line selection and task list (Rev3.2; future implementation)
 - task details
 - inspection form
 - numeric/qualitative values

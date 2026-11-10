@@ -1,5 +1,7 @@
 # P1-03A review evidence
 
+> Historical evidence for the original P1-03A PR. [Rev3.2](architecture/IPQC_ANDROID_ARCHITECTURE_V1_REV3_2_2026-11-10.md) supersedes its device-authentication direction; R32-01 retires active registration and signing. The old 187/72 results and deferred P1-03B instructions below are not R32-01 evidence or authorization. See [R32-01 results](15_R3201_VERIFICATION.md); do not repeat the old probe/enabling procedure.
+
 Baseline verified against origin/main: `a8a4528a83f31865d85f13a09b4fda986e6a9883`.
 Feature branch: `codex/p1-03a-device-enrollment`. No merge or deployment authorized/performed. Approved Rev3.1 / binding F2 documents are unchanged. Pre-existing untracked user files are excluded.
 
