@@ -122,6 +122,8 @@ Existing catch-up default24h, clamped1..168h, is retained. Candidate o must sati
 
 Keep existing unique (PlanId, ScheduledOccurrenceUtc). Add a partial unique (LineId, ScheduledOccurrenceUtc) for workflow2 tasks marked PlanningSnapshotVersion1; fixed rounds map to distinct instants, so this enforces one admitted task per actual line/round occurrence across different Plans. An existing admitted line occurrence is an idempotent winner even if its source Plan is now disabled/replaced. An **unadmitted historical shared** row at that line/occurrence is a HistoricalOccurrenceConflict: skip/log for explicit investigation, do not adopt, overwrite, convert or create a competing admitted copy. The index excludes those historical rows so migration does not rewrite or fail on old duplicate groups. Application checks of those rows run under the shared protocol; no public API may manufacture them. Legacy version1 rows remain their own workflow and are not silently merged or disabled.
 
+Also compare the frozen calendar key (actual LineId, stored local date, round) of existing admitted snapshots inside that transaction. If a timezone-rule update would map an already recorded calendar round to a different UTC instant, retain the original task and report rule drift rather than generating a second task or rewriting its UTC/offset. A bounded candidate-date UTC range plus application parsing keeps this check provider-neutral without another JSON-expression index. The UTC unique index guards physical occurrence duplicates; the common writer protocol additionally protects this frozen calendar identity. Never infer that key for unadmitted rows from mutable legacy Shift or current labels.
+
 ## 6. Frozen snapshot and migration proposal
 
 ### 6.1 Versioned planning snapshot
@@ -230,7 +232,7 @@ Other intended changes: `.github/workflows/ci.yml` expands the real PG class fil
 | R03-09 | Later Plan move/Standard change/line rename cannot rewrite Task relational identity, frozen JSON/header/item bytes or source facts |
 | R03-10 | Standard readiness: nonempty valid ordered definitions, default1/count1..50, quantitative limits and 1000-item technical cap; raw unknown photo strings retained, no false inspection readiness |
 | R03-11 | Both configured lines/both rounds generate exactly four ownerless tasks per covered day, correct local round/date and UTC, no device/person requirement |
-| R03-12 | Spring/fall 07/19 UTC vectors, New York timezone independent of server timezone, legacy 02:30 invalid/01:30 earlier-instant recurrence tests unchanged |
+| R03-12 | Spring/fall 07/19 UTC vectors, New York timezone independent of server timezone, frozen calendar-key/offset rule-drift recovery without duplicate/rewrite, legacy 02:30 invalid/01:30 earlier-instant recurrence tests unchanged |
 | R03-13 | Restart/catch-up window boundaries/clamp and effective-end inclusivity; long outage bounded, malformed Plan does not stop valid later plans |
 | R03-14 | Future occurrence, disabled Plan, inactive/unconfigured line, unknown workflow or unadmitted Plan cannot generate; no client/public generation path |
 | R03-15 | Multiple workers/restarts/retries produce one task per Plan occurrence and admitted line occurrence; losing unique insert leaves no shell/children |
