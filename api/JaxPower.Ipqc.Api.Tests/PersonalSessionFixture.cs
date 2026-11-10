@@ -36,6 +36,7 @@ internal sealed class SessionFault : DbCommandInterceptor
 {
     private Func<DbCommand, bool>? match;
     private bool fail;
+    private int busyRemaining;
     public TaskCompletionSource Entered { get; private set; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
     public TaskCompletionSource Release { get; private set; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
     public void Arm(string sqlFragment, bool failure = false)
@@ -45,11 +46,18 @@ internal sealed class SessionFault : DbCommandInterceptor
         Release = new(TaskCreationOptions.RunContinuationsAsynchronously);
         match = c => c.CommandText.Contains(sqlFragment, StringComparison.Ordinal);
     }
+    public void ArmBusy(int failures)
+    { Arm("UPDATE \"ApplicationUsers\""); busyRemaining = failures; }
     private async Task Check(DbCommand command, CancellationToken ct)
     {
         var predicate = match;
         if (predicate is null || !predicate(command) || Interlocked.CompareExchange(ref match, null, predicate) != predicate) return;
         Entered.TrySetResult();
+        if (busyRemaining > 0)
+        {
+            if (--busyRemaining > 0) match = predicate;
+            throw new SqliteException("Synthetic transient writer contention", 5);
+        }
         if (fail) throw new InvalidOperationException("Synthetic session persistence failure");
         await Release.Task.WaitAsync(TimeSpan.FromSeconds(20), ct);
     }

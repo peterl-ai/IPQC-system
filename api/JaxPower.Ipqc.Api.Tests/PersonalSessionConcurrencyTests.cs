@@ -10,6 +10,27 @@ namespace JaxPower.Ipqc.Api.Tests;
 
 public sealed class PersonalSessionConcurrencyTests
 {
+    [Theory]
+    [InlineData(1, HttpStatusCode.NoContent)][InlineData(3, HttpStatusCode.ServiceUnavailable)]
+    public async Task Transient_save_retry_is_atomic_and_exhaustion_is_not_invalid_credentials(int failures, HttpStatusCode status)
+    {
+        await using var f = await PersonalSessionFixture.CreateAsync(); var auth = await f.Login();
+        f.Fault.ArmBusy(failures);
+        var response = await f.Client(auth.AccessToken).PostAsJsonAsync("/api/auth/change-password",
+            new ChangePasswordInput(TestAccounts.Password, "SyntheticChanged123A"));
+        Assert.Equal(status, response.StatusCode);
+        if (failures == 3)
+        {
+            Assert.Contains("PersonalAccessTemporarilyUnavailable", await response.Content.ReadAsStringAsync());
+            Assert.Equal(HttpStatusCode.OK, (await f.Client(auth.AccessToken).GetAsync("/api/line-patrol/lines")).StatusCode);
+            Assert.NotNull((await f.Refresh(auth.RefreshToken!)).RefreshToken);
+        }
+        else
+        {
+            Assert.Equal(HttpStatusCode.Unauthorized, (await f.Client(auth.AccessToken).GetAsync("/api/me")).StatusCode);
+            Assert.Equal(2, await f.Read(db => db.ApplicationUsers.Where(x => x.Id == TestAccounts.Ipqa1Id).Select(x => x.AuthVersion).SingleAsync()));
+        }
+    }
     [Fact]
     public async Task Pre_commit_failure_rolls_back_the_entire_replacement_graph()
     { await using var f = await PersonalSessionFixture.CreateAsync(); await CommitRollback(f); }
@@ -19,7 +40,7 @@ public sealed class PersonalSessionConcurrencyTests
         var auth = await f.Login(); f.CommitFault.Armed = true;
         using (var scope = f.Factory.Services.CreateScope())
             await Assert.ThrowsAsync<InvalidOperationException>(() => scope.ServiceProvider.GetRequiredService<LocalAuthService>().RefreshAsync(auth.RefreshToken, null, default));
-        Assert.Equal(1, await f.Read(db => db.RefreshTokenSessions.CountAsync()));
+        Assert.Equal(1, await f.Read(db => db.RefreshTokenSessions.CountAsync(x => x.PersonalSessionId == auth.PersonalSessionId)));
         Assert.NotNull((await f.Refresh(auth.RefreshToken!)).RefreshToken);
     }
     [Fact]

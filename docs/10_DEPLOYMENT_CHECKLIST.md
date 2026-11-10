@@ -4,6 +4,8 @@ This checklist describes application requirements. JAX Power has not selected a 
 
 ## Required configuration
 
+R32-02 adds optional-for-legacy, required-for-new-personal-API configuration: `PersonalAccess__EnvironmentId` (stable ordinary application environment, separate from historical Enrollment environment) and `LinePatrol__LineIds__0` / `LinePatrol__LineIds__1` (two distinct existing active ProductionLine GUIDs). Supply actual reviewed values through operations configuration; Git contains none. Missing/invalid settings produce visible 503 on the affected new surface, without breaking existing Web/login/line administration. No device/CA/mTLS setup is required. Normal HTTPS/hostname/chain trust on both tablets remains a separate IT gate. See [R32-02 contract and migration safety](16_R3202_PERSONAL_ACCESS.md). No production migration, feature rollout or cleanup activation is authorized by this document.
+
 Supply these through the deployment secret/configuration system, never through committed files:
 
 | Setting | Purpose |
