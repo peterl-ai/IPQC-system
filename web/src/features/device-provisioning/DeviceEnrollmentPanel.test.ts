@@ -7,7 +7,7 @@ import zh from '@/i18n/locales/zh-CN'
 import Panel from './DeviceEnrollmentPanel.vue'
 import { ProvisioningApiError, type Device } from './api'
 import { enrollmentApi, type Enrollment } from './enrollmentApi'
-vi.mock('./enrollmentApi', () => ({ enrollmentApi: { list: vi.fn(), invite: vi.fn(), approve: vi.fn(), cancel: vi.fn() } }))
+vi.mock('./enrollmentApi', () => ({ enrollmentApi: { list: vi.fn(), cancel: vi.fn() } }))
 const device: Device = { id: 'device', displayName: 'Synthetic PAD', model: null, serial: null, status: 'PendingCredential', lineId: 'line', revision: 8, bindingVersion: 3, replacedByDeviceId: null, createdAtUtc: '', updatedAtUtc: '', terminalAtUtc: null, terminalReason: null, credentialStatus: 'NotEnrolled', canExecuteLineShared: false }
 const pending: Enrollment = { id: 'request', deviceId: 'device', lineId: 'line', sourceBindingVersion: 3, targetBindingVersion: 4, environment: 'test-environment', revision: 3, state: 'PendingApproval', expiresAtUtc: '2026-11-09T20:00:00Z', csrSha256: 'A'.repeat(64), spkiSha256: 'B'.repeat(64), approvedByUserId: null, approvedAtUtc: null, terminalReason: null, candidate: null, canExecuteLineShared: false }
 let app: App, host: HTMLDivElement
@@ -25,50 +25,44 @@ async function mount(locale = 'en', row = device) {
 beforeEach(() => {
   vi.resetAllMocks()
   vi.mocked(enrollmentApi.list).mockResolvedValue({ items: [pending], total: 1, page: 1, pageSize: 20 })
-  vi.mocked(enrollmentApi.approve).mockResolvedValue({ ...pending, state: 'Approved' })
   vi.mocked(enrollmentApi.cancel).mockResolvedValue({ ...pending, state: 'Cancelled' })
 })
 afterEach(() => { app?.unmount(); host?.remove() })
-describe('Enrollment Admin boundary', () => {
-  it.each(['en', 'zh-CN'])('requires physical verification and sends exact identity / fingerprints (%s)', async locale => {
+describe('Historical enrollment and controlled closure', () => {
+  it.each(['en', 'zh-CN'])('shows history without invitation, approval, verification or secret controls (%s)', async locale => {
     const labels = locale === 'en' ? en : zh
     await mount(locale)
     expect(host.textContent).toContain(labels.enrollment.boundary)
-    expect(button(labels.enrollment.approve).disabled).toBe(true)
-    const check = host.querySelector<HTMLInputElement>('input[type=checkbox]')!; check.checked = true; check.dispatchEvent(new Event('change')); await flush()
-    await click(labels.enrollment.approve)
-    expect(enrollmentApi.approve).toHaveBeenCalledWith(pending.id, { expectedRevision: 3, expectedDeviceRevision: 8, lineId: 'line', bindingVersion: 3, csrSha256: pending.csrSha256, spkiSha256: pending.spkiSha256, operationId: expect.any(String) })
-  })
-  it('keeps the same issuance approval ID on uncertain HTTP retry and never retries automatically', async () => {
-    vi.mocked(enrollmentApi.approve).mockRejectedValue(new ProvisioningApiError('Conflict', 409))
-    await mount(); const check = host.querySelector<HTMLInputElement>('input')!; check.checked = true; check.dispatchEvent(new Event('change')); await flush()
-    await click(en.enrollment.approve)
-    expect(enrollmentApi.approve).toHaveBeenCalledTimes(1); expect(host.textContent).toContain(en.provisioning.error.Conflict)
-    await click(en.enrollment.approve)
-    expect(vi.mocked(enrollmentApi.approve).mock.calls[0]).toEqual(vi.mocked(enrollmentApi.approve).mock.calls[1])
-  })
-  it('shows invitation secret once, never persists it, and clears it when dismissed or unmounted', async () => {
-    vi.mocked(enrollmentApi.list).mockResolvedValue({ items: [], total: 0, page: 1, pageSize: 20 })
-    vi.mocked(enrollmentApi.invite).mockResolvedValue({ enrollment: { ...pending, state: 'Invited' }, invitationSecret: 'synthetic-one-time-secret', invitationExpiresAtUtc: pending.expiresAtUtc })
-    await mount(); await click(en.enrollment.invite)
-    expect(enrollmentApi.invite).toHaveBeenCalledWith(device); expect(host.textContent).toContain('synthetic-one-time-secret')
+    expect(button(labels.enrollment.invite)).toBeUndefined(); expect(button(labels.enrollment.approve)).toBeUndefined()
+    expect(host.querySelector('input[type=checkbox]')).toBeNull(); expect(host.querySelector('.enrollment-secret')).toBeNull()
+    expect(host.textContent).toContain(pending.id); expect(host.textContent).toContain(pending.spkiSha256)
     expect(localStorage.length).toBe(0); expect(sessionStorage.length).toBe(0)
-    await click(en.enrollment.dismissSecret); expect(host.textContent).not.toContain('synthetic-one-time-secret')
-    app.unmount(); await mount(); expect(host.textContent).not.toContain('synthetic-one-time-secret')
   })
-  it('requires cancellation reason and includes expected revision', async () => {
-    await mount(); expect(button(en.enrollment.cancel).disabled).toBe(true)
-    const reason = host.querySelector('textarea')!; reason.value = 'Operator cancelled'; reason.dispatchEvent(new Event('input')); await flush(); await click(en.enrollment.cancel)
-    expect(enrollmentApi.cancel).toHaveBeenCalledWith('request', 3, 'Operator cancelled')
+  it.each(['en', 'zh-CN'])('permits reason/revision-checked closure of an Expired projection (%s)', async locale => {
+    const labels = locale === 'en' ? en : zh
+    vi.mocked(enrollmentApi.list).mockResolvedValue({ items: [{ ...pending, state: 'Expired' }], total: 1, page: 1, pageSize: 20 })
+    await mount(locale); expect(button(labels.enrollment.cancel).disabled).toBe(true)
+    const reason = host.querySelector('textarea')!; reason.value = 'Close old request'; reason.dispatchEvent(new Event('input')); await flush()
+    await click(labels.enrollment.cancel)
+    expect(enrollmentApi.cancel).toHaveBeenCalledWith(pending.id, pending.revision, 'Close old request')
   })
-  it('paginates history and displays unconfirmed candidate and revocation recovery without offering activation', async () => {
-    const issued: Enrollment = { ...pending, state: 'IssuedUnconfirmed', candidate: { id: 'credential-id', issuanceOperationId: 'stable-operation', state: 'Revoked', bindingVersion: 4, certificateSha256: 'C'.repeat(64), certificatePem: null, rootCertificatePem: '', notBeforeUtc: pending.expiresAtUtc, notAfterUtc: pending.expiresAtUtc, externalRevocationPending: true, lastErrorCode: 'IssuerOutcomeUnknown', canExecuteLineShared: false } }
+  it('shows stale cancellation conflicts without automatic mutation retries', async () => {
+    vi.mocked(enrollmentApi.cancel).mockRejectedValue(new ProvisioningApiError('Conflict', 409))
+    await mount(); const reason = host.querySelector('textarea')!; reason.value = 'Close'; reason.dispatchEvent(new Event('input')); await flush()
+    await click(en.enrollment.cancel); expect(enrollmentApi.cancel).toHaveBeenCalledTimes(1)
+    expect(host.textContent).toContain(en.provisioning.error.Conflict)
+  })
+  it.each(['en', 'zh-CN'])('retains candidate IDs, original operation, pending cleanup and paginated terminal history (%s)', async locale => {
+    const labels = locale === 'en' ? en : zh
+    const issued: Enrollment = { ...pending, state: 'IssuedUnconfirmed', candidate: { id: 'original-credential', issuanceOperationId: 'original-operation', state: 'Revoked', bindingVersion: 4, certificateSha256: 'C'.repeat(64), certificatePem: null, rootCertificatePem: '', notBeforeUtc: pending.expiresAtUtc, notAfterUtc: pending.expiresAtUtc, externalRevocationPending: true, lastErrorCode: 'IssuerUnavailable', canExecuteLineShared: false } }
     vi.mocked(enrollmentApi.list).mockResolvedValueOnce({ items: [issued], total: 2, page: 1, pageSize: 20 }).mockResolvedValueOnce({ items: [{ ...pending, id: 'previous', state: 'Cancelled' }], total: 2, page: 2, pageSize: 20 })
-    await mount(); expect(host.textContent).toContain(en.enrollment.state.IssuedUnconfirmed); expect(host.textContent).toContain(en.enrollment.revocationPending)
-    expect(host.textContent).toContain('stable-operation'); expect(button(en.enrollment.invite).disabled).toBe(true)
-    await click(en.provisioning.more); expect(enrollmentApi.list).toHaveBeenLastCalledWith('device', 2); expect(host.querySelectorAll('article')).toHaveLength(2)
+    await mount(locale); expect(host.textContent).toContain('original-operation'); expect(host.textContent).toContain('original-credential')
+    expect(host.textContent).toContain(labels.enrollment.revocationPending); expect(host.textContent).toContain(labels.enrollment.issuerRecovery)
+    await click(labels.provisioning.more); expect(enrollmentApi.list).toHaveBeenLastCalledWith(device.id, 2)
+    expect(host.querySelectorAll('article')).toHaveLength(2); expect(host.querySelectorAll('textarea')).toHaveLength(1)
+    expect(host.textContent).not.toContain('mTLS'); expect(host.textContent).not.toContain('enrollment.state.')
   })
-  it('keeps revoked or replaced device history visible while omitting new invitations', async () => {
+  it('keeps replaced-device enrollment history visible', async () => {
     await mount('en', { ...device, status: 'Replaced', lineId: null })
     expect(host.querySelectorAll('article')).toHaveLength(1); expect(button(en.enrollment.invite)).toBeUndefined()
   })

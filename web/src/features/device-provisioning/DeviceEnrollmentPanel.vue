@@ -5,13 +5,7 @@
     <a-alert v-if="error" role="alert" type="error" :message="error" />
     <div class="table-toolbar">
       <a-button :disabled="busy" @click="refresh">{{ t('provisioning.refresh') }}</a-button>
-      <a-button v-if="device.status === 'PendingCredential' && device.lineId" :disabled="busy || hasOpen" @click="invite">{{ t('enrollment.invite') }}</a-button>
     </div>
-    <section v-if="invitation" role="status" class="enrollment-secret">
-      <p>{{ t('enrollment.secretWarning') }}</p>
-      <dl><dt>{{ t('enrollment.id') }}</dt><dd>{{ invitation.enrollment.id }}</dd><dt>{{ t('enrollment.secret') }}</dt><dd>{{ invitation.invitationSecret }}</dd><dt>{{ t('enrollment.expires') }}</dt><dd>{{ date(invitation.invitationExpiresAtUtc) }}</dd></dl>
-      <a-button @click="invitation = null">{{ t('enrollment.dismissSecret') }}</a-button>
-    </section>
     <p v-if="busy" role="status">{{ t('provisioning.loading') }}</p>
     <article v-for="row in rows" :key="row.id" class="enrollment-entry">
       <h3>{{ t(`enrollment.state.${row.state}`) }}</h3>
@@ -28,11 +22,7 @@
         <p v-if="row.candidate.externalRevocationPending">{{ t('enrollment.revocationPending') }}</p>
         <p v-if="row.candidate.lastErrorCode">{{ t('enrollment.issuerRecovery') }}</p>
       </template>
-      <div v-if="row.state === 'PendingApproval'" class="enrollment-approval">
-        <label><input v-model="verified[row.id]" type="checkbox" :disabled="busy"> {{ t('enrollment.verify') }}</label>
-        <a-button :disabled="busy || !verified[row.id]" @click="approve(row)">{{ t('enrollment.approve') }}</a-button>
-      </div>
-      <form v-if="!['Cancelled', 'Expired'].includes(row.state)" class="enrollment-cancel" @submit.prevent="cancel(row)">
+      <form v-if="row.state !== 'Cancelled'" class="enrollment-cancel" @submit.prevent="cancel(row)">
         <label :for="`cancel-${row.id}`">{{ t('provisioning.reason') }}</label><textarea :id="`cancel-${row.id}`" v-model="reasons[row.id]" maxlength="2000" :disabled="busy" />
         <a-button danger :disabled="busy || !reasons[row.id]?.trim()" @click="cancel(row)">{{ t('enrollment.cancel') }}</a-button>
       </form>
@@ -43,18 +33,15 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { onMounted, reactive, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { errorCode, ProvisioningApiError, type Device } from './api'
-import { enrollmentApi, type Approval, type Enrollment, type Invitation } from './enrollmentApi'
+import { enrollmentApi, type Enrollment } from './enrollmentApi'
 const props = defineProps<{ device: Device }>()
 const emit = defineEmits<{ close: []; changed: [] }>()
 const { t } = useI18n()
-const rows = ref<Enrollment[]>([]), total = ref(0), page = ref(1), busy = ref(false), error = ref(''), invitation = ref<Invitation | null>(null)
-const verified = reactive<Record<string, boolean>>({}), reasons = reactive<Record<string, string>>({})
-// Retry the identical approved snapshot with the same operation ID after an uncertain HTTP outcome.
-const approvals = new Map<string, Approval>()
-const hasOpen = computed(() => rows.value.some(x => !['Cancelled', 'Expired'].includes(x.state)))
+const rows = ref<Enrollment[]>([]), total = ref(0), page = ref(1), busy = ref(false), error = ref('')
+const reasons = reactive<Record<string, string>>({})
 function date(value: string) { return new Intl.DateTimeFormat('sv-SE', { timeZone: 'America/New_York', dateStyle: 'short', timeStyle: 'short' }).format(new Date(value)) }
 function describe(e: unknown) {
   if (e instanceof ProvisioningApiError && e.status === 409) return t('provisioning.error.Conflict')
@@ -71,20 +58,8 @@ async function run(action: () => Promise<void>) {
   busy.value = true; error.value = ''
   try { await action() } catch (e) { error.value = describe(e) } finally { busy.value = false }
 }
-function refresh() { Object.keys(verified).forEach(id => { verified[id] = false }); return run(() => load(true)) }
+function refresh() { return run(() => load(true)) }
 function loadMore() { return run(() => load(false)) }
-function invite() { return run(async () => { invitation.value = null; invitation.value = await enrollmentApi.invite(props.device); await load(true) }) }
-function approve(row: Enrollment) {
-  if (!verified[row.id] || !row.csrSha256 || !row.spkiSha256) return
-  return run(async () => {
-    let input = approvals.get(row.id)
-    if (!input) {
-      input = { expectedRevision: row.revision, expectedDeviceRevision: props.device.revision, lineId: row.lineId, bindingVersion: row.sourceBindingVersion, csrSha256: row.csrSha256!, spkiSha256: row.spkiSha256!, operationId: crypto.randomUUID() }
-      approvals.set(row.id, input)
-    }
-    await enrollmentApi.approve(row.id, input); verified[row.id] = false; emit('changed'); await load(true)
-  })
-}
 function cancel(row: Enrollment) {
   const reason = reasons[row.id]?.trim()
   if (!reason) return
