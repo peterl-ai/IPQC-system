@@ -16,7 +16,7 @@ public sealed class UserInputException(Dictionary<string, string[]> errors) : Ex
 }
 
 public sealed class ApplicationUserService(IpqcDbContext db, IPasswordHasher<ApplicationUser> hasher,
-    TimeProvider clock)
+    TimeProvider clock, PersonalSessionStore sessions)
 {
     public static bool ValidRole(string? role) => role is "Admin" or "PQE" or "IPQA";
     private static DateTime Utc(DateTime value) => DateTime.SpecifyKind(value, DateTimeKind.Utc);
@@ -83,9 +83,10 @@ public sealed class ApplicationUserService(IpqcDbContext db, IPasswordHasher<App
     private async Task<UserOutput?> ChangeAsync(Guid id, Guid actorId, string actor, UserUpdateInput? update,
         bool? active, CancellationToken ct)
     {
-        await using var transaction = await db.Database.BeginTransactionAsync(IsolationLevel.Serializable, ct);
         try
         {
+            return await sessions.WriteAsync<UserOutput?>(id, async () =>
+            {
             var user = await db.ApplicationUsers.SingleOrDefaultAsync(x => x.Id == id, ct);
             if (user is null) return null;
             var nextRole = update?.Role ?? user.Role;
@@ -111,12 +112,12 @@ public sealed class ApplicationUserService(IpqcDbContext db, IPasswordHasher<App
                 await RevokeSessionsAsync(id, user.UpdatedAtUtc, ct);
             }
             await db.SaveChangesAsync(ct);
-            await transaction.CommitAsync(ct);
             return Output(user);
+            }, ct, serializable: true);
         }
         catch (Exception ex) when (ex is DbUpdateConcurrencyException ||
             ex is PostgresException { SqlState: PostgresErrorCodes.SerializationFailure } ||
-            ex is SqliteException { SqliteErrorCode: 5 or 6 })
+            ex is SqliteException { SqliteErrorCode: 5 or 6 } || ex is PersonalAccessException)
         { throw new UserConflictException("User state changed concurrently. Retry the operation."); }
     }
 
@@ -125,6 +126,8 @@ public sealed class ApplicationUserService(IpqcDbContext db, IPasswordHasher<App
     {
         if (!LocalAuthService.ValidPassword(password))
             throw new UserInputException(new() { ["TemporaryPassword"] = ["Use 10–256 characters with upper, lower, and numeric characters."] });
+        return await sessions.WriteAsync<UserOutput?>(id, async () =>
+        {
         var user = await db.ApplicationUsers.FindAsync([id], ct);
         if (user is null) return null;
         user.PasswordHash = hasher.HashPassword(user, password!);
@@ -137,10 +140,13 @@ public sealed class ApplicationUserService(IpqcDbContext db, IPasswordHasher<App
         await RevokeSessionsAsync(id, user.UpdatedAtUtc, ct);
         await db.SaveChangesAsync(ct);
         return Output(user);
+        }, ct);
     }
 
     public async Task<UserOutput?> UnlockAsync(Guid id, string actor, CancellationToken ct)
     {
+        return await sessions.WriteAsync<UserOutput?>(id, async () =>
+        {
         var user = await db.ApplicationUsers.FindAsync([id], ct);
         if (user is null) return null;
         user.FailedLoginCount = 0;
@@ -149,6 +155,7 @@ public sealed class ApplicationUserService(IpqcDbContext db, IPasswordHasher<App
         user.UpdatedBy = actor;
         await db.SaveChangesAsync(ct);
         return Output(user);
+        }, ct);
     }
 
     private Task<int> RevokeSessionsAsync(Guid id, DateTime now, CancellationToken ct) =>

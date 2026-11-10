@@ -84,6 +84,10 @@ public sealed partial class IpqcDbContext(DbContextOptions<IpqcDbContext> option
         user.Property(x => x.CreatedBy).HasMaxLength(100);
         user.Property(x => x.UpdatedBy).HasMaxLength(100);
         var session = modelBuilder.Entity<RefreshTokenSession>();
+        session.Property(x => x.PersonalSessionEnvironmentId).HasMaxLength(200);
+        session.HasIndex(x => new { x.UserId, x.PersonalSessionId });
+        session.HasIndex(x => x.PersonalSessionId).IsUnique()
+            .HasFilter("\"PersonalSessionId\" IS NOT NULL AND \"RevokedAtUtc\" IS NULL");
         session.HasKey(x => x.Id);
         session.Property(x => x.TokenHash).HasMaxLength(64).IsRequired();
         session.HasIndex(x => x.TokenHash).IsUnique();
@@ -142,6 +146,7 @@ public sealed partial class IpqcDbContext(DbContextOptions<IpqcDbContext> option
         assignee.HasOne(x => x.User).WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Restrict);
 
         var task = modelBuilder.Entity<PatrolTask>();
+        task.HasIndex(x => new { x.WorkflowVersion, x.LineId, x.ScheduledOccurrenceUtc, x.Id });
         task.Property(x => x.WorkflowVersion).HasDefaultValue(WorkflowVersion.LegacyPersonalV1).HasSentinel(WorkflowVersion.LegacyPersonalV1).IsConcurrencyToken();
         task.HasOne(x => x.Line).WithMany().HasForeignKey(x => x.LineId).OnDelete(DeleteBehavior.Restrict);
         task.ToTable(t => t.HasCheckConstraint("CK_PatrolTasks_Workflow", "\"WorkflowVersion\" IN (1, 2) AND (\"WorkflowVersion\" = 1 OR \"LineId\" IS NOT NULL)"));

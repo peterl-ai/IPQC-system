@@ -23,6 +23,8 @@ public sealed class ApplicationUser
 public sealed class RefreshTokenSession
 {
     public Guid Id { get; set; }
+    public Guid? PersonalSessionId { get; set; }
+    public string? PersonalSessionEnvironmentId { get; set; }
     public Guid UserId { get; set; }
     public ApplicationUser User { get; set; } = null!;
     public string TokenHash { get; set; } = "";

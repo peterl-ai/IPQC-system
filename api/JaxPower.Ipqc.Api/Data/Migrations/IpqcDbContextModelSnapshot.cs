@@ -757,6 +757,8 @@ namespace JaxPower.Ipqc.Api.Data.Migrations
 
                     b.HasIndex("Status", "ScheduledOccurrenceUtc");
 
+                    b.HasIndex("WorkflowVersion", "LineId", "ScheduledOccurrenceUtc", "Id");
+
                     b.ToTable("PatrolTasks", t =>
                         {
                             t.HasCheckConstraint("CK_PatrolTasks_Workflow", "\"WorkflowVersion\" IN (1, 2) AND (\"WorkflowVersion\" = 1 OR \"LineId\" IS NOT NULL)");
@@ -1231,6 +1233,13 @@ namespace JaxPower.Ipqc.Api.Data.Migrations
                     b.Property<DateTime>("ExpiresAtUtc")
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("PersonalSessionEnvironmentId")
+                        .HasMaxLength(200)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("PersonalSessionId")
+                        .HasColumnType("TEXT");
+
                     b.Property<Guid?>("ReplacedBySessionId")
                         .HasColumnType("TEXT");
 
@@ -1251,8 +1260,14 @@ namespace JaxPower.Ipqc.Api.Data.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("PersonalSessionId")
+                        .IsUnique()
+                        .HasFilter("\"PersonalSessionId\" IS NOT NULL AND \"RevokedAtUtc\" IS NULL");
+
                     b.HasIndex("TokenHash")
                         .IsUnique();
+
+                    b.HasIndex("UserId", "PersonalSessionId");
 
                     b.HasIndex("UserId", "RevokedAtUtc");
 

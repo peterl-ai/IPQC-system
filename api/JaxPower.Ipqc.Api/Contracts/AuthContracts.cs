@@ -6,4 +6,5 @@ public sealed record ChangePasswordInput(string? CurrentPassword, string? NewPas
 public sealed record CurrentUserOutput(Guid Id, string Username, string DisplayName, string Role,
     bool IsActive, bool MustChangePassword, IReadOnlyList<string> Permissions);
 public sealed record AuthOutput(string AccessToken, DateTime AccessExpiresAtUtc,
-    CurrentUserOutput User, string? RefreshToken = null);
+    CurrentUserOutput User, string? RefreshToken = null, Guid? PersonalSessionId = null,
+    string? PersonalSessionEnvironmentId = null, DateTime? PersonalSessionExpiresAtUtc = null);
