@@ -7,6 +7,7 @@ namespace JaxPower.Ipqc.Api.Security;
 
 public sealed class DeviceEnrollmentOptions
 {
+    public bool CleanupEnabled { get; set; }
     public bool BootstrapEnabled { get; set; }
     public string EnvironmentId { get; set; } = "";
     public bool DevelopmentIssuerEnabled { get; set; }
@@ -17,12 +18,18 @@ public sealed class DeviceEnrollmentOptions
 
     public void Validate(IHostEnvironment host)
     {
-        var isolated = host.IsDevelopment() || host.IsEnvironment("Testing");
-        if (!isolated && (BootstrapEnabled || DevelopmentIssuerEnabled))
-            throw new InvalidOperationException("P1-03A production bootstrap and development issuer are forbidden; P1-03B transport is not installed.");
-        if ((BootstrapEnabled || DevelopmentIssuerEnabled) && (string.IsNullOrWhiteSpace(EnvironmentId) || EnvironmentId.Length > 200))
-            throw new InvalidOperationException("Configure Enrollment:EnvironmentId before enabling isolated enrollment.");
+        // Obsolete enable flags cannot reopen enrollment or load unused issuer material.
+        if (CleanupEnabled && (string.IsNullOrWhiteSpace(EnvironmentId) || EnvironmentId.Length > 200))
+            throw new InvalidOperationException("Configure the original Enrollment:EnvironmentId before enabling cleanup.");
     }
+}
+
+public static class DeviceProvisioningRetirement
+{
+    public const string Code = "DeviceProvisioningRetired";
+    public static ProvisioningException Rejected() => new(Code, 410);
+    public static IResult Response() => Results.Problem(statusCode: 410, title: Code,
+        extensions: new Dictionary<string, object?> { ["code"] = Code });
 }
 
 public static class DeviceEnrollmentProof

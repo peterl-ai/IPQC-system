@@ -44,22 +44,18 @@ public sealed class ProductionLineManagementTests
     }
 
     [Fact]
-    public async Task Current_and_historical_reservations_have_restrictive_line_foreign_keys()
+    public async Task Existing_reservations_restrict_deactivation_until_controlled_revoke()
     {
-        await using var app = await ProvisioningFixture.CreateAsync(); var a = await app.LineAsync("A"); var b = await app.LineAsync("B"); var d = await app.DeviceAsync("PAD");
-        d = await app.DeviceAction(d, "bind", new DeviceBindingInput(a.Id, d.Revision));
-        Assert.Equal(HttpStatusCode.Conflict, (await app.Admin.PostAsJsonAsync($"/api/admin/production-lines/{a.Id}/deactivate", new ProvisioningRevisionInput(a.Revision))).StatusCode);
-        d = await app.DeviceAction(d, "rebind", new DeviceBindingInput(b.Id, d.Revision, "Move"));
-        using var scope = app.Factory.Services.CreateScope(); var db = scope.ServiceProvider.GetRequiredService<IpqcDbContext>();
-        foreach (var line in new[] { a, b }) await Assert.ThrowsAsync<SqliteException>(() => db.Database.ExecuteSqlInterpolatedAsync($"DELETE FROM ProductionLines WHERE Id = {line.Id}"));
-        await Assert.ThrowsAsync<SqliteException>(() => db.Database.ExecuteSqlInterpolatedAsync($"DELETE FROM RegisteredDevices WHERE Id = {d.Id}"));
-        var other = await app.DeviceAsync("Other");
-        await Assert.ThrowsAsync<SqliteException>(() => db.Database.ExecuteSqlInterpolatedAsync($"UPDATE RegisteredDevices SET LineId = {b.Id} WHERE Id = {other.Id}"));
-        await Assert.ThrowsAsync<SqliteException>(() => db.Database.ExecuteSqlInterpolatedAsync($"UPDATE RegisteredDevices SET Status = {4} WHERE Id = {other.Id}"));
-        await Assert.ThrowsAsync<SqliteException>(() => db.Database.ExecuteSqlInterpolatedAsync($"UPDATE RegisteredDevices SET BindingVersion = {0} WHERE Id = {other.Id}"));
-        await Assert.ThrowsAsync<SqliteException>(() => db.Database.ExecuteSqlInterpolatedAsync($"UPDATE RegisteredDevices SET LineId = {Guid.NewGuid()} WHERE Id = {other.Id}"));
+        await using var app=await ProvisioningFixture.CreateAsync();var line=await app.LineAsync("A");var d=await app.DeviceAsync("Historical",line.Id);
+        var before=await app.StateAsync();
+        Assert.Equal(HttpStatusCode.Conflict,(await app.Admin.PostAsJsonAsync($"/api/admin/production-lines/{line.Id}/deactivate",new ProvisioningRevisionInput(line.Revision))).StatusCode);
+        Assert.Equal(HttpStatusCode.Gone,(await app.Admin.PostAsJsonAsync($"/api/admin/devices/{d.Id}/unbind",new DeviceReasonInput(d.Revision,"Release"))).StatusCode);
+        Assert.Equal(before,await app.StateAsync());
+        await app.Db(async db=>{await Assert.ThrowsAsync<SqliteException>(()=>db.Database.ExecuteSqlInterpolatedAsync($"DELETE FROM ProductionLines WHERE Id={line.Id}"));return 0;});
+        await app.DeviceAction(d,"revoke",new DeviceReasonInput(d.Revision,"Retire"));
+        (await app.Admin.PostAsJsonAsync($"/api/admin/production-lines/{line.Id}/deactivate",new ProvisioningRevisionInput(line.Revision))).EnsureSuccessStatusCode();
+        await app.Db(async db=>{await Assert.ThrowsAsync<SqliteException>(()=>db.Database.ExecuteSqlInterpolatedAsync($"DELETE FROM ProductionLines WHERE Id={line.Id}"));return 0;});
     }
-
     [Theory]
     [InlineData("pqe")]
     [InlineData("dev-ipqa-1")]
@@ -98,70 +94,21 @@ public sealed class ProductionLineManagementTests
     }
 
     [Fact]
-    public async Task Provisioning_cannot_issue_device_identity_or_unlock_LineShared_and_spoofed_inputs_fail_closed()
+    public async Task Retired_device_calls_and_retained_revoke_preserve_legacy_reports_and_LineShared_guards()
     {
-        await using var app = await WorkflowFixture.CreateAsync();
-        var task = await app.SeedAsync(WorkflowVersion.LineSharedV1);
-        var create = await app.Admin.PostAsJsonAsync("/api/admin/devices", new DeviceCreateInput("Descriptive only")); create.EnsureSuccessStatusCode();
-        var d = (await create.Content.ReadFromJsonAsync<DeviceOutput>())!;
-        var bound = await app.Admin.PostAsJsonAsync($"/api/admin/devices/{d.Id}/bind", new DeviceBindingInput(task.Line, 1)); bound.EnsureSuccessStatusCode();
-        var pending = (await bound.Content.ReadFromJsonAsync<DeviceOutput>())!;
-        Assert.False(pending.CanExecuteLineShared); Assert.Equal("NotEnrolled", pending.CredentialStatus);
-        app.Ipqa.DefaultRequestHeaders.Add("X-Device-Id", d.Id.ToString());
-        app.Ipqa.DefaultRequestHeaders.Add("X-Client-Cert", "forged"); app.Ipqa.DefaultRequestHeaders.Add("X-Forwarded-For", "127.0.0.1");
-        var before = await app.StateAsync();
-        foreach (var revoked in new[] { false, true })
+        await using var app=await WorkflowFixture.CreateAsync();var completed=await app.SeedAsync(WorkflowVersion.LegacyPersonalV1,"Completed");var shared=await app.SeedAsync(WorkflowVersion.LineSharedV1);
+        var id=Guid.NewGuid();using(var scope=app.Factory.Services.CreateScope())
         {
-            var version = pending;
-            if (revoked)
-            {
-                var response = await app.Admin.PostAsJsonAsync($"/api/admin/devices/{d.Id}/revoke", new DeviceReasonInput(pending.Revision, "Revoke"));
-                response.EnsureSuccessStatusCode(); version = (await response.Content.ReadFromJsonAsync<DeviceOutput>())!;
-            }
-            app.Ipqa.DefaultRequestHeaders.Remove("X-Binding-Version"); app.Ipqa.DefaultRequestHeaders.Add("X-Binding-Version", version.BindingVersion.ToString());
-            foreach (var claimedLine in new[] { task.Line, Guid.NewGuid() })
-            {
-                app.Ipqa.DefaultRequestHeaders.Remove("X-Line-Id"); app.Ipqa.DefaultRequestHeaders.Add("X-Line-Id", claimedLine.ToString());
-                Assert.Equal(HttpStatusCode.Conflict, (await app.MutateTaskAsync("draft", task.Task, task.Item, task.Task)).StatusCode);
-                Assert.Equal(HttpStatusCode.Conflict, (await app.MutateTaskAsync("submit", task.Task, task.Item, task.Task)).StatusCode);
-            }
+            var db=scope.ServiceProvider.GetRequiredService<IpqcDbContext>();db.RegisteredDevices.Add(new(){Id=id,DisplayName="Historical",LineId=shared.Line,Revision=2,BindingVersion=2,
+                CreatedAtUtc=DateTime.UtcNow,UpdatedAtUtc=DateTime.UtcNow,CreatedByUserId=TestAccounts.AdminId,UpdatedByUserId=TestAccounts.AdminId});await db.SaveChangesAsync();
         }
-        Assert.Equal(before, await app.StateAsync());
-        Assert.Equal(HttpStatusCode.BadRequest, (await app.Admin.PostAsJsonAsync("/api/admin/devices", new { displayName = "Forged", status = "Trusted", bindingVersion = 99, lineId = task.Line, fingerprint = "fake" })).StatusCode);
-        var routes = app.Factory.Services.GetRequiredService<EndpointDataSource>().Endpoints.OfType<RouteEndpoint>().Select(x => x.RoutePattern.RawText ?? "").ToList();
-        Assert.DoesNotContain(routes, x => x.Contains("native", StringComparison.OrdinalIgnoreCase) || x.Contains("offline-grant", StringComparison.OrdinalIgnoreCase));
-        // New bootstrap routes stay disabled by default; none can activate legacy or LineShared work.
-        Assert.Equal(HttpStatusCode.NotFound, (await app.Admin.PostAsJsonAsync($"/bootstrap/v1/enrollments/{d.Id}/receipt-challenge", new { })).StatusCode);
-        foreach (var path in new[] { "/api/pairing", "/api/devices/enroll", "/api/native/session" }) Assert.Equal(HttpStatusCode.NotFound, (await app.Admin.PostAsJsonAsync(path, new { deviceId = d.Id })).StatusCode);
-        Assert.DoesNotContain(routes, x => x.Contains("{id:guid}/audit") && x.Contains("delete", StringComparison.OrdinalIgnoreCase));
-    }
-
-    [Fact]
-    public async Task Reservation_rebind_replacement_and_revoke_preserve_all_legacy_work_and_completed_report_facts()
-    {
-        await using var app = await WorkflowFixture.CreateAsync();
-        var completed = await app.SeedAsync(WorkflowVersion.LegacyPersonalV1, "Completed");
-        var shared = await app.SeedAsync(WorkflowVersion.LineSharedV1);
-        var before = await app.StateAsync();
-        var reportPath = $"/api/completed-patrol-records/{completed.Task}/report";
-        var reportBefore = await app.Admin.GetStringAsync(reportPath);
-        async Task<DeviceOutput> Create(string name)
-        {
-            var response = await app.Admin.PostAsJsonAsync("/api/admin/devices", new DeviceCreateInput(name));
-            response.EnsureSuccessStatusCode(); return (await response.Content.ReadFromJsonAsync<DeviceOutput>())!;
-        }
-        async Task<DeviceOutput> Change<T>(DeviceOutput device, string action, T input)
-        {
-            var response = await app.Admin.PostAsJsonAsync($"/api/admin/devices/{device.Id}/{action}", input);
-            response.EnsureSuccessStatusCode();
-            Assert.Equal(before, await app.StateAsync());
-            Assert.Equal(reportBefore, await app.Admin.GetStringAsync(reportPath));
-            return (await response.Content.ReadFromJsonAsync<DeviceOutput>())!;
-        }
-        var old = await Create("Old PAD"); var replacement = await Create("New PAD");
-        old = await Change(old, "bind", new DeviceBindingInput(completed.Line, old.Revision));
-        old = await Change(old, "rebind", new DeviceBindingInput(shared.Line, old.Revision, "Move reservation"));
-        replacement = await Change(old, "replace", new DeviceReplaceInput(replacement.Id, old.Revision, replacement.Revision, "Replace hardware"));
-        await Change(replacement, "revoke", new DeviceReasonInput(replacement.Revision, "Retired"));
+        var before=await app.StateAsync();var report=$"/api/completed-patrol-records/{completed.Task}/report";var oldReport=await app.Admin.GetStringAsync(report);
+        app.Ipqa.DefaultRequestHeaders.Add("X-Device-Id",id.ToString());app.Ipqa.DefaultRequestHeaders.Add("X-Client-Cert","forged");
+        foreach(var (method,path) in DeviceProvisioningRetirementTests.Routes(id))Assert.Equal(HttpStatusCode.Gone,(await app.Admin.SendAsync(new(method,path){Content=JsonContent.Create(new{status="Trusted"})})).StatusCode);
+        (await app.Admin.PostAsJsonAsync($"/api/admin/devices/{id}/revoke",new DeviceReasonInput(2,"Retire"))).EnsureSuccessStatusCode();
+        foreach(var action in new[]{"draft","submit"})Assert.Equal(HttpStatusCode.Conflict,(await app.MutateTaskAsync(action,shared.Task,shared.Item,shared.Task)).StatusCode);
+        Assert.Equal(before,await app.StateAsync());Assert.Equal(oldReport,await app.Admin.GetStringAsync(report));
+        var routes=app.Factory.Services.GetRequiredService<EndpointDataSource>().Endpoints.OfType<RouteEndpoint>().Select(x=>x.RoutePattern.RawText??"");
+        Assert.DoesNotContain(routes,x=>x.Contains("native",StringComparison.OrdinalIgnoreCase)||x.Contains("offline-grant",StringComparison.OrdinalIgnoreCase));
     }
 }

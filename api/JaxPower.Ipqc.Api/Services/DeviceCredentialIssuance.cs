@@ -1,4 +1,3 @@
-using System.Security.Cryptography;
 using JaxPower.Ipqc.Api.Data;
 using JaxPower.Ipqc.Api.Domain;
 using JaxPower.Ipqc.Api.Security;
@@ -6,104 +5,90 @@ using Microsoft.EntityFrameworkCore;
 
 namespace JaxPower.Ipqc.Api.Services;
 
+// Historical operation drain only. New signing is never part of recovery.
 public sealed class DeviceCredentialIssuance(IpqcDbContext db, ProvisioningStore store, DeviceEnrollmentLifecycle lifecycle,
     IDeviceCertificateIssuer issuer, DeviceEnrollmentOptions options, TimeProvider clock)
 {
     private DateTime Now => clock.GetUtcNow().UtcDateTime;
-    private sealed record Claim(Guid Id, Guid Lease, bool Cleanup, DeviceIssuanceRequest Request);
+    private sealed record Claim(Guid Id, Guid Lease, Guid EnrollmentId, Guid DeviceId, Guid LineId,
+        long BindingVersion, Guid OperationId, string IssuerId, string RootPem, string Environment);
+
     public async Task<bool> ProcessNextAsync(CancellationToken ct)
     {
-        if (!issuer.Available) return false;
+        if (!options.CleanupEnabled || string.IsNullOrWhiteSpace(options.EnvironmentId)) return false;
         db.ChangeTracker.Clear();
-        var claim = await store.WriteAsync(async () =>
+        var (worked, claim) = await store.WriteAsync(async () =>
         {
-            var k = await db.DeviceCredentials.Where(x =>
-                (x.State == CandidateCredentialState.PendingIssuance || x.State == CandidateCredentialState.OutcomeUnknown || x.ExternalRevocationPending) &&
-                (x.LeaseUntilUtc == null || x.LeaseUntilUtc <= Now))
-                .Join(db.DeviceEnrollments.Where(x => x.Environment == options.EnvironmentId), x => x.EnrollmentId, x => x.Id, (x, _) => x)
-                .OrderBy(x => x.Id).FirstOrDefaultAsync(ct);
-            if (k is null) return null;
-            var e = await db.DeviceEnrollments.SingleAsync(x => x.Id == k.EnrollmentId, ct);
-            var d = await db.RegisteredDevices.SingleAsync(x => x.Id == k.DeviceId, ct);
-            if ((int)e.State <= 6 && (e.ExpiresAtUtc <= Now || !await BindingValid(e, d, ct)))
-                await lifecycle.CloseAsync(e, d, e.ExpiresAtUtc <= Now ? EnrollmentState.Expired : EnrollmentState.Cancelled,
-                    "BindingOrDeadlineChanged", ProvisioningActor.System, Guid.NewGuid(), ct);
-            var cleanup = (int)e.State > 6 || k.State is CandidateCredentialState.Revoked or CandidateCredentialState.Failed;
-            if (cleanup && !k.ExternalRevocationPending) return null;
+            var now = Now;
+            var next = await (from request in db.DeviceEnrollments
+                join credential in db.DeviceCredentials on request.Id equals credential.EnrollmentId into credentials
+                from candidate in credentials.DefaultIfEmpty()
+                where request.Environment == options.EnvironmentId &&
+                    ((int)request.State <= 6 || (candidate != null && (candidate.ExternalRevocationPending ||
+                        candidate.State == CandidateCredentialState.OutcomeUnknown || candidate.State == CandidateCredentialState.IssuedUnconfirmed))) &&
+                    (candidate == null || candidate.LeaseUntilUtc == null || candidate.LeaseUntilUtc <= now)
+                orderby candidate == null ? null : candidate.LeaseUntilUtc, request.Id
+                select new { Enrollment = request, Credential = candidate }).FirstOrDefaultAsync(ct);
+            if (next is null) return (false, (Claim?)null);
+            var e = next.Enrollment; var k = next.Credential;
+            var d = await db.RegisteredDevices.SingleAsync(x => x.Id == e.DeviceId, ct);
+            if ((int)e.State <= 6)
+                await lifecycle.CloseAsync(e, d, e.ExpiresAtUtc <= now ? EnrollmentState.Expired : EnrollmentState.Cancelled,
+                    "DeviceProvisioningRetired", ProvisioningActor.System, Guid.NewGuid(), ct);
+            if (k is null) return (true, (Claim?)null);
             var before = DeviceEnrollmentLifecycle.Snapshot(e, d, k);
-            k.LeaseId = Guid.NewGuid(); k.LeaseUntilUtc = Now.AddSeconds(30); k.Revision++;
-            if (!cleanup) { k.State = CandidateCredentialState.OutcomeUnknown; e.State = EnrollmentState.Issuing; e.Revision++; }
-            lifecycle.Audit(e, d, cleanup ? "CredentialRevocationStarted" : "CredentialIssuanceStarted", ProvisioningActor.System, before, k);
-            return new Claim(k.Id, k.LeaseId.Value, cleanup, new(k.IssuanceOperationId, k.DeviceId, k.Id, k.SpkiBase64,
-                k.RootCertificatePem, Utc(k.NotBeforeUtc), Utc(k.NotAfterUtc)));
+            // Also reconcile historical terminal rows with an unknown/unconfirmed candidate.
+            k.ExternalRevocationPending |= k.CertificatePem is not null || k.State is
+                CandidateCredentialState.OutcomeUnknown or CandidateCredentialState.IssuedUnconfirmed;
+            if (!k.ExternalRevocationPending) return (true, (Claim?)null);
+            k.State = CandidateCredentialState.Revoked;
+            k.LeaseId = Guid.NewGuid(); k.LeaseUntilUtc = now.AddSeconds(30); k.Revision++;
+            lifecycle.Audit(e, d, "CredentialRevocationStarted", ProvisioningActor.System, before, k);
+            return (true, new Claim(k.Id, k.LeaseId.Value, e.Id, k.DeviceId, k.LineId, k.BindingVersion,
+                k.IssuanceOperationId, k.IssuerId, k.RootCertificatePem, e.Environment));
         }, ct);
-        if (claim is null) return false;
+        if (claim is null) return worked;
 
-        // No database transaction or provisioning lock is held across ANY signer operation.
-        DeviceIssuanceResult result = new(IssuerOutcome.Unknown); string? failure = null;
+        // No DB transaction/lock crosses the adapter boundary. Recover never falls through to Issue.
+        string? failure = null;
         try
         {
-            if (claim.Cleanup) await issuer.RevokeAsync(claim.Request.OperationId, ct);
+            if (!issuer.Available) failure = "IssuerUnavailable";
+            else if (issuer.Profile.Id != claim.IssuerId || issuer.Profile.RootCertificatePem != claim.RootPem)
+                failure = "IssuerMismatch";
             else
             {
-                result = await issuer.RecoverAsync(claim.Request.OperationId, ct);
-                if (result.Outcome == IssuerOutcome.NotIssued) result = await issuer.IssueAsync(claim.Request, ct);
-                if (result.Outcome == IssuerOutcome.Issued) DeviceCertificateProfile.Validate(claim.Request, result.CertificatePem!, Now);
+                var original = await issuer.RecoverAsync(claim.OperationId, ct);
+                if (original.Outcome == IssuerOutcome.Unknown) failure = "IssuerOutcomeUnknown";
+                else
+                    // Even definitive NotIssued needs an acknowledged cancellation fence against late publication.
+                    // The original public result/journal is retained; existing credential metadata is not rewritten.
+                    await issuer.RevokeAsync(claim.OperationId, ct);
             }
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
-        catch (CryptographicException) { failure = "InvalidIssuerResult"; }
         catch (Exception) { failure = "IssuerOutcomeUnknown"; }
 
         db.ChangeTracker.Clear();
         await store.WriteAsync(async () =>
         {
             var k = await db.DeviceCredentials.SingleAsync(x => x.Id == claim.Id, ct);
-            if (k.LeaseId != claim.Lease) return false; // Another recovery owns the lease; it must recover the original result.
-            var e = await db.DeviceEnrollments.SingleAsync(x => x.Id == k.EnrollmentId, ct);
+            var e = await db.DeviceEnrollments.SingleAsync(x => x.Id == claim.EnrollmentId, ct);
+            if (k.LeaseId != claim.Lease || k.EnrollmentId != claim.EnrollmentId || k.DeviceId != claim.DeviceId ||
+                k.LineId != claim.LineId || k.BindingVersion != claim.BindingVersion || k.IssuanceOperationId != claim.OperationId ||
+                k.IssuerId != claim.IssuerId || k.RootCertificatePem != claim.RootPem || e.Environment != claim.Environment)
+                return false;
             var d = await db.RegisteredDevices.SingleAsync(x => x.Id == k.DeviceId, ct);
             var before = DeviceEnrollmentLifecycle.Snapshot(e, d, k);
-            if ((int)e.State <= 6 && (e.ExpiresAtUtc <= Now || !await BindingValid(e, d, ct)))
-                await lifecycle.CloseAsync(e, d, e.ExpiresAtUtc <= Now ? EnrollmentState.Expired : EnrollmentState.Cancelled,
-                    "BindingOrDeadlineChanged", ProvisioningActor.System, Guid.NewGuid(), ct);
-            var cancelled = (int)e.State > 6 || k.State == CandidateCredentialState.Revoked;
             k.Revision++; k.LastErrorCode = failure;
             k.LeaseId = null; k.LeaseUntilUtc = Now.AddSeconds(5);
-            if (claim.Cleanup)
-            {
-                if (failure is null) k.ExternalRevocationPending = false;
-                lifecycle.Audit(e, d, failure is null ? "CredentialRevocationRecorded" : "CredentialIssuanceDeferred", ProvisioningActor.System, before, k);
-            }
-            else if (failure == "InvalidIssuerResult")
-            {
-                k.State = cancelled ? CandidateCredentialState.Revoked : CandidateCredentialState.Failed;
-                k.ExternalRevocationPending = true;
-                lifecycle.Audit(e, d, "CredentialIssuanceFailed", ProvisioningActor.System, before, k);
-            }
-            else if (failure is null && result.Outcome == IssuerOutcome.Issued)
-            {
-                k.CertificateSha256 = DeviceCertificateProfile.Validate(claim.Request, result.CertificatePem!, Now);
-                k.CertificatePem = result.CertificatePem; k.IssuedAtUtc = Now;
-                k.State = cancelled ? CandidateCredentialState.Revoked : CandidateCredentialState.IssuedUnconfirmed;
-                k.ExternalRevocationPending = cancelled;
-                if (!cancelled) { e.State = EnrollmentState.IssuedUnconfirmed; e.Revision++; }
-                lifecycle.Audit(e, d, cancelled ? "CredentialLateResultRevoked" : "CredentialCandidateIssued", ProvisioningActor.System, before, k);
-            }
-            else
-            {
-                k.State = cancelled ? CandidateCredentialState.Revoked : CandidateCredentialState.OutcomeUnknown;
-                if (cancelled) k.ExternalRevocationPending = true;
-                k.LastErrorCode ??= "IssuerOutcomeUnknown";
-                lifecycle.Audit(e, d, "CredentialIssuanceDeferred", ProvisioningActor.System, before, k);
-            }
+            if (failure is null) k.ExternalRevocationPending = false;
+            lifecycle.Audit(e, d, failure is null ? "CredentialRevocationRecorded" : "CredentialIssuanceDeferred",
+                ProvisioningActor.System, before, k);
             return true;
         }, ct);
         return true;
     }
-    private async Task<bool> BindingValid(DeviceEnrollment e, RegisteredDevice d, CancellationToken ct) =>
-        d.Status == DeviceProvisioningStatus.PendingCredential && d.LineId == e.LineId && d.BindingVersion == e.SourceBindingVersion &&
-        await db.ProductionLines.AnyAsync(x => x.Id == e.LineId && x.IsActive, ct);
-    private static DateTime Utc(DateTime value) => DateTime.SpecifyKind(value, DateTimeKind.Utc);
 }
 
 public sealed class DeviceCredentialIssuanceWorker(IServiceScopeFactory scopes, DeviceEnrollmentOptions options,
@@ -111,7 +96,7 @@ public sealed class DeviceCredentialIssuanceWorker(IServiceScopeFactory scopes, 
 {
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        if (!options.WorkerEnabled) return;
+        if (!options.CleanupEnabled || !options.WorkerEnabled) return;
         using var timer = new PeriodicTimer(TimeSpan.FromSeconds(5));
         while (await timer.WaitForNextTickAsync(stoppingToken))
         {
@@ -124,7 +109,7 @@ public sealed class DeviceCredentialIssuanceWorker(IServiceScopeFactory scopes, 
                 }
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { return; }
-            catch (Exception) { logger.LogWarning("Enrollment issuance/recovery deferred; durable operation remains pending."); }
+            catch (Exception) { logger.LogWarning("Retired credential cleanup deferred; the original operation remains pending."); }
         }
     }
 }

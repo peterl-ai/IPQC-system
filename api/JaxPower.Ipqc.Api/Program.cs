@@ -27,9 +27,18 @@ builder.Services.AddScoped<DeviceRegistryService>();
 var enrollmentOptions = builder.Configuration.GetSection("Enrollment").Get<DeviceEnrollmentOptions>() ?? new();
 enrollmentOptions.Validate(builder.Environment);
 builder.Services.AddSingleton(enrollmentOptions);
-builder.Services.AddSingleton<IDeviceCertificateIssuer>(services => enrollmentOptions.DevelopmentIssuerEnabled
-    ? new DevelopmentDeviceCertificateIssuer(enrollmentOptions, services.GetRequiredService<IHostEnvironment>())
-    : new UnconfiguredDeviceCertificateIssuer());
+builder.Services.AddSingleton<IDeviceCertificateIssuer>(services =>
+{
+    if (enrollmentOptions.CleanupEnabled && enrollmentOptions.DevelopmentIssuerEnabled &&
+        (builder.Environment.IsDevelopment() || builder.Environment.IsEnvironment("Testing")))
+    {
+        try { return new CleanupOnlyDeviceCertificateIssuer(new DevelopmentDeviceCertificateIssuer(enrollmentOptions,
+            services.GetRequiredService<IHostEnvironment>(), cleanupOnly: true)); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.Cryptography.CryptographicException or InvalidOperationException or ArgumentException)
+        { services.GetRequiredService<ILogger<Program>>().LogWarning("Original isolated issuer/journal is unavailable; credential cleanup remains pending."); }
+    }
+    return new UnconfiguredDeviceCertificateIssuer();
+});
 builder.Services.AddScoped<DeviceEnrollmentLifecycle>();
 builder.Services.AddScoped<DeviceEnrollmentService>();
 builder.Services.AddScoped<DeviceCredentialIssuance>();
@@ -128,24 +137,28 @@ builder.Services.AddCors(options => options.AddPolicy("LocalVite", policy =>
     policy.WithOrigins("http://localhost:5173", "http://127.0.0.1:5173").AllowAnyHeader().AllowAnyMethod()));
 
 var app = builder.Build();
+if (enrollmentOptions.BootstrapEnabled || enrollmentOptions.DevelopmentIssuerEnabled)
+    app.Logger.LogWarning("Device provisioning/enrollment is retired. Legacy enable flags cannot enable enrollment or new issuance; only explicitly configured cleanup is permitted.");
 if (app.Environment.IsDevelopment())
 {
     app.MapOpenApi();
     app.UseCors("LocalVite");
 }
 if (!app.Environment.IsDevelopment()) app.UseExceptionHandler();
+app.UseAuthentication();
+app.UseRateLimiter();
+app.UseAuthorization();
 app.Use(async (context, next) =>
 {
-    if (DeviceEnrollmentEndpoints.IsEnrollmentPath(context.Request.Path))
+    // Retired routes do not bind or read bodies; authorization must precede limits on retained cancellation.
+    if (context.Request.Path.StartsWithSegments("/api/admin/enrollments") &&
+        context.Request.Path.Value!.EndsWith("/cancel", StringComparison.OrdinalIgnoreCase))
     {
         DeviceEnrollmentEndpoints.LimitEnrollmentBody(context);
         if (context.Request.ContentLength > 32768) { context.Response.StatusCode = 413; return; }
     }
     await next(context);
 });
-app.UseAuthentication();
-app.UseRateLimiter();
-app.UseAuthorization();
 
 app.MapAuth();
 app.MapUsers();

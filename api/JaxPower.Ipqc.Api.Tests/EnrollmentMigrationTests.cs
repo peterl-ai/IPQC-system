@@ -14,8 +14,7 @@ public sealed class EnrollmentMigrationTests
     public async Task Populated_P102_upgrade_preserves_all_original_columns_and_truthful_admin_audit()
     {
         await using var source = await ProvisioningFixture.CreateAsync();
-        var line = await source.LineAsync("HISTORY"); var device = await source.DeviceAsync("Synthetic historical PAD");
-        await source.DeviceAction(device,"bind",new JaxPower.Ipqc.Api.Contracts.DeviceBindingInput(line.Id,device.Revision));
+        var line = await source.LineAsync("HISTORY"); await source.DeviceAsync("Synthetic historical PAD",line.Id);
         var path = source.Path + ".p102";
         try
         {
@@ -53,7 +52,7 @@ public sealed class EnrollmentMigrationTests
     [Fact]
     public async Task Fresh_schema_rejects_forged_audit_actors_and_restricts_referenced_history_deletion()
     {
-        await using var f=await EnrollmentFixture.CreateAsync();var d=await f.BoundDevice();await f.Invite(d);
+        await using var f=await EnrollmentFixture.CreateAsync();var d=await f.BoundDevice();await f.Seed(d);
         await f.Db(async db=>{
             await Assert.ThrowsAsync<SqliteException>(()=>db.Database.ExecuteSqlInterpolatedAsync($"UPDATE \"ProvisioningAuditEvents\" SET \"ActorKind\" = 4 WHERE \"DeviceId\" = {d.Id}"));
             await Assert.ThrowsAsync<SqliteException>(()=>db.Database.ExecuteSqlInterpolatedAsync($"DELETE FROM \"RegisteredDevices\" WHERE \"Id\" = {d.Id}"));
