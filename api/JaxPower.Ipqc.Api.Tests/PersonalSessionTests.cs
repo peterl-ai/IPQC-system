@@ -57,6 +57,7 @@ public sealed class PersonalSessionTests
         Assert.Equal(HttpStatusCode.OK, (await f.Client(legacyJwt).GetAsync("/api/me")).StatusCode);
         Assert.Equal(HttpStatusCode.OK, (await f.Client(legacyJwt).GetAsync("/api/completed-patrol-records")).StatusCode);
         Assert.Equal(HttpStatusCode.Unauthorized, (await f.Client(legacyJwt).GetAsync("/api/line-patrol/lines")).StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, (await f.Client(legacyJwt).GetAsync("/api/line-patrol/tasks?lineId=malformed")).StatusCode);
         var next = await f.Refresh(auth.RefreshToken!); Assert.Null(next.PersonalSessionId); Assert.Null(next.PersonalSessionEnvironmentId);
         Assert.Equal(HttpStatusCode.Unauthorized, (await f.Client(next.AccessToken).GetAsync("/api/line-patrol/lines")).StatusCode);
         Assert.Equal(HttpStatusCode.NoContent, (await f.Client(legacyJwt).PostAsJsonAsync("/api/auth/logout", new RefreshInput(next.RefreshToken))).StatusCode);

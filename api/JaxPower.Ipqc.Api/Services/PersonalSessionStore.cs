@@ -41,7 +41,7 @@ public sealed class PersonalSessionStore(IpqcDbContext db)
                         await using var tx = await db.Database.UseTransactionAsync(native, ct);
                         var result = await operation();
                         await db.SaveChangesAsync(ct);
-                        await native.CommitAsync(ct);
+                        await tx!.CommitAsync(ct);
                         return result;
                     }
                     finally { connection.DefaultTimeout = previousTimeout; await db.Database.CloseConnectionAsync(); }

@@ -154,6 +154,8 @@ if (app.Environment.IsDevelopment())
 if (!app.Environment.IsDevelopment()) app.UseExceptionHandler();
 app.Use(async (context, next) =>
 {
+    if (context.Request.Path.StartsWithSegments("/api/auth") || context.Request.Path.StartsWithSegments("/api/line-patrol"))
+        context.Response.Headers.CacheControl = "no-store";
     try { await next(context); }
     catch (PersonalAccessException ex) when (!context.Response.HasStarted)
     {
@@ -170,6 +172,15 @@ app.Use(async (context, next) =>
 app.UseAuthentication();
 app.UseRateLimiter();
 app.UseAuthorization();
+app.Use(async (context, next) =>
+{
+    // Current-family authorization precedes minimal-API query/body binding.
+    // Role authorization has already preserved normal 401/403 ordering.
+    if (context.GetEndpoint()?.Metadata.GetMetadata<PersonalAccessRequirement>() is { } requirement)
+        context.Items[typeof(PersonalAuthority)] = await context.RequestServices.GetRequiredService<PersonalAccess>()
+            .ValidateAsync(context.User, requirement.Business, context.RequestAborted);
+    await next(context);
+});
 app.Use(async (context, next) =>
 {
     // Retired routes do not bind or read bodies; authorization must precede limits on retained cancellation.

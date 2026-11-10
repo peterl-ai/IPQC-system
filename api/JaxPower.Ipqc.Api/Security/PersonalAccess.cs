@@ -23,6 +23,7 @@ public sealed class PersonalAccessOptions
 
 public sealed record PersonalAuthority(Guid UserId, Guid PersonalSessionId, string EnvironmentId,
     DateTime VerifiedAtUtc, DateTime PersonalSessionExpiresAtUtc);
+public sealed record PersonalAccessRequirement(bool Business);
 
 public sealed class PersonalAccess(IpqcDbContext db, AuthenticationClock clock, PersonalAccessOptions options)
 {
@@ -58,12 +59,5 @@ public sealed class PersonalAccess(IpqcDbContext db, AuthenticationClock clock, 
 
     public static RouteHandlerBuilder RequireCurrent(RouteHandlerBuilder route, bool business) => route
         .RequireAuthorization(business ? IpqcPermissions.LinePatrolRead : CurrentPolicy)
-        .AddEndpointFilter(async (context, next) =>
-        {
-            context.HttpContext.Response.Headers.CacheControl = "no-store";
-            var access = context.HttpContext.RequestServices.GetRequiredService<PersonalAccess>();
-            context.HttpContext.Items[typeof(PersonalAuthority)] = await access.ValidateAsync(
-                context.HttpContext.User, business, context.HttpContext.RequestAborted);
-            return await next(context);
-        });
+        .WithMetadata(new PersonalAccessRequirement(business));
 }

@@ -11,6 +11,18 @@ namespace JaxPower.Ipqc.Api.Tests;
 public sealed class PersonalSessionConcurrencyTests
 {
     [Fact]
+    public async Task Pre_commit_failure_rolls_back_the_entire_replacement_graph()
+    { await using var f = await PersonalSessionFixture.CreateAsync(); await CommitRollback(f); }
+
+    internal static async Task CommitRollback(PersonalSessionFixture f)
+    {
+        var auth = await f.Login(); f.CommitFault.Armed = true;
+        using (var scope = f.Factory.Services.CreateScope())
+            await Assert.ThrowsAsync<InvalidOperationException>(() => scope.ServiceProvider.GetRequiredService<LocalAuthService>().RefreshAsync(auth.RefreshToken, null, default));
+        Assert.Equal(1, await f.Read(db => db.RefreshTokenSessions.CountAsync()));
+        Assert.NotNull((await f.Refresh(auth.RefreshToken!)).RefreshToken);
+    }
+    [Fact]
     public async Task Duplicate_refresh_and_logout_race_has_one_successor_then_no_live_family()
     { await using var f = await PersonalSessionFixture.CreateAsync(); await RefreshLogout(f); }
 

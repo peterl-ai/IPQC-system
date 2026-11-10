@@ -61,12 +61,24 @@ internal sealed class SessionFault : DbCommandInterceptor
     { await Check(command, cancellationToken); return result; }
 }
 
+internal sealed class SessionCommitFault : DbTransactionInterceptor
+{
+    public bool Armed { get; set; }
+    public override ValueTask<InterceptionResult> TransactionCommittingAsync(DbTransaction transaction,
+        TransactionEventData eventData, InterceptionResult result, CancellationToken cancellationToken = default)
+    {
+        if (Armed) { Armed = false; throw new InvalidOperationException("Synthetic pre-commit failure"); }
+        return ValueTask.FromResult(result);
+    }
+}
+
 internal sealed class PersonalSessionFixture : IAsyncDisposable
 {
     public required WebApplicationFactory<Program> Factory { get; init; }
     public required HttpClient Anonymous { get; init; }
     public required PersonalClock Clock { get; init; }
     public required SessionFault Fault { get; init; }
+    public required SessionCommitFault CommitFault { get; init; }
     public required PersonalAccessOptions Options { get; init; }
     public required string Connection { get; init; }
     public string? PostgresRoot { get; init; }
@@ -77,7 +89,7 @@ internal sealed class PersonalSessionFixture : IAsyncDisposable
     public static async Task<PersonalSessionFixture> CreateAsync(bool postgres = false, string? environment = Environment,
         string? migration = null)
     {
-        var clock = new PersonalClock(); var fault = new SessionFault();
+        var clock = new PersonalClock(); var fault = new SessionFault(); var commitFault = new SessionCommitFault();
         var options = new PersonalAccessOptions { EnvironmentId = environment,
             LineIds = [Guid.NewGuid().ToString(), Guid.NewGuid().ToString()] };
         string connection; string? root = null;
@@ -98,22 +110,25 @@ internal sealed class PersonalSessionFixture : IAsyncDisposable
         var factory = new WebApplicationFactory<Program>().WithWebHostBuilder(web =>
         {
             web.UseEnvironment("Testing"); web.UseSetting("Scheduler:Enabled", "false");
+            web.UseSetting("Database:Provider", postgres ? "Postgres" : "Sqlite");
+            web.UseSetting("ConnectionStrings:Ipqc", connection);
             web.ConfigureLogging(x => x.ClearProviders());
             web.ConfigureTestServices(services =>
             {
                 services.RemoveAll<DbContextOptions<IpqcDbContext>>();
+                services.RemoveAll<IDbContextOptionsConfiguration<IpqcDbContext>>();
                 services.RemoveAll<AuthenticationClock>(); services.AddSingleton(new AuthenticationClock(clock));
                 services.RemoveAll<TimeProvider>(); services.AddSingleton<TimeProvider>(clock);
                 services.RemoveAll<PersonalAccessOptions>(); services.AddSingleton(options);
                 services.AddDbContext<IpqcDbContext>(o =>
                 {
                     if (postgres) o.UseNpgsql(connection); else o.UseSqlite(connection);
-                    o.AddInterceptors(fault);
+                    o.AddInterceptors(fault, commitFault);
                 });
             });
         });
         var fixture = new PersonalSessionFixture { Factory = factory, Anonymous = factory.CreateClient(),
-            Clock = clock, Fault = fault, Options = options, Connection = connection, PostgresRoot = root };
+            Clock = clock, Fault = fault, CommitFault = commitFault, Options = options, Connection = connection, PostgresRoot = root };
         await fixture.Edit(async db =>
         {
             await db.GetService<IMigrator>().MigrateAsync(migration);

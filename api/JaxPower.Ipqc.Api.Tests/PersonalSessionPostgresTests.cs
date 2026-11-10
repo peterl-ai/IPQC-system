@@ -26,7 +26,11 @@ public sealed class PersonalSessionPostgresTests
 
     [DisposablePostgresFact]
     public async Task Real_PostgreSQL_failed_successor_rolls_back_consumption()
-    { await using var f = await PersonalSessionFixture.CreateAsync(postgres: true); await PersonalSessionConcurrencyTests.RotationRollback(f); }
+    {
+        await using var f = await PersonalSessionFixture.CreateAsync(postgres: true);
+        await PersonalSessionConcurrencyTests.RotationRollback(f);
+        await PersonalSessionConcurrencyTests.CommitRollback(f);
+    }
 
     [DisposablePostgresFact]
     public async Task Real_PostgreSQL_rotation_serializes_with_all_security_mutations()
