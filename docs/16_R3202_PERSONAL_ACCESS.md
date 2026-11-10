@@ -116,6 +116,24 @@ R02 IDs below refer to unchanged readiness criteria. Actual test totals and fina
 
 ## Verification commands and live PostgreSQL isolation
 
+Verification at code commit `4e641c4b1d71b75c7b73c45561b1c5d9d7866a93` (subsequent delivery adds evidence/formatting and explicit missing/third-line assertions; final-HEAD CI is independently verified in the PR delivery):
+
+| Gate | Actual result |
+| --- | --- |
+| Backend restore / Release build | PASS, 0 warnings / 0 errors |
+| Complete local backend suite | PASS 239 / FAIL 0 / SKIP 4 (243 total); four opt-in real PostgreSQL tests skipped locally because no disposable local server |
+| Explicit migration suite | PASS 15 / FAIL 0 / SKIP 0; fresh/populated SQLite, historical upgrades, provider models and SQL |
+| Both EF has-pending-model-changes commands | PASS, SQLite and PostgreSQL models clean; no server connection |
+| PostgreSQL idempotent upgrade SQL | PASS review: two nullable native-type columns, three indexes, no unrelated DDL/backfill/drop |
+| Web npm ci / lint / typecheck / build | PASS; unchanged dependency/bundle advisories below |
+| Web tests | PASS 70 / FAIL 0 / SKIP 0 (16 files) |
+| Git whitespace / scoped file-content secret scan | PASS; no production identifiers, private keys or bearer tokens introduced |
+| [GitHub code CI run 42911816173](https://github.com/peterl-ai/IPQC-system/actions/runs/42911816173) | PASS backend, frontend and PostgreSQL jobs on the exact code commit above |
+| Real PostgreSQL 17 CI execution | PASS 4 / FAIL 0 / SKIP 0; separate ephemeral PostgreSQL job, not model-only or SQLite evidence |
+| Actual PAD / internal HTTPS / IT restore drill | SKIPPED / PENDING external gates; no device/app or deployment claim |
+
+Initial CI exposed a mixed-provider registration in the new PostgreSQL fixture, then a rollback helper counting a preceding independent family. Both test-isolation defects were corrected and the real server suite passed without disabling cases or weakening the target-family invariant. Early local fault tests were corrected for EF exception wrapping and explicit insertion of synthetic GUID-bearing children. Intermediate failures are not final gate passes. R02-01..32 are mapped above; client-only/operational portions remain explicitly deferred, and the approved planning matrix is unchanged.
+
 From repository root: dotnet restore/build/test the solution in Release; Web npm ci/lint/test/typecheck/build; dotnet tool restore; EF has-pending-model-changes under scoped Testing SQLite in-memory and Postgres model-only configuration; generate/review Postgres idempotent migration SQL; git diff --check and scoped secret scan. Test evidence/TRX and generated SQL remain under the OS temp ipqc-r32-02-verification directory, not Git. Pending-model checks and SQL generation do not connect to a server.
 
 Focused filter: `FullyQualifiedName~PersonalSession|FullyQualifiedName~OfflineAccessReceipt|FullyQualifiedName~LinePatrolRead`. Migration filter: `FullyQualifiedName~MigrationTests`. Existing backend suite continues to include all legacy and R32-01 tests.

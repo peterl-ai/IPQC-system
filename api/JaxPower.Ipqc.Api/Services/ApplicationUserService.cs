@@ -87,32 +87,32 @@ public sealed class ApplicationUserService(IpqcDbContext db, IPasswordHasher<App
         {
             return await sessions.WriteAsync<UserOutput?>(id, async () =>
             {
-            var user = await db.ApplicationUsers.SingleOrDefaultAsync(x => x.Id == id, ct);
-            if (user is null) return null;
-            var nextRole = update?.Role ?? user.Role;
-            var nextActive = active ?? user.IsActive;
-            if (id == actorId && (!nextActive || nextRole != "Admin"))
-                throw new UserConflictException("You cannot deactivate yourself or remove your Admin role.");
-            if (user.IsActive && user.Role == "Admin" && (!nextActive || nextRole != "Admin") &&
-                await db.ApplicationUsers.CountAsync(x => x.IsActive && x.Role == "Admin", ct) <= 1)
-                throw new UserConflictException("The last active Admin must remain active.");
-            if (user.Role == "IPQA" && (!nextActive || nextRole != "IPQA") &&
-                (await db.PatrolPlanAssignees.AnyAsync(x => x.UserId == id && x.IsActive && x.PatrolPlan.IsEnabled, ct) ||
-                 await db.PatrolTasks.AnyAsync(x => x.AssignedInspectorUserId == id && x.Status != "Completed", ct)))
-                throw new UserConflictException("IPQA has an enabled Plan or unfinished Task assignment.");
-            var changedSecurity = user.Role != nextRole || user.IsActive != nextActive;
-            user.Role = nextRole!;
-            user.IsActive = nextActive;
-            if (update is not null) user.DisplayName = update.DisplayName!.Trim();
-            user.UpdatedAtUtc = clock.GetUtcNow().UtcDateTime;
-            user.UpdatedBy = actor;
-            if (changedSecurity)
-            {
-                user.AuthVersion++;
-                await RevokeSessionsAsync(id, user.UpdatedAtUtc, ct);
-            }
-            await db.SaveChangesAsync(ct);
-            return Output(user);
+                var user = await db.ApplicationUsers.SingleOrDefaultAsync(x => x.Id == id, ct);
+                if (user is null) return null;
+                var nextRole = update?.Role ?? user.Role;
+                var nextActive = active ?? user.IsActive;
+                if (id == actorId && (!nextActive || nextRole != "Admin"))
+                    throw new UserConflictException("You cannot deactivate yourself or remove your Admin role.");
+                if (user.IsActive && user.Role == "Admin" && (!nextActive || nextRole != "Admin") &&
+                    await db.ApplicationUsers.CountAsync(x => x.IsActive && x.Role == "Admin", ct) <= 1)
+                    throw new UserConflictException("The last active Admin must remain active.");
+                if (user.Role == "IPQA" && (!nextActive || nextRole != "IPQA") &&
+                    (await db.PatrolPlanAssignees.AnyAsync(x => x.UserId == id && x.IsActive && x.PatrolPlan.IsEnabled, ct) ||
+                     await db.PatrolTasks.AnyAsync(x => x.AssignedInspectorUserId == id && x.Status != "Completed", ct)))
+                    throw new UserConflictException("IPQA has an enabled Plan or unfinished Task assignment.");
+                var changedSecurity = user.Role != nextRole || user.IsActive != nextActive;
+                user.Role = nextRole!;
+                user.IsActive = nextActive;
+                if (update is not null) user.DisplayName = update.DisplayName!.Trim();
+                user.UpdatedAtUtc = clock.GetUtcNow().UtcDateTime;
+                user.UpdatedBy = actor;
+                if (changedSecurity)
+                {
+                    user.AuthVersion++;
+                    await RevokeSessionsAsync(id, user.UpdatedAtUtc, ct);
+                }
+                await db.SaveChangesAsync(ct);
+                return Output(user);
             }, ct, serializable: true);
         }
         catch (Exception ex) when (ex is DbUpdateConcurrencyException ||
@@ -128,18 +128,18 @@ public sealed class ApplicationUserService(IpqcDbContext db, IPasswordHasher<App
             throw new UserInputException(new() { ["TemporaryPassword"] = ["Use 10–256 characters with upper, lower, and numeric characters."] });
         return await sessions.WriteAsync<UserOutput?>(id, async () =>
         {
-        var user = await db.ApplicationUsers.FindAsync([id], ct);
-        if (user is null) return null;
-        user.PasswordHash = hasher.HashPassword(user, password!);
-        user.MustChangePassword = true;
-        user.AuthVersion++;
-        user.FailedLoginCount = 0;
-        user.LockoutEndUtc = null;
-        user.UpdatedAtUtc = clock.GetUtcNow().UtcDateTime;
-        user.UpdatedBy = actor;
-        await RevokeSessionsAsync(id, user.UpdatedAtUtc, ct);
-        await db.SaveChangesAsync(ct);
-        return Output(user);
+            var user = await db.ApplicationUsers.FindAsync([id], ct);
+            if (user is null) return null;
+            user.PasswordHash = hasher.HashPassword(user, password!);
+            user.MustChangePassword = true;
+            user.AuthVersion++;
+            user.FailedLoginCount = 0;
+            user.LockoutEndUtc = null;
+            user.UpdatedAtUtc = clock.GetUtcNow().UtcDateTime;
+            user.UpdatedBy = actor;
+            await RevokeSessionsAsync(id, user.UpdatedAtUtc, ct);
+            await db.SaveChangesAsync(ct);
+            return Output(user);
         }, ct);
     }
 
@@ -147,14 +147,14 @@ public sealed class ApplicationUserService(IpqcDbContext db, IPasswordHasher<App
     {
         return await sessions.WriteAsync<UserOutput?>(id, async () =>
         {
-        var user = await db.ApplicationUsers.FindAsync([id], ct);
-        if (user is null) return null;
-        user.FailedLoginCount = 0;
-        user.LockoutEndUtc = null;
-        user.UpdatedAtUtc = clock.GetUtcNow().UtcDateTime;
-        user.UpdatedBy = actor;
-        await db.SaveChangesAsync(ct);
-        return Output(user);
+            var user = await db.ApplicationUsers.FindAsync([id], ct);
+            if (user is null) return null;
+            user.FailedLoginCount = 0;
+            user.LockoutEndUtc = null;
+            user.UpdatedAtUtc = clock.GetUtcNow().UtcDateTime;
+            user.UpdatedBy = actor;
+            await db.SaveChangesAsync(ct);
+            return Output(user);
         }, ct);
     }
 

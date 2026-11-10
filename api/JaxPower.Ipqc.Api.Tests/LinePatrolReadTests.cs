@@ -51,6 +51,9 @@ public sealed class LinePatrolReadTests
         Assert.Equal("Frozen item", detail.Items.Single().InspectionItem); Assert.False(detail.CanExecute);
         Assert.DoesNotContain("assignedInspector", await client.GetStringAsync($"/api/line-patrol/tasks/{one}"), StringComparison.OrdinalIgnoreCase);
         Assert.Equal(HttpStatusCode.NotFound, (await client.GetAsync($"/api/line-patrol/tasks/{legacy}")).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await client.GetAsync($"/api/line-patrol/tasks?lineId={Guid.NewGuid()}")).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await client.GetAsync("/api/line-patrol/tasks")).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await client.GetAsync($"/api/line-patrol/tasks?lineId={Guid.Empty}")).StatusCode);
         Assert.Equal(HttpStatusCode.Conflict, (await client.GetAsync($"/api/line-patrol/tasks/{one}?expectedTaskLineId={f.Line2}")).StatusCode);
         Assert.Equal(HttpStatusCode.Forbidden, (await client.PutAsJsonAsync($"/api/patrol-tasks/{one}/draft", new TaskDraftInput(null, []))).StatusCode);
         var owner = await f.Login("dev-ipqa-2");

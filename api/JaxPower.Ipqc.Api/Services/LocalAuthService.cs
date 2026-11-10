@@ -34,29 +34,29 @@ public sealed class LocalAuthService(IpqcDbContext db, IPasswordHasher<Applicati
         if (id is null) return null;
         return await store.WriteAsync<(AuthOutput Output, string RefreshToken, DateTime RefreshExpiresAtUtc)?>(id.Value, async () =>
         {
-        var user = await db.ApplicationUsers.SingleOrDefaultAsync(x => x.Id == id, ct);
-        var now = clock.GetUtcNow().UtcDateTime;
-        if (user is null || !user.IsActive || user.LockoutEndUtc > now) return null;
-        var result = hasher.VerifyHashedPassword(user, user.PasswordHash, password);
-        if (result == PasswordVerificationResult.Failed)
-        {
-            // One database statement serializes increments for this account on SQLite and PostgreSQL.
-            await db.ApplicationUsers.Where(x => x.Id == user.Id && x.IsActive &&
-                (x.LockoutEndUtc == null || x.LockoutEndUtc <= now))
-                .ExecuteUpdateAsync(update => update
-                    .SetProperty(x => x.LockoutEndUtc,
-                        x => x.FailedLoginCount >= 4 ? now.AddMinutes(15) : x.LockoutEndUtc)
-                    .SetProperty(x => x.FailedLoginCount,
-                        x => x.FailedLoginCount >= 4 ? 0 : x.FailedLoginCount + 1), ct);
-            return null;
-        }
-        user.FailedLoginCount = 0;
-        user.LockoutEndUtc = null;
-        if (result == PasswordVerificationResult.SuccessRehashNeeded)
-            user.PasswordHash = hasher.HashPassword(user, password);
-        var issued = Issue(user, now, now.AddDays(settings.RefreshDays), userAgent, Guid.NewGuid(), personalOptions.ValidEnvironment);
-        await db.SaveChangesAsync(ct);
-        return (issued.Output, issued.RefreshToken, now.AddDays(settings.RefreshDays));
+            var user = await db.ApplicationUsers.SingleOrDefaultAsync(x => x.Id == id, ct);
+            var now = clock.GetUtcNow().UtcDateTime;
+            if (user is null || !user.IsActive || user.LockoutEndUtc > now) return null;
+            var result = hasher.VerifyHashedPassword(user, user.PasswordHash, password);
+            if (result == PasswordVerificationResult.Failed)
+            {
+                // One database statement serializes increments for this account on SQLite and PostgreSQL.
+                await db.ApplicationUsers.Where(x => x.Id == user.Id && x.IsActive &&
+                    (x.LockoutEndUtc == null || x.LockoutEndUtc <= now))
+                    .ExecuteUpdateAsync(update => update
+                        .SetProperty(x => x.LockoutEndUtc,
+                            x => x.FailedLoginCount >= 4 ? now.AddMinutes(15) : x.LockoutEndUtc)
+                        .SetProperty(x => x.FailedLoginCount,
+                            x => x.FailedLoginCount >= 4 ? 0 : x.FailedLoginCount + 1), ct);
+                return null;
+            }
+            user.FailedLoginCount = 0;
+            user.LockoutEndUtc = null;
+            if (result == PasswordVerificationResult.SuccessRehashNeeded)
+                user.PasswordHash = hasher.HashPassword(user, password);
+            var issued = Issue(user, now, now.AddDays(settings.RefreshDays), userAgent, Guid.NewGuid(), personalOptions.ValidEnvironment);
+            await db.SaveChangesAsync(ct);
+            return (issued.Output, issued.RefreshToken, now.AddDays(settings.RefreshDays));
         }, ct);
     }
 
@@ -70,19 +70,19 @@ public sealed class LocalAuthService(IpqcDbContext db, IPasswordHasher<Applicati
         if (owner is null) return null;
         return await store.WriteAsync<(AuthOutput Output, string RefreshToken, DateTime RefreshExpiresAtUtc)?>(owner.Value, async () =>
         {
-        var now = clock.GetUtcNow().UtcDateTime;
-        var session = await db.RefreshTokenSessions.Include(x => x.User)
-            .SingleOrDefaultAsync(x => x.TokenHash == hash, ct);
-        if (session is null || session.RevokedAtUtc is not null || session.ExpiresAtUtc <= now ||
-            !session.User.IsActive || session.AuthVersion != session.User.AuthVersion) return null;
-        var replaced = await db.RefreshTokenSessions.Where(x => x.Id == session.Id && x.RevokedAtUtc == null)
-            .ExecuteUpdateAsync(x => x.SetProperty(s => s.RevokedAtUtc, now), ct);
-        if (replaced != 1) return null;
-        var issued = Issue(session.User, now, session.ExpiresAtUtc, userAgent,
-            session.PersonalSessionId, session.PersonalSessionEnvironmentId);
-        session.ReplacedBySessionId = issued.SessionId;
-        await db.SaveChangesAsync(ct);
-        return (issued.Output, issued.RefreshToken, session.ExpiresAtUtc);
+            var now = clock.GetUtcNow().UtcDateTime;
+            var session = await db.RefreshTokenSessions.Include(x => x.User)
+                .SingleOrDefaultAsync(x => x.TokenHash == hash, ct);
+            if (session is null || session.RevokedAtUtc is not null || session.ExpiresAtUtc <= now ||
+                !session.User.IsActive || session.AuthVersion != session.User.AuthVersion) return null;
+            var replaced = await db.RefreshTokenSessions.Where(x => x.Id == session.Id && x.RevokedAtUtc == null)
+                .ExecuteUpdateAsync(x => x.SetProperty(s => s.RevokedAtUtc, now), ct);
+            if (replaced != 1) return null;
+            var issued = Issue(session.User, now, session.ExpiresAtUtc, userAgent,
+                session.PersonalSessionId, session.PersonalSessionEnvironmentId);
+            session.ReplacedBySessionId = issued.SessionId;
+            await db.SaveChangesAsync(ct);
+            return (issued.Output, issued.RefreshToken, session.ExpiresAtUtc);
         }, ct);
     }
 
@@ -113,20 +113,20 @@ public sealed class LocalAuthService(IpqcDbContext db, IPasswordHasher<Applicati
         if (!ValidPassword(newPassword) || currentPassword is null) return false;
         return await store.WriteAsync(userId, async () =>
         {
-        var user = await db.ApplicationUsers.FindAsync([userId], ct);
-        if (user is null || hasher.VerifyHashedPassword(user, user.PasswordHash, currentPassword) == PasswordVerificationResult.Failed)
-            return false;
-        if (string.Equals(currentPassword, newPassword, StringComparison.Ordinal)) return false;
-        var now = clock.GetUtcNow().UtcDateTime;
-        user.PasswordHash = hasher.HashPassword(user, newPassword!);
-        user.MustChangePassword = false;
-        user.AuthVersion++;
-        user.UpdatedAtUtc = now;
-        user.UpdatedBy = user.Username;
-        await db.RefreshTokenSessions.Where(x => x.UserId == userId && x.RevokedAtUtc == null)
-            .ExecuteUpdateAsync(x => x.SetProperty(s => s.RevokedAtUtc, now), ct);
-        await db.SaveChangesAsync(ct);
-        return true;
+            var user = await db.ApplicationUsers.FindAsync([userId], ct);
+            if (user is null || hasher.VerifyHashedPassword(user, user.PasswordHash, currentPassword) == PasswordVerificationResult.Failed)
+                return false;
+            if (string.Equals(currentPassword, newPassword, StringComparison.Ordinal)) return false;
+            var now = clock.GetUtcNow().UtcDateTime;
+            user.PasswordHash = hasher.HashPassword(user, newPassword!);
+            user.MustChangePassword = false;
+            user.AuthVersion++;
+            user.UpdatedAtUtc = now;
+            user.UpdatedBy = user.Username;
+            await db.RefreshTokenSessions.Where(x => x.UserId == userId && x.RevokedAtUtc == null)
+                .ExecuteUpdateAsync(x => x.SetProperty(s => s.RevokedAtUtc, now), ct);
+            await db.SaveChangesAsync(ct);
+            return true;
         }, ct);
     }
 
