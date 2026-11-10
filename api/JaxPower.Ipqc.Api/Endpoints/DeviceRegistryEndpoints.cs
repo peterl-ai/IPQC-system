@@ -23,26 +23,13 @@ public static class DeviceRegistryEndpoints
             if (await service.GetAsync(id, ct) is null) return Results.NotFound();
             return Results.Ok(await store.AuditAsync(id, true, number, size, ct));
         });
-        group.MapPost("", async (DeviceCreateInput input, DeviceRegistryService service, HttpContext http, CancellationToken ct) =>
-        {
-            var row = await service.CreateAsync(input, IpqcPermissions.UserId(http.User), IpqcPermissions.Username(http.User), ct);
-            return Results.Created($"/api/admin/devices/{row.Id}", row);
-        }).RequireAuthorization(IpqcPermissions.DevicesWrite);
-        group.MapPut("/{id:guid}", async (Guid id, DeviceUpdateInput input, DeviceRegistryService service, HttpContext http, CancellationToken ct) =>
-            Results.Ok(await service.UpdateAsync(id, input, IpqcPermissions.UserId(http.User), IpqcPermissions.Username(http.User), ct)))
-            .RequireAuthorization(IpqcPermissions.DevicesWrite);
-        foreach (var rebind in new[] { false, true })
-            group.MapPost(rebind ? "/{id:guid}/rebind" : "/{id:guid}/bind", async (Guid id, DeviceBindingInput input,
-                DeviceRegistryService service, HttpContext http, CancellationToken ct) => Results.Ok(await service.ReserveAsync(id, input, rebind,
-                    IpqcPermissions.UserId(http.User), IpqcPermissions.Username(http.User), ct)))
-                .RequireAuthorization(IpqcPermissions.DevicesWrite);
-        foreach (var revoke in new[] { false, true })
-            group.MapPost(revoke ? "/{id:guid}/revoke" : "/{id:guid}/unbind", async (Guid id, DeviceReasonInput input,
-                DeviceRegistryService service, HttpContext http, CancellationToken ct) => Results.Ok(await service.ReleaseAsync(id, input, revoke,
-                    IpqcPermissions.UserId(http.User), IpqcPermissions.Username(http.User), ct)))
-                .RequireAuthorization(IpqcPermissions.DevicesWrite);
-        group.MapPost("/{id:guid}/replace", async (Guid id, DeviceReplaceInput input, DeviceRegistryService service, HttpContext http, CancellationToken ct) =>
-            Results.Ok(await service.ReplaceAsync(id, input, IpqcPermissions.UserId(http.User), IpqcPermissions.Username(http.User), ct)))
+        group.MapPost("", DeviceProvisioningRetirement.Response).RequireAuthorization(IpqcPermissions.DevicesWrite);
+        group.MapPut("/{id:guid}", DeviceProvisioningRetirement.Response).RequireAuthorization(IpqcPermissions.DevicesWrite);
+        foreach (var action in new[] { "bind", "rebind", "unbind", "replace" })
+            group.MapPost("/{id:guid}/" + action, DeviceProvisioningRetirement.Response).RequireAuthorization(IpqcPermissions.DevicesWrite);
+        group.MapPost("/{id:guid}/revoke", async (Guid id, DeviceReasonInput input, DeviceRegistryService service,
+            HttpContext http, CancellationToken ct) => Results.Ok(await service.ReleaseAsync(id, input, true,
+                IpqcPermissions.UserId(http.User), IpqcPermissions.Username(http.User), ct)))
             .RequireAuthorization(IpqcPermissions.DevicesWrite);
     }
 }

@@ -21,11 +21,10 @@ export interface Audit {
   actorKind?: 'Admin' | 'Device' | 'ApplicantKey' | 'System'; actorDeviceId?: string | null; enrollmentId?: string | null; credentialId?: string | null
   occurredAtUtc: string; reason: string | null; before: Snapshot | null; after: Snapshot
 }
-export type DeviceAction = 'bind' | 'rebind' | 'unbind' | 'revoke' | 'replace'
 export class ProvisioningApiError extends Error {
   constructor(readonly code: string, readonly status: number) { super(code) }
 }
-const knownErrors = ['InvalidInput', 'Conflict', 'NotFound', 'DuplicateCode', 'LineInUse', 'InactiveLine', 'LineOccupied', 'TerminalDevice', 'InvalidTransition']
+const knownErrors = ['DeviceProvisioningRetired', 'InvalidInput', 'Conflict', 'NotFound', 'DuplicateCode', 'LineInUse', 'InactiveLine', 'LineOccupied', 'TerminalDevice', 'InvalidTransition']
 export function errorCode(error: unknown): string {
   if (!(error instanceof ProvisioningApiError)) return 'Unavailable'
   if (error.status === 401 || error.status === 403) return 'Forbidden'
@@ -50,13 +49,9 @@ export const provisioningApi = {
   lines: (page = 1, pageSize = 20) => request<Page<Line>>(`/production-lines?page=${page}&pageSize=${pageSize}`),
   devices: (page = 1, pageSize = 20) => request<Page<Device>>(`/devices?page=${page}&pageSize=${pageSize}`),
   lineOptions: () => all((page) => provisioningApi.lines(page, 100)),
-  deviceOptions: () => all((page) => provisioningApi.devices(page, 100)),
   createLine: (code: string, name: string) => request<Line>('/production-lines', 'POST', { code, name, isActive: true }),
   renameLine: (line: Line, name: string) => request<Line>(`/production-lines/${line.id}`, 'PUT', { name, expectedRevision: line.revision }),
   setLineActive: (line: Line, active: boolean) => request<Line>(`/production-lines/${line.id}/${active ? 'activate' : 'deactivate'}`, 'POST', { expectedRevision: line.revision }),
-  createDevice: (displayName: string, model: string, serial: string) => request<Device>('/devices', 'POST', { displayName, model, serial }),
-  editDevice: (device: Device, displayName: string, model: string, serial: string) => request<Device>(`/devices/${device.id}`, 'PUT', { displayName, model, serial, expectedRevision: device.revision }),
-  deviceAction: (device: Device, action: DeviceAction, input: { lineId?: string; reason?: string; replacementDeviceId?: string; replacementExpectedRevision?: number }) =>
-    request<Device>(`/devices/${device.id}/${action}`, 'POST', { ...input, expectedRevision: device.revision }),
+  revokeDevice: (device: Device, reason: string) => request<Device>(`/devices/${device.id}/revoke`, 'POST', { expectedRevision: device.revision, reason }),
   audit: (kind: 'production-lines' | 'devices', id: string, page = 1) => request<Page<Audit>>(`/${kind}/${id}/audit?page=${page}&pageSize=20`),
 }

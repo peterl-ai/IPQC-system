@@ -1,7 +1,7 @@
 export default {
   enrollment: {
-  "title": "设备凭据注册",
-  "boundary": "候选证书不授予巡检权限。设备启用需要后续经验证的 mTLS 确认。",
+  "title": "注册历史",
+  "boundary": "历史候选证书不授予巡检权限。新设备注册和证书签发已停用。",
   "invite": "签发邀请",
   "secretWarning": "仅在此视图显示一次。请安全交付指定 PAD 操作员，勿通过聊天或审计备注发送。",
   "secret": "邀请密钥",
@@ -21,7 +21,7 @@ export default {
   "approve": "批准候选证书签发",
   "cancel": "取消注册",
   "revocationPending": "外部撤销或签发结果清理仍在进行。",
-  "issuerRecovery": "签发需要恢复。请与 IT 核查原签发操作，勿使用新操作 ID 重复批准。",
+  "issuerRecovery": "原凭据清理需要恢复。请与 IT 核查原操作及签发日志；新签发已停用。",
   "rateLimited": "请求过多，请稍后重试。",
   "actor": {
     "Admin": "管理员",
@@ -35,23 +35,23 @@ export default {
     "PendingApproval": "等待管理员核验",
     "Approved": "已批准候选证书签发",
     "Issuing": "等待签发结果",
-    "IssuedUnconfirmed": "已签发，mTLS 未确认",
+    "IssuedUnconfirmed": "历史未确认候选证书",
     "Cancelled": "已取消",
     "Expired": "已过期"
   },
   "credential": {
     "PendingIssuance": "待签发",
     "OutcomeUnknown": "签发结果未知",
-    "IssuedUnconfirmed": "已签发，mTLS 未确认",
+    "IssuedUnconfirmed": "历史未确认候选证书",
     "Revoked": "候选凭据已撤销",
     "Failed": "签发结果被拒绝"
   }
 },
   provisioning: {
-  "title": "设备预配置",
-  "boundary": "预配置资料和产线预分配不代表 PAD 已完成凭据注册，也不授予巡检执行权限。",
+  "title": "产线与设备历史",
+  "boundary": "产线管理仍可使用。设备预配置和注册已停用；历史记录和受控关闭不授予巡检权限。",
   "lines": "产线目录",
-  "devices": "设备",
+  "devices": "设备历史",
   "refresh": "刷新",
   "add": "新增",
   "loading": "加载中…",
@@ -104,11 +104,12 @@ export default {
     "replace": "替换设备记录"
   },
   "error": {
+    "DeviceProvisioningRetired": "设备预配置和注册已停用，请刷新此历史视图。",
     "InvalidInput": "请填写必填项，并遵守长度限制。",
     "Conflict": "记录已变更或正忙。请关闭窗口并刷新，核对最新状态后再试。",
     "NotFound": "所选记录已不存在，请刷新列表。",
     "DuplicateCode": "此产线代码已被使用，包括已停用的产线。",
-    "LineInUse": "停用产线前，请先释放或撤销当前预分配。",
+    "LineInUse": "停用产线前，请先撤销历史设备的产线预分配。",
     "InactiveLine": "此产线已停用。",
     "LineOccupied": "此产线已有预分配。",
     "TerminalDevice": "已撤销或已替换的设备不能修改或重新启用。",

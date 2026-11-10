@@ -24,6 +24,11 @@ internal static class TestAccounts
         using var scope = factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<IpqcDbContext>();
         var hasher = scope.ServiceProvider.GetRequiredService<IPasswordHasher<ApplicationUser>>();
+        await SeedAsync(db, hasher);
+    }
+
+    internal static async Task SeedAsync(IpqcDbContext db, IPasswordHasher<ApplicationUser> hasher)
+    {
         if (await db.ApplicationUsers.AnyAsync()) return;
         Add(AdminId, "admin", "Admin");
         Add(PqeId, "pqe", "PQE");

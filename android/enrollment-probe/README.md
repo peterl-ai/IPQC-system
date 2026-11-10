@@ -1,5 +1,7 @@
 # Isolated Android 11 enrollment feasibility gate
 
+> Retired historical probe procedure under [Rev3.2](../../docs/architecture/IPQC_ANDROID_ARCHITECTURE_V1_REV3_2_2026-11-10.md). Do not build/install this enrollment probe or enable Bootstrap using the old steps below. No probe project or APK is delivered. P1-03B/mTLS/device activation is cancelled; normal Android secure storage remains distinct from device trust. Actual targets are SM-X210/API35 and SM-T500/API30, one minSdk30 future app. Old skipped hardware/CA results remain historical; R32-01 adds only retirement/cleanup and no Android code.
+
 This directory is separate from the future patrol application. No production Android app, APK, signing key or authority-bearing credential is delivered here. Local feasibility execution is **SKIPPED**: Android SDK/adb/Gradle/JDK and an SM-T500 are unavailable on the implementation host. Backend development and software DER/JOSE interoperability tests proceed independently. Do not describe them as hardware/Keystore PASS.
 
 ## On-site preparation

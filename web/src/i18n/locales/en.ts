@@ -1,7 +1,7 @@
 export default {
   enrollment: {
-  "title": "Device Enrollment",
-  "boundary": "Candidate certificates do not authorize patrol. Device activation requires the future verified mTLS confirmation.",
+  "title": "Enrollment History",
+  "boundary": "Historical candidates never authorize patrol. New enrollment and certificate issuance are retired.",
   "invite": "Issue Invitation",
   "secretWarning": "Shown once in this view. Deliver securely to the intended PAD operator. Never send it through chat or audit notes.",
   "secret": "Invitation secret",
@@ -21,7 +21,7 @@ export default {
   "approve": "Approve Candidate Issuance",
   "cancel": "Cancel Enrollment",
   "revocationPending": "External revocation or issuance outcome cleanup is pending.",
-  "issuerRecovery": "Issuance needs recovery. Check the issuance operation with IT; approval must not be repeated under a new operation ID.",
+  "issuerRecovery": "Original credential cleanup needs recovery. Check its original operation and issuer journal with IT; new issuance is disabled.",
   "rateLimited": "Too many requests. Wait before retrying.",
   "actor": {
     "Admin": "Admin",
@@ -35,23 +35,23 @@ export default {
     "PendingApproval": "Awaiting Admin verification",
     "Approved": "Approved for candidate issuance",
     "Issuing": "Issuance outcome pending",
-    "IssuedUnconfirmed": "Issued, mTLS unconfirmed",
+    "IssuedUnconfirmed": "Historical unconfirmed candidate",
     "Cancelled": "Cancelled",
     "Expired": "Expired"
   },
   "credential": {
     "PendingIssuance": "Pending issuance",
     "OutcomeUnknown": "Issuance outcome unknown",
-    "IssuedUnconfirmed": "Issued, mTLS unconfirmed",
+    "IssuedUnconfirmed": "Historical unconfirmed candidate",
     "Revoked": "Revoked candidate",
     "Failed": "Issuer result rejected"
   }
 },
   provisioning: {
-  "title": "Device Provisioning",
-  "boundary": "Provisioning metadata and line reservations do not enroll a PAD or authorize patrol execution.",
+  "title": "Production Lines and Device History",
+  "boundary": "Line administration remains available. Device provisioning and enrollment are retired; historical records and controlled closure do not grant patrol access.",
   "lines": "Production Lines",
-  "devices": "Devices",
+  "devices": "Device History",
   "refresh": "Refresh",
   "add": "Add",
   "loading": "Loading…",
@@ -104,11 +104,12 @@ export default {
     "replace": "Replace Device Record"
   },
   "error": {
+    "DeviceProvisioningRetired": "Device provisioning and enrollment are retired. Refresh this historical view.",
     "InvalidInput": "Complete the required fields within their limits.",
     "Conflict": "The record changed or is busy. Close this dialog, refresh, and review the latest state before retrying.",
     "NotFound": "The selected record no longer exists. Refresh the list.",
     "DuplicateCode": "This line code is already used, including by an inactive line.",
-    "LineInUse": "Release or revoke the current reservation before deactivating this line.",
+    "LineInUse": "Revoke the historical device reservation before deactivating this line.",
     "InactiveLine": "This line is inactive.",
     "LineOccupied": "This line already has a reservation.",
     "TerminalDevice": "A revoked or replaced device cannot be changed or reactivated.",

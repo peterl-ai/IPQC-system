@@ -29,6 +29,18 @@ public sealed class UnconfiguredDeviceCertificateIssuer : IDeviceCertificateIssu
     public Task RevokeAsync(Guid operation, CancellationToken ct) => throw new InvalidOperationException("PKI is not configured.");
 }
 
+// The application DI surface never exposes signing, including isolated cleanup configurations.
+public sealed class CleanupOnlyDeviceCertificateIssuer(IDeviceCertificateIssuer inner) : IDeviceCertificateIssuer, IDisposable
+{
+    public bool Available => inner.Available;
+    public DeviceIssuerProfile Profile => inner.Profile;
+    public Task<DeviceIssuanceResult> RecoverAsync(Guid operation, CancellationToken ct) => inner.RecoverAsync(operation, ct);
+    public Task RevokeAsync(Guid operation, CancellationToken ct) => inner.RevokeAsync(operation, ct);
+    public Task<DeviceIssuanceResult> IssueAsync(DeviceIssuanceRequest request, CancellationToken ct) =>
+        throw DeviceProvisioningRetirement.Rejected();
+    public void Dispose() => (inner as IDisposable)?.Dispose();
+}
+
 public static class DeviceCertificateProfile
 {
     public static CertificateRequest Request(DeviceIssuanceRequest input, ECDsa publicKey)
@@ -73,10 +85,12 @@ public sealed class DevelopmentDeviceCertificateIssuer : IDeviceCertificateIssue
 {
     private readonly X509Certificate2 root;
     private readonly string directory;
+    private readonly bool cleanupOnly;
     public bool Available => true;
     public DeviceIssuerProfile Profile { get; }
-    public DevelopmentDeviceCertificateIssuer(DeviceEnrollmentOptions options, IHostEnvironment host)
+    public DevelopmentDeviceCertificateIssuer(DeviceEnrollmentOptions options, IHostEnvironment host, bool cleanupOnly = false)
     {
+        this.cleanupOnly = cleanupOnly;
         options.Validate(host);
         if (!options.DevelopmentIssuerEnabled || !(host.IsDevelopment() || host.IsEnvironment("Testing"))) throw new InvalidOperationException("Development PKI is disabled.");
         var repo = new DirectoryInfo(host.ContentRootPath);
@@ -93,6 +107,8 @@ public sealed class DevelopmentDeviceCertificateIssuer : IDeviceCertificateIssue
             return full;
         }
         directory = Outside(options.ReceiptDirectory);
+        if (cleanupOnly && !Directory.Exists(directory))
+            throw new IOException("The original issuer journal is unavailable.");
         root = X509CertificateLoader.LoadPkcs12FromFile(Outside(options.RootPfxPath), options.RootPassword, X509KeyStorageFlags.EphemeralKeySet);
         if (!root.HasPrivateKey || root.Extensions.OfType<X509BasicConstraintsExtension>().SingleOrDefault()?.CertificateAuthority != true)
             throw new InvalidOperationException("Configure a dedicated development issuing CA.");
@@ -104,7 +120,13 @@ public sealed class DevelopmentDeviceCertificateIssuer : IDeviceCertificateIssue
     public Task<DeviceIssuanceResult> RecoverAsync(Guid operation, CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
-        try { using var lease = Lock(operation); return Task.FromResult(Read(operation)); }
+        try
+        {
+            using var lease = Lock(operation); var original = Read(operation);
+            if (cleanupOnly && original.Outcome == IssuerOutcome.NotIssued && !File.Exists(PathFor(operation, ".revoked")))
+                original = new(IssuerOutcome.Unknown); // Missing receipts are not definitive non-issuance during retirement.
+            return Task.FromResult(original);
+        }
         catch (IOException) { return Task.FromResult(new DeviceIssuanceResult(IssuerOutcome.Unknown)); }
     }
     private DeviceIssuanceResult Read(Guid id) => File.Exists(PathFor(id, ".json"))
@@ -112,6 +134,7 @@ public sealed class DevelopmentDeviceCertificateIssuer : IDeviceCertificateIssue
         : new(IssuerOutcome.NotIssued);
     public Task<DeviceIssuanceResult> IssueAsync(DeviceIssuanceRequest request, CancellationToken ct)
     {
+        if (cleanupOnly) throw DeviceProvisioningRetirement.Rejected();
         ct.ThrowIfCancellationRequested();
         try
         {
@@ -142,6 +165,8 @@ public sealed class DevelopmentDeviceCertificateIssuer : IDeviceCertificateIssue
     public Task RevokeAsync(Guid operation, CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested(); using var lease = Lock(operation);
+        if (cleanupOnly && !File.Exists(PathFor(operation, ".json")) && !File.Exists(PathFor(operation, ".revoked")))
+            throw new IOException("The original issuance result is unresolved.");
         if (!File.Exists(PathFor(operation, ".revoked"))) DurableWrite(PathFor(operation, ".revoked"), "Revoked");
         return Task.CompletedTask;
     }

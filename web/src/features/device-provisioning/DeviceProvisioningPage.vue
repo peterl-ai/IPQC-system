@@ -8,7 +8,7 @@
         <a-button role="tab" :aria-selected="tab === 'lines'" @click="tab = 'lines'">{{ t('provisioning.lines') }}</a-button>
         <a-button role="tab" :aria-selected="tab === 'devices'" @click="tab = 'devices'">{{ t('provisioning.devices') }}</a-button>
         <a-button :loading="loading" @click="load">{{ t('provisioning.refresh') }}</a-button>
-        <a-button type="primary" :disabled="loading" @click="open(tab === 'lines' ? 'lineCreate' : 'deviceCreate')">{{ t('provisioning.add') }}</a-button>
+        <a-button v-if="tab === 'lines'" type="primary" :disabled="loading" @click="open('lineCreate')">{{ t('provisioning.add') }}</a-button>
       </div>
       <p v-if="loading" role="status">{{ t('provisioning.loading') }}</p>
       <div class="provisioning-scroll" role="tabpanel">
@@ -28,13 +28,8 @@
               <td>{{ device.displayName }}</td><td>{{ device.model || '—' }} / {{ device.serial || '—' }}</td><td>{{ t(`provisioning.state.${device.status}`) }}<div>{{ t('provisioning.notAuthorized') }}</div><div v-if="device.terminalReason">{{ device.terminalReason }}</div></td><td>{{ lineLabel(device.lineId) }}</td><td>{{ device.revision }} / {{ device.bindingVersion }}</td>
               <td>
                 <a-space wrap>
-                  <template v-if="device.status === 'PendingCredential'">
-                    <a-button @click="open('deviceEdit', device)">{{ t('common.edit') }}</a-button>
-                    <a-button @click="open(device.lineId ? 'rebind' : 'bind', device)">{{ t(device.lineId ? 'provisioning.rebind' : 'provisioning.bind') }}</a-button>
-                    <a-button v-if="device.lineId" @click="open('unbind', device)">{{ t('provisioning.unbind') }}</a-button>
-                    <a-button v-if="device.lineId" @click="open('replace', device)">{{ t('provisioning.replace') }}</a-button>
-                    <a-button danger @click="open('revoke', device)">{{ t('provisioning.revoke') }}</a-button>
-                  </template><a-button @click="enrollmentDevice = device">{{ t('enrollment.title') }}</a-button><a-button @click="showAudit('devices', device.id)">{{ t('provisioning.audit') }}</a-button>
+                  <a-button v-if="device.status === 'PendingCredential'" danger @click="open('revoke', device)">{{ t('provisioning.revoke') }}</a-button>
+                  <a-button @click="enrollmentDevice = device">{{ t('enrollment.title') }}</a-button><a-button @click="showAudit('devices', device.id)">{{ t('provisioning.audit') }}</a-button>
                 </a-space>
               </td>
             </tr>
@@ -53,12 +48,6 @@
       <form class="provisioning-form" @submit.prevent="save">
         <label v-if="operation === 'lineCreate'" for="provision-code">{{ t('provisioning.code') }}<input id="provision-code" v-model="draft.code" maxlength="100" required :disabled="busy"></label>
         <label v-if="editsName" for="provision-name">{{ t('provisioning.name') }}<input id="provision-name" v-model="draft.name" maxlength="200" required :disabled="busy"></label>
-        <template v-if="operation === 'deviceCreate' || operation === 'deviceEdit'">
-          <label for="provision-model">{{ t('provisioning.model') }}<input id="provision-model" v-model="draft.model" maxlength="200" :disabled="busy"></label>
-          <label for="provision-serial">{{ t('provisioning.serial') }}<input id="provision-serial" v-model="draft.serial" maxlength="200" :disabled="busy"></label>
-        </template>
-        <label v-if="operation === 'bind' || operation === 'rebind'" for="provision-line">{{ t('provisioning.reservation') }}<select id="provision-line" v-model="draft.lineId" required :disabled="busy"><option value="" disabled>{{ t('provisioning.select') }}</option><option v-for="line in availableLines" :key="line.id" :value="line.id">{{ line.code }} — {{ line.name }}</option></select></label>
-        <label v-if="operation === 'replace'" for="provision-replacement">{{ t('provisioning.replacement') }}<select id="provision-replacement" v-model="draft.replacementId" required :disabled="busy"><option value="" disabled>{{ t('provisioning.select') }}</option><option v-for="d in deviceOptions.filter(x => x.status === 'PendingCredential' && !x.lineId && x.id !== deviceTarget?.id)" :key="d.id" :value="d.id">{{ d.displayName }}</option></select></label>
         <label v-if="needsReason" for="provision-reason">{{ t('provisioning.reason') }}<textarea id="provision-reason" v-model="draft.reason" maxlength="2000" required :disabled="busy" /></label>
       </form>
     </a-modal>
@@ -96,26 +85,22 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import PageHeader from '@/components/PageHeader.vue'
 import DeviceEnrollmentPanel from './DeviceEnrollmentPanel.vue'
-import { errorCode, provisioningApi, type Audit, type Device, type DeviceAction, type Line } from './api'
+import { errorCode, provisioningApi, type Audit, type Device, type Line } from './api'
 const { t } = useI18n()
-type Operation = 'lineCreate' | 'lineRename' | 'lineActivate' | 'lineDeactivate' | 'deviceCreate' | 'deviceEdit' | DeviceAction
+type Operation = 'lineCreate' | 'lineRename' | 'lineActivate' | 'lineDeactivate' | 'revoke'
 const tab = ref<'lines' | 'devices'>('lines')
 const enrollmentDevice = ref<Device | null>(null)
-const lines = ref<Line[]>([]), devices = ref<Device[]>([]), lineOptions = ref<Line[]>([]), deviceOptions = ref<Device[]>([])
+const lines = ref<Line[]>([]), devices = ref<Device[]>([]), lineOptions = ref<Line[]>([])
 const linePage = ref(1), devicePage = ref(1), lineTotal = ref(0), deviceTotal = ref(0)
 const currentPage = computed(() => tab.value === 'lines' ? linePage.value : devicePage.value)
 const loading = ref(false), error = ref(''), busy = ref(false), modalError = ref('')
 const operation = ref<Operation | null>(null), target = ref<Line | Device | null>(null)
 const deviceTarget = computed(() => target.value && 'displayName' in target.value ? target.value : null)
-const availableLines = computed(() => {
-  const occupied = new Set(deviceOptions.value.filter(x => x.id !== deviceTarget.value?.id).map(x => x.lineId))
-  return lineOptions.value.filter(x => x.isActive && x.id !== deviceTarget.value?.lineId && !occupied.has(x.id))
-})
 const lineTarget = computed(() => target.value && 'code' in target.value ? target.value : null)
-const editsName = computed(() => ['lineCreate', 'lineRename', 'deviceCreate', 'deviceEdit'].includes(operation.value ?? ''))
-const needsReason = computed(() => ['rebind', 'unbind', 'revoke', 'replace'].includes(operation.value ?? ''))
+const editsName = computed(() => ['lineCreate', 'lineRename'].includes(operation.value ?? ''))
+const needsReason = computed(() => operation.value === 'revoke')
 const destructive = computed(() => needsReason.value || operation.value === 'lineDeactivate')
-const draft = reactive({ code: '', name: '', model: '', serial: '', lineId: '', replacementId: '', reason: '' })
+const draft = reactive({ code: '', name: '', reason: '' })
 const auditOpen = ref(false), auditLoading = ref(false), auditError = ref(''), auditRows = ref<Audit[]>([]), auditTotal = ref(0), auditPage = ref(1)
 let auditTarget: { kind: 'production-lines' | 'devices'; id: string } | null = null
 const describeError = (e: unknown) => t(`provisioning.error.${errorCode(e)}`)
@@ -124,8 +109,8 @@ function plantDate(value: string) { return new Intl.DateTimeFormat('sv-SE', { ti
 async function load() {
   loading.value = true; error.value = ''
   try {
-    const [l, d, lo, options] = await Promise.all([provisioningApi.lines(linePage.value), provisioningApi.devices(devicePage.value), provisioningApi.lineOptions(), provisioningApi.deviceOptions()])
-    lines.value = l.items; lineTotal.value = l.total; devices.value = d.items; deviceTotal.value = d.total; lineOptions.value = lo; deviceOptions.value = options
+    const [l, d, lo] = await Promise.all([provisioningApi.lines(linePage.value), provisioningApi.devices(devicePage.value), provisioningApi.lineOptions()])
+    lines.value = l.items; lineTotal.value = l.total; devices.value = d.items; deviceTotal.value = d.total; lineOptions.value = lo
   } catch (e) { error.value = describeError(e) } finally { loading.value = false }
 }
 function changePage(delta: number) { if (tab.value === 'lines') linePage.value += delta; else devicePage.value += delta; void load() }
@@ -138,26 +123,19 @@ function switchTab(event: KeyboardEvent) {
 }
 function open(action: Operation, row?: Line | Device) {
   operation.value = action; target.value = row ?? null; modalError.value = ''
-  Object.assign(draft, { code: '', name: row ? 'code' in row ? row.name : row.displayName : '', model: row && 'model' in row ? row.model ?? '' : '', serial: row && 'serial' in row ? row.serial ?? '' : '', lineId: '', replacementId: '', reason: '' })
+  Object.assign(draft, { code: '', name: row ? 'code' in row ? row.name : row.displayName : '', reason: '' })
 }
 function close() { if (!busy.value) operation.value = null }
 async function save() {
   if (busy.value || !operation.value) return
-  if ((editsName.value && !draft.name.trim()) || (operation.value === 'lineCreate' && !draft.code.trim()) || (needsReason.value && !draft.reason.trim()) || (['bind', 'rebind'].includes(operation.value) && !draft.lineId) || (operation.value === 'replace' && !draft.replacementId)) { modalError.value = t('provisioning.error.InvalidInput'); return }
+  if ((editsName.value && !draft.name.trim()) || (operation.value === 'lineCreate' && !draft.code.trim()) || (needsReason.value && !draft.reason.trim())) { modalError.value = t('provisioning.error.InvalidInput'); return }
   busy.value = true; modalError.value = ''
   try {
     switch (operation.value) {
       case 'lineCreate': await provisioningApi.createLine(draft.code, draft.name); break
       case 'lineRename': await provisioningApi.renameLine(lineTarget.value!, draft.name); break
       case 'lineActivate': case 'lineDeactivate': await provisioningApi.setLineActive(lineTarget.value!, operation.value === 'lineActivate'); break
-      case 'deviceCreate': await provisioningApi.createDevice(draft.name, draft.model, draft.serial); break
-      case 'deviceEdit': await provisioningApi.editDevice(deviceTarget.value!, draft.name, draft.model, draft.serial); break
-      case 'replace': {
-        const replacement = deviceOptions.value.find(x => x.id === draft.replacementId)
-        if (!replacement) throw new Error('Missing selection')
-        await provisioningApi.deviceAction(deviceTarget.value!, 'replace', { replacementDeviceId: replacement.id, replacementExpectedRevision: replacement.revision, reason: draft.reason }); break
-      }
-      default: await provisioningApi.deviceAction(deviceTarget.value!, operation.value, { ...(['bind', 'rebind'].includes(operation.value) ? { lineId: draft.lineId } : {}), ...(needsReason.value ? { reason: draft.reason } : {}) })
+      case 'revoke': await provisioningApi.revokeDevice(deviceTarget.value!, draft.reason); break
     }
     operation.value = null; await load()
   } catch (e) { modalError.value = describeError(e); await load() } finally { busy.value = false }

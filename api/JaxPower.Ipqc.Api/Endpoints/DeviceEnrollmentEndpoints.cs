@@ -17,11 +17,9 @@ public static class DeviceEnrollmentEndpoints
             var (number, size) = ProductionLineEndpoints.Pagination(page, pageSize);
             return Results.Ok(await service.ListAsync(id, number, size, ct));
         });
-        admin.MapPost("/devices/{id:guid}/enrollments", async (Guid id, EnrollmentCreateInput input, DeviceEnrollmentService service, HttpContext http, CancellationToken ct) =>
-            Results.Ok(await service.CreateAsync(id, input, IpqcPermissions.UserId(http.User), IpqcPermissions.Username(http.User), ct)))
+        admin.MapPost("/devices/{id:guid}/enrollments", DeviceProvisioningRetirement.Response)
             .RequireAuthorization(IpqcPermissions.DevicesWrite);
-        admin.MapPost("/enrollments/{id:guid}/approve", async (Guid id, EnrollmentApproveInput input, DeviceEnrollmentService service, HttpContext http, CancellationToken ct) =>
-            Results.Json(await service.ApproveAsync(id, input, IpqcPermissions.UserId(http.User), IpqcPermissions.Username(http.User), ct), statusCode: 202))
+        admin.MapPost("/enrollments/{id:guid}/approve", DeviceProvisioningRetirement.Response)
             .RequireAuthorization(IpqcPermissions.DevicesWrite);
         admin.MapPost("/enrollments/{id:guid}/cancel", async (Guid id, EnrollmentCancelInput input, DeviceEnrollmentService service, HttpContext http, CancellationToken ct) =>
             Results.Ok(await service.CancelAsync(id, input, IpqcPermissions.UserId(http.User), IpqcPermissions.Username(http.User), ct)))
@@ -30,22 +28,8 @@ public static class DeviceEnrollmentEndpoints
         var bootstrap = app.MapGroup("/bootstrap/v1/enrollments").AllowAnonymous().RequireRateLimiting("enrollment-bootstrap");
         bootstrap.AddEndpointFilter(ProductionLineEndpoints.ProvisioningError);
         bootstrap.AddEndpointFilter(NoStore);
-        bootstrap.AddEndpointFilter(async (context, next) =>
-        {
-            var options = context.HttpContext.RequestServices.GetRequiredService<DeviceEnrollmentOptions>();
-            // Cannot be enabled in production in this phase, regardless of forwarded headers/JWT.
-            if (!options.BootstrapEnabled || !(app.Environment.IsDevelopment() || app.Environment.IsEnvironment("Testing")) ||
-                (!app.Environment.IsEnvironment("Testing") && !context.HttpContext.Request.IsHttps)) return Results.NotFound();
-            return await next(context);
-        });
-        bootstrap.MapPost("/{id:guid}/challenge", async (Guid id, EnrollmentChallengeInput input, DeviceEnrollmentService service, CancellationToken ct) =>
-            Results.Ok(await service.ChallengeAsync(id, input, ct)));
-        bootstrap.MapPost("/{id:guid}/proof", async (Guid id, EnrollmentProofInput input, DeviceEnrollmentService service, CancellationToken ct) =>
-            Results.Json(await service.ProofAsync(id, input, ct), statusCode: 202));
-        bootstrap.MapPost("/{id:guid}/receipt-challenge", async (Guid id, DeviceEnrollmentService service, CancellationToken ct) =>
-            Results.Ok(await service.ReceiptChallengeAsync(id, ct)));
-        bootstrap.MapPost("/{id:guid}/receipt", async (Guid id, EnrollmentProofInput input, DeviceEnrollmentService service, CancellationToken ct) =>
-            Results.Ok(await service.ReceiptAsync(id, input, ct)));
+        foreach (var action in new[] { "challenge", "proof", "receipt-challenge", "receipt" })
+            bootstrap.MapPost("/{id:guid}/" + action, () => Results.NotFound());
     }
     private static async ValueTask<object?> NoStore(EndpointFilterInvocationContext context, EndpointFilterDelegate next)
     { context.HttpContext.Response.Headers.CacheControl = "no-store"; return await next(context); }

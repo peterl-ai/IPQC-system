@@ -1,6 +1,7 @@
 using JaxPower.Ipqc.Api.Contracts;
 using JaxPower.Ipqc.Api.Data;
 using JaxPower.Ipqc.Api.Domain;
+using JaxPower.Ipqc.Api.Security;
 using Microsoft.EntityFrameworkCore;
 
 namespace JaxPower.Ipqc.Api.Services;
@@ -23,37 +24,10 @@ public sealed class DeviceRegistryService(IpqcDbContext db, ProvisioningStore st
     }
     public async Task<DeviceOutput?> GetAsync(Guid id, CancellationToken ct) =>
         await db.RegisteredDevices.AsNoTracking().SingleOrDefaultAsync(x => x.Id == id, ct) is { } row ? Output(row) : null;
-    public Task<DeviceOutput> CreateAsync(DeviceCreateInput input, Guid actor, string username, CancellationToken ct) => store.WriteAsync(() =>
-    {
-        var now = clock.GetUtcNow().UtcDateTime;
-        var row = new RegisteredDevice { Id = Guid.NewGuid(), DisplayName = ProvisioningStore.Text(input.DisplayName, 200),
-            Model = ProvisioningStore.Text(input.Model, 200, false), Serial = ProvisioningStore.Text(input.Serial, 200, false),
-            CreatedAtUtc = now, UpdatedAtUtc = now, CreatedByUserId = actor, UpdatedByUserId = actor };
-        db.RegisteredDevices.Add(row);
-        store.Audit(null, row.Id, "DeviceCreated", actor, username, null, Snapshot(row));
-        return Task.FromResult(Output(row));
-    }, ct);
-    public Task<DeviceOutput> UpdateAsync(Guid id, DeviceUpdateInput input, Guid actor, string username, CancellationToken ct) => store.WriteAsync(async () =>
-    {
-        var row = await PendingAsync(id, input.ExpectedRevision, ct); var before = Snapshot(row);
-        row.DisplayName = ProvisioningStore.Text(input.DisplayName, 200);
-        row.Model = ProvisioningStore.Text(input.Model, 200, false); row.Serial = ProvisioningStore.Text(input.Serial, 200, false);
-        Advance(row, actor, binding: false);
-        store.Audit(null, id, "DeviceUpdated", actor, username, before, Snapshot(row)); return Output(row);
-    }, ct);
-    public Task<DeviceOutput> ReserveAsync(Guid id, DeviceBindingInput input, bool rebind, Guid actor, string username, CancellationToken ct) => store.WriteAsync(async () =>
-    {
-        var row = await PendingAsync(id, input.ExpectedRevision, ct);
-        if ((row.LineId is not null) != rebind || row.LineId == input.LineId) throw new ProvisioningException("InvalidTransition");
-        var reason = rebind ? ProvisioningStore.Text(input.Reason, 2000) : null;
-        await AvailableLineAsync(input.LineId, ct);
-        var change = Guid.NewGuid();
-        await enrollment.InvalidateDeviceAsync(row, "ReservationChanged", ProvisioningActor.Admin(actor, username), change, ct);
-        var before = Snapshot(row); row.LineId = input.LineId; Advance(row, actor);
-        store.Audit(null, id, rebind ? "ReservationRebound" : "ReservationBound", actor, username, before, Snapshot(row), reason, change);
-        return Output(row);
-    }, ct);
-    public Task<DeviceOutput> ReleaseAsync(Guid id, DeviceReasonInput input, bool revoke, Guid actor, string username, CancellationToken ct) => store.WriteAsync(async () =>
+    public Task<DeviceOutput> CreateAsync(DeviceCreateInput input, Guid actor, string username, CancellationToken ct) => throw DeviceProvisioningRetirement.Rejected();
+    public Task<DeviceOutput> UpdateAsync(Guid id, DeviceUpdateInput input, Guid actor, string username, CancellationToken ct) => throw DeviceProvisioningRetirement.Rejected();
+    public Task<DeviceOutput> ReserveAsync(Guid id, DeviceBindingInput input, bool rebind, Guid actor, string username, CancellationToken ct) => throw DeviceProvisioningRetirement.Rejected();
+    public Task<DeviceOutput> ReleaseAsync(Guid id, DeviceReasonInput input, bool revoke, Guid actor, string username, CancellationToken ct) => !revoke ? throw DeviceProvisioningRetirement.Rejected() : store.WriteAsync(async () =>
     {
         var row = await PendingAsync(id, input.ExpectedRevision, ct);
         var reason = ProvisioningStore.Text(input.Reason, 2000);
@@ -66,39 +40,13 @@ public sealed class DeviceRegistryService(IpqcDbContext db, ProvisioningStore st
         store.Audit(null, id, revoke ? "DeviceRevoked" : "ReservationUnbound", actor, username, before, Snapshot(row), reason, change);
         return Output(row);
     }, ct);
-    public Task<DeviceOutput> ReplaceAsync(Guid id, DeviceReplaceInput input, Guid actor, string username, CancellationToken ct) => store.WriteAsync(async () =>
-    {
-        if (id == input.ReplacementDeviceId) throw new ProvisioningException("InvalidTransition");
-        var old = await PendingAsync(id, input.ExpectedRevision, ct);
-        var replacement = await PendingAsync(input.ReplacementDeviceId, input.ReplacementExpectedRevision, ct);
-        if (old.LineId is not { } line || replacement.LineId is not null) throw new ProvisioningException("InvalidTransition");
-        var reason = ProvisioningStore.Text(input.Reason, 2000);
-        var directory = await db.ProductionLines.SingleAsync(x => x.Id == line, ct);
-        if (!directory.IsActive) throw new ProvisioningException("InactiveLine");
-        var beforeOld = Snapshot(old); var beforeNew = Snapshot(replacement); var change = Guid.NewGuid();
-        await enrollment.InvalidateDeviceAsync(old, "DeviceReplaced", ProvisioningActor.Admin(actor, username), change, ct);
-        await enrollment.InvalidateDeviceAsync(replacement, "ReplacementReservation", ProvisioningActor.Admin(actor, username), change, ct);
-        old.LineId = null; old.Status = DeviceProvisioningStatus.Replaced; old.ReplacedByDeviceId = replacement.Id;
-        old.TerminalAtUtc = clock.GetUtcNow().UtcDateTime; old.TerminalReason = reason; Advance(old, actor);
-        // Release the unique slot before assigning it; both saves and both audit events are one transaction.
-        await db.SaveChangesAsync(ct);
-        replacement.LineId = line; Advance(replacement, actor);
-        store.Audit(null, id, "DeviceReplaced", actor, username, beforeOld, Snapshot(old), reason, change);
-        store.Audit(null, replacement.Id, "ReplacementReserved", actor, username, beforeNew, Snapshot(replacement), reason, change);
-        return Output(replacement);
-    }, ct);
+    public Task<DeviceOutput> ReplaceAsync(Guid id, DeviceReplaceInput input, Guid actor, string username, CancellationToken ct) => throw DeviceProvisioningRetirement.Rejected();
     private async Task<RegisteredDevice> PendingAsync(Guid id, long expected, CancellationToken ct)
     {
         var row = await db.RegisteredDevices.SingleOrDefaultAsync(x => x.Id == id, ct) ?? throw new ProvisioningException("NotFound", 404);
         ProvisioningStore.Revision(row.Revision, expected);
         if (row.Status != DeviceProvisioningStatus.PendingCredential) throw new ProvisioningException("TerminalDevice");
         return row;
-    }
-    private async Task AvailableLineAsync(Guid id, CancellationToken ct)
-    {
-        var line = await db.ProductionLines.SingleOrDefaultAsync(x => x.Id == id, ct) ?? throw new ProvisioningException("NotFound", 404);
-        if (!line.IsActive) throw new ProvisioningException("InactiveLine");
-        if (await db.RegisteredDevices.AnyAsync(x => x.LineId == id, ct)) throw new ProvisioningException("LineOccupied");
     }
     private void Advance(RegisteredDevice row, Guid actor, bool binding = true)
     {

@@ -1,10 +1,7 @@
-using System.Net;
-using System.Net.Http.Json;
 using System.Security.Cryptography;
-using System.Text;
-using System.Text.Json.Nodes;
-using JaxPower.Ipqc.Api.Contracts;
+using JaxPower.Ipqc.Api.Domain;
 using JaxPower.Ipqc.Api.Security;
+using JaxPower.Ipqc.Api.Services;
 using Microsoft.EntityFrameworkCore;
 using Xunit;
 
@@ -13,55 +10,76 @@ namespace JaxPower.Ipqc.Api.Tests;
 public sealed class EnrollmentBindingTests
 {
     [Theory]
-    [InlineData("audience")] [InlineData("deviceId")] [InlineData("lineId")]
-    [InlineData("bindingVersion")] [InlineData("targetBindingVersion")]
-    [InlineData("csrSha256")] [InlineData("spkiSha256")] [InlineData("nonce")] [InlineData("challengeId")]
-    public async Task Even_valid_key_cannot_sign_a_different_environment_identity_version_or_nonce(string claim)
+    [InlineData(EnrollmentState.Invited,null,false)]
+    [InlineData(EnrollmentState.Approved,CandidateCredentialState.PendingIssuance,false)]
+    [InlineData(EnrollmentState.IssuedUnconfirmed,CandidateCredentialState.IssuedUnconfirmed,false)]
+    [InlineData(EnrollmentState.Issuing,CandidateCredentialState.OutcomeUnknown,false)]
+    [InlineData(EnrollmentState.Cancelled,CandidateCredentialState.Failed,true)]
+    [InlineData(EnrollmentState.Expired,CandidateCredentialState.Revoked,true)]
+    public async Task Drain_covers_preexisting_states_and_never_activates_or_signs(EnrollmentState state,CandidateCredentialState? candidate,bool pending)
     {
-        await using var f=await EnrollmentFixture.CreateAsync();var d=await f.BoundDevice();using var key=ECDsa.Create(ECCurve.NamedCurves.nistP256);
-        var invite=await f.Invite(d);var challenge=await f.Challenge(invite,key);
-        var json=JsonNode.Parse(DeviceEnrollmentProof.Decode(challenge.Payload))!;
-        if(claim.Contains("Version"))json[claim]=999;else json[claim]="different-bound-value";
-        var forged=challenge with {Payload=DeviceEnrollmentProof.Encode(Encoding.UTF8.GetBytes(json.ToJsonString()))};var before=await f.State();
-        Assert.Equal(HttpStatusCode.BadRequest,(await f.Bootstrap.PostAsJsonAsync($"/bootstrap/v1/enrollments/{invite.Enrollment.Id}/proof",EnrollmentFixture.Sign(forged,key))).StatusCode);
-        Assert.Equal(before,await f.State());
+        await using var f=await EnrollmentFixture.CreateAsync();var d=await f.BoundDevice();
+        await f.Seed(d,state,candidate,pending,receipt:candidate is not null);var identity=candidate is null?null:EnrollmentRevocationTests.Identity(await f.Candidate());
+        Assert.True(await f.Process());Assert.False(await f.Process());
+        var output=await f.Get(d.Id);Assert.Contains(output.State,new[]{"Cancelled","Expired"});Assert.False(output.CanExecuteLineShared);
+        Assert.Equal(d,await f.App.GetDevice(d.Id));Assert.Equal(0,f.Issuer.Issues);
+        if(candidate is not null){Assert.Equal(identity,EnrollmentRevocationTests.Identity(await f.Candidate()));Assert.False((await f.Candidate()).ExternalRevocationPending);}
+        Assert.True(await f.Db(db=>db.EnrollmentChallenges.AllAsync(x=>x.ConsumedAtUtc!=null))||state is EnrollmentState.Cancelled or EnrollmentState.Expired);
     }
-
     [Fact]
-    public async Task CSR_signature_tampering_stale_admin_snapshot_and_unavailable_issuer_leave_no_candidate()
+    public async Task Cleanup_disabled_and_wrong_environment_leave_all_records_untouched()
     {
-        await using var f=await EnrollmentFixture.CreateAsync();var d=await f.BoundDevice();using var key=ECDsa.Create(ECCurve.NamedCurves.nistP256);
-        var invite=await f.Invite(d);var csr=Convert.FromBase64String(EnrollmentFixture.Csr(key,d.Id));csr[^1]^=1;var before=await f.State();
-        Assert.Equal(HttpStatusCode.BadRequest,(await f.Bootstrap.PostAsJsonAsync($"/bootstrap/v1/enrollments/{invite.Enrollment.Id}/challenge",new EnrollmentChallengeInput(invite.InvitationSecret,Convert.ToBase64String(csr)))).StatusCode);
-        Assert.Equal(before,await f.State());var proof=await f.Prove(invite,key);before=await f.State();
-        var approval=f.Approval(d,proof);
-        foreach(var wrong in new[]{approval with{ExpectedRevision=1},approval with{ExpectedDeviceRevision=d.Revision+1},approval with{LineId=Guid.NewGuid()},approval with{BindingVersion=d.BindingVersion+1},approval with{CsrSha256=new string('0',64)},approval with{SpkiSha256=new string('0',64)}})
-            Assert.Equal(HttpStatusCode.Conflict,(await f.App.Admin.PostAsJsonAsync($"/api/admin/enrollments/{proof.Id}/approve",wrong)).StatusCode);
-        f.Issuer.Available=false;
-        Assert.Equal(HttpStatusCode.ServiceUnavailable,(await f.App.Admin.PostAsJsonAsync($"/api/admin/enrollments/{proof.Id}/approve",approval)).StatusCode);
-        Assert.Equal(before,await f.State());Assert.Equal(0,f.Issuer.Issues);
+        await using var f=await EnrollmentFixture.CreateAsync();var d=await f.BoundDevice();await f.Seed(d,credentialState:CandidateCredentialState.OutcomeUnknown);
+        var before=await f.State();f.Options.CleanupEnabled=false;Assert.False(await f.Process());Assert.Equal(before,await f.State());
+        f.Options.CleanupEnabled=true;f.Options.EnvironmentId="another";Assert.False(await f.Process());Assert.Equal(before,await f.State());Assert.Empty(f.Issuer.Revocations);
     }
-
-    [Fact]
-    public async Task Environment_change_and_rebind_invalidate_old_proof_and_approval_without_moving_credentials()
+    [Theory]
+    [InlineData("unavailable")] [InlineData("unknown")] [InlineData("issuer-mismatch")] [InlineData("root-mismatch")]
+    public async Task Missing_or_mismatched_original_issuer_never_fabricates_acknowledgement(string issue)
     {
-        await using var f=await EnrollmentFixture.CreateAsync();var d=await f.BoundDevice();using var key=ECDsa.Create(ECCurve.NamedCurves.nistP256);
-        var invite=await f.Invite(d);var challenge=await f.Challenge(invite,key);var before=await f.State();var env=f.Options.EnvironmentId;f.Options.EnvironmentId="other-environment";
-        Assert.Equal(HttpStatusCode.Conflict,(await f.Bootstrap.PostAsJsonAsync($"/bootstrap/v1/enrollments/{invite.Enrollment.Id}/proof",EnrollmentFixture.Sign(challenge,key))).StatusCode);Assert.Equal(before,await f.State());f.Options.EnvironmentId=env;
-        var proof=await f.Prove(invite,key);var target=await f.App.LineAsync("OTHER");await f.App.DeviceAction(d,"rebind",new DeviceBindingInput(target.Id,d.Revision,"Move"));before=await f.State();
-        Assert.Equal(HttpStatusCode.Conflict,(await f.App.Admin.PostAsJsonAsync($"/api/admin/enrollments/{proof.Id}/approve",f.Approval(d,proof))).StatusCode);
-        Assert.Equal(before,await f.State());Assert.Equal("Cancelled",(await f.Get(d.Id)).State);Assert.Equal(0,await f.Db(db=>db.DeviceCredentials.CountAsync()));
+        await using var f=await EnrollmentFixture.CreateAsync();var d=await f.BoundDevice();await f.Seed(d,credentialState:CandidateCredentialState.OutcomeUnknown,pending:true);
+        if(issue=="unavailable")f.Issuer.Available=false;if(issue=="unknown")f.Issuer.Unknown=true;
+        if(issue=="issuer-mismatch")await f.Db(async db=>{(await db.DeviceCredentials.SingleAsync()).IssuerId="wrong-original-issuer";await db.SaveChangesAsync();return 0;});
+        if(issue=="root-mismatch")await f.Db(async db=>{(await db.DeviceCredentials.SingleAsync()).RootCertificatePem="wrong-original-root";await db.SaveChangesAsync();return 0;});
+        Assert.True(await f.Process());Assert.True((await f.Candidate()).ExternalRevocationPending);Assert.Empty(f.Issuer.Revocations);Assert.Equal(0,await EnrollmentRevocationTests.Acknowledgements(f));Assert.Equal(0,f.Issuer.Issues);
     }
-
-    [Fact]
-    public async Task Expired_candidate_is_preserved_and_revoked_when_a_new_invitation_is_created()
+    [Theory]
+    [InlineData(IssuerOutcome.NotIssued)] [InlineData(IssuerOutcome.Unknown)] [InlineData(IssuerOutcome.Issued)]
+    public async Task Recover_result_cannot_start_issuance_and_only_acknowledged_cancellation_clears_pending(IssuerOutcome result)
     {
-        await using var f=await EnrollmentFixture.CreateAsync();var d=await f.BoundDevice();using var key=ECDsa.Create(ECCurve.NamedCurves.nistP256);
-        var old=await f.Approve(d,await f.Prove(await f.Invite(d),key));await f.Process();
-        f.Clock.Advance(TimeSpan.FromMinutes(31));
-        // Authenticate again because the synthetic clock also controls legacy JWT lifetime.
-        using var admin=await TestAccounts.ClientAsync(f.App.Factory,"admin");
-        var response=await admin.PostAsJsonAsync($"/api/admin/devices/{d.Id}/enrollments",new EnrollmentCreateInput(d.Revision));response.EnsureSuccessStatusCode();
-        await f.Db(async db=>{var history=await db.DeviceEnrollments.SingleAsync(x=>x.Id==old.Id);Assert.Equal(JaxPower.Ipqc.Api.Domain.EnrollmentState.Expired,history.State);var k=await db.DeviceCredentials.SingleAsync();Assert.Equal(old.Candidate!.Id,k.Id);Assert.Equal(JaxPower.Ipqc.Api.Domain.CandidateCredentialState.Revoked,k.State);Assert.True(k.ExternalRevocationPending);Assert.NotNull(k.CertificatePem);return 0;});
+        await using var f=await EnrollmentFixture.CreateAsync();var d=await f.BoundDevice();await f.Seed(d,credentialState:CandidateCredentialState.OutcomeUnknown,pending:true,receipt:true);
+        f.Issuer.ForcedOutcome=result;Assert.True(await f.Process());Assert.Equal(0,f.Issuer.Issues);
+        Assert.Equal(result==IssuerOutcome.Unknown,(await f.Candidate()).ExternalRevocationPending);
+        Assert.Equal(result==IssuerOutcome.Unknown?0:1,f.Issuer.RevocationAcknowledgements.Count);
+    }
+    [Fact]
+    public async Task Missing_original_journal_receipt_remains_unknown_and_is_not_recreated_as_success()
+    {
+        await using var f=await EnrollmentFixture.CreateAsync();var d=await f.BoundDevice();var old=await f.Seed(d,credentialState:CandidateCredentialState.OutcomeUnknown,pending:true);
+        using var cleanup=new DevelopmentDeviceCertificateIssuer(f.Options,new EnrollmentTestHost(),cleanupOnly:true);
+        Assert.Equal(IssuerOutcome.Unknown,(await cleanup.RecoverAsync(old.OperationId!.Value,default)).Outcome);
+        await Assert.ThrowsAsync<IOException>(()=>cleanup.RevokeAsync(old.OperationId.Value,default));
+        await Assert.ThrowsAsync<ProvisioningException>(()=>cleanup.IssueAsync(null!,default));
+        Assert.False(File.Exists(Path.Combine(f.Options.ReceiptDirectory,old.OperationId.Value.ToString("N")+".revoked")));
+        var bad=new DeviceEnrollmentOptions{CleanupEnabled=true,EnvironmentId=f.Options.EnvironmentId,DevelopmentIssuerEnabled=true,
+            RootPfxPath=f.Options.RootPfxPath,RootPassword=f.Options.RootPassword,ReceiptDirectory=Path.Combine(f.DirectoryPath,"missing-original-journal")};
+        Assert.Throws<IOException>(()=>new DevelopmentDeviceCertificateIssuer(bad,new EnrollmentTestHost(),cleanupOnly:true));
+        Assert.False(Directory.Exists(bad.ReceiptDirectory));
+    }
+    [Fact]
+    public async Task Expired_original_certificate_can_be_revoked_without_revalidating_it_as_current_authority()
+    {
+        await using var f=await EnrollmentFixture.CreateAsync();var d=await f.BoundDevice();await f.Seed(d,credentialState:CandidateCredentialState.IssuedUnconfirmed);
+        var identity=EnrollmentRevocationTests.Identity(await f.Candidate());f.Clock.Advance(TimeSpan.FromDays(31));
+        Assert.True(await f.Process());Assert.False((await f.Candidate()).ExternalRevocationPending);Assert.Equal(identity,EnrollmentRevocationTests.Identity(await f.Candidate()));Assert.Equal(0,f.Issuer.Issues);
+    }
+    [Fact]
+    public void Historical_CSR_curve_subject_and_signature_validation_is_preserved()
+    {
+        using var key=ECDsa.Create(ECCurve.NamedCurves.nistP256);using var unsupported=ECDsa.Create(ECCurve.NamedCurves.nistP384);var id=Guid.NewGuid();
+        var valid=EnrollmentFixture.Csr(key,id);Assert.NotEmpty(DeviceEnrollmentProof.ReadCsr(valid,id).Spki);
+        var tampered=Convert.FromBase64String(valid);tampered[^1]^=1;
+        foreach(var input in new[]{EnrollmentFixture.Csr(unsupported,id),EnrollmentFixture.Csr(key,Guid.NewGuid()),Convert.ToBase64String(tampered),"not-a-csr"})
+            Assert.Throws<ProvisioningException>(()=>DeviceEnrollmentProof.ReadCsr(input,id));
     }
 }
