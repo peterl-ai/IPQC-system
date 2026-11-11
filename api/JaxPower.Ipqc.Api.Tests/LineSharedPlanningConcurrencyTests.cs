@@ -209,4 +209,17 @@ public sealed class LineSharedPlanningConcurrencyTests
         }, CancellationToken.None);
         Assert.Equal(0, connection.DefaultTimeout);
     }
+    [Fact]
+    public void R03_15_Ef_wrapped_known_postgres_conflicts_are_transient_but_uniqueness_is_not()
+    {
+        foreach (var state in new[] { "40001", "40P01", "55P03" })
+        {
+            var provider = new Npgsql.PostgresException("Synthetic classification only", "ERROR", "ERROR", state);
+            Assert.True(PersonalSessionStore.IsTransient(new InvalidOperationException("EF wrapper", provider)));
+            Assert.True(PersonalSessionStore.IsTransient(new InvalidOperationException("EF wrapper", new DbUpdateException("EF save", provider))));
+        }
+        Assert.False(PersonalSessionStore.IsTransient(new InvalidOperationException("Unrelated application failure")));
+        Assert.False(PersonalSessionStore.IsTransient(new InvalidOperationException("EF wrapper",
+            new Npgsql.PostgresException("Synthetic uniqueness", "ERROR", "ERROR", "23505"))));
+    }
 }
