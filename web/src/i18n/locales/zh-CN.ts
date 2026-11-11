@@ -1,4 +1,12 @@
 export default {
+  sharedPlan: {
+    title: '产线共享计划', legacy: '个人计划', notice: '仅提供计划功能。任务保持只读，尚不支持巡检和提交。',
+    Day: '日班 07:00', Night: '夜班 19:00', rounds: '纽约时间轮次', scheduling: '启用调度', revision: '版本', historical: '历史记录／未准入',
+    conflict: '配置已变更或与其他计划重叠。输入已保留，请重新加载并核对后再保存。',
+    loginRequired: '需要有效的个人会话，请在线重新登入。', InvalidSharedPlanInput: '请检查计划字段、产线、轮次及生效区间。',
+    SharedStandardNotReady: '标准尚未满足调度条件。', LineConfigurationUnavailable: '两条配置产线都必须存在且已启用。',
+    PersonalAccessConfigurationUnavailable: '个人访问配置不可用。', Forbidden: '当前账号无权管理共享计划。', Unavailable: '共享计划暂不可用，请稍后重试。',
+  },
   enrollment: {
   "title": "注册历史",
   "boundary": "历史候选证书不授予巡检权限。新设备注册和证书签发已停用。",

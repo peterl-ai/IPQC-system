@@ -12,7 +12,11 @@ Device provisioning/enrollment is retired at both routes and services. Retired A
 
 ## R32-02 personal session and read foundation
 
-The R32-02 implementation adds stable personal refresh families, atomic account/session lifecycle, a 72-hour local-policy receipt contract and personally authorized **non-executing** line/task reads. See [exact contracts and verification](docs/16_R3202_PERSONAL_ACCESS.md). Configure `PersonalAccess:EnvironmentId` and the two real `LinePatrol:LineIds` separately; missing new settings leave legacy login/Web/APIs usable and return visible configuration errors only on the new personal surface. No line IDs or production endpoints are seeded. Existing legacy JWT/cookie/report/ownership behavior and R32-01 retirement remain; new routes require current database family authority and do not use devices. Android, WorkContext, shared writes/Submit and LineShared generation remain deferred. This feature is for PR review, not production activation.
+The R32-02 implementation adds stable personal refresh families, atomic account/session lifecycle, a 72-hour local-policy receipt contract and personally authorized **non-executing** line/task reads. See [exact contracts and verification](docs/16_R3202_PERSONAL_ACCESS.md). Configure `PersonalAccess:EnvironmentId` and the two real `LinePatrol:LineIds` separately; missing new settings leave legacy login/Web/APIs usable and return visible configuration errors only on the new personal surface. No line IDs or production endpoints are seeded. Existing legacy JWT/cookie/report/ownership behavior and R32-01 retirement remain; new routes require current database family authority and do not use devices. Android, WorkContext and shared writes/Submit remain deferred; shared planning generation is provided separately by R32-03 below. This feature is for PR review, not production activation.
+
+## R32-03 shared planning foundation
+
+Admin/PQE shared Plans now use actual configured lines, fixed New York Day07/Night19 rounds, revision/overlap controls and server-side ownerless generation. Versioned planning snapshots freeze source facts; all shared task reads remain `canExecute=false`. Legacy personal Plans and R32-01/02 contracts remain. See [implemented contracts, migration safety and verification](docs/17_R3203_SHARED_PLANNING.md). Scheduling is not inspection activation; WorkContext, shared writes/Submit/photos and Android remain deferred. No production rollout is performed.
 
 ## Product direction
 

@@ -1,4 +1,12 @@
 export default {
+  sharedPlan: {
+    title: 'Shared Line Plans', legacy: 'Personal Plans', notice: 'Planning only. Tasks remain read-only; inspection and Submit are unavailable.',
+    Day: 'Day 07:00', Night: 'Night 19:00', rounds: 'New York rounds', scheduling: 'Scheduling enabled', revision: 'Revision', historical: 'Historical / unadmitted',
+    conflict: 'Configuration changed or overlaps another plan. Keep your entries; reload and reconcile before saving again.',
+    loginRequired: 'A current personal session is required. Sign in online again.', InvalidSharedPlanInput: 'Check the plan fields, line, rounds and effective interval.',
+    SharedStandardNotReady: 'The Standard is not ready for scheduling.', LineConfigurationUnavailable: 'Both configured lines must exist and be active.',
+    PersonalAccessConfigurationUnavailable: 'Personal access configuration is unavailable.', Forbidden: 'Your current account cannot manage shared plans.', Unavailable: 'Shared planning is unavailable. Try again later.',
+  },
   enrollment: {
   "title": "Enrollment History",
   "boundary": "Historical candidates never authorize patrol. New enrollment and certificate issuance are retired.",
