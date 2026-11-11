@@ -68,11 +68,11 @@ Final-head results and CI links are completed after execution. Local PostgreSQL 
 
 | Gate | Result |
 | --- | --- |
-| Release restore/build/full backend | PENDING final run |
+| Release restore/build/full backend | PASS: restore/build (0 warnings/errors);295 PASS/0 FAIL/14 local PostgreSQL SKIP |
 | New focused planning/race tests | Initial focused43 PASS/0 FAIL/5 SKIP; expanded SQLite race9 PASS/0 FAIL |
 | Web lint/test/typecheck/build | lint/typecheck PASS;77 tests PASS/0 FAIL; build PASS (existing large-bundle warning) |
-| SQLite fresh/populated/historical/recovery | PENDING final expanded run |
-| Both EF models / PostgreSQL SQL | PENDING final command results |
+| SQLite fresh/populated/historical/recovery | PASS:8 migration cases including both interruption/recovery paths; old column/FK/index comparisons |
+| Both EF models / PostgreSQL SQL | PASS:2 CLI model checks; native additive idempotent PostgreSQL SQL reviewed |
 | Real disposable PostgreSQL | Local SKIPPED; CI PENDING |
 | Git whitespace / scoped secret / remote content | PENDING final verification |
 | UAT/PAD/production rollout/restore | NOT RUN; outside this authorization |
@@ -127,3 +127,46 @@ No production host/FQDN/port/CA or confirmed tablet HTTPS trust is invented. IT 
 The old legacy scheduler stale-configuration race remains documented; the new shared generator does not inherit its cached-source path. Shared planning uses a low-volume common gate rather than a distributed scheduling platform. This PR does not enforce future planning-JSON immutability against a DBA; application paths never rewrite snapshots and marked corruption fails closed in reads. Future execution must independently implement approved F1/F2/F3 without treating this planning snapshot as execution authority.
 
 Stop for independent PR review. Do not merge/deploy or begin R32-04.
+
+## Changed files
+
+- `.github/workflows/ci.yml`
+- `README.md`
+- `api/JaxPower.Ipqc.Api.Tests/LineSharedPlanTests.cs`
+- `api/JaxPower.Ipqc.Api.Tests/LineSharedPlanningConcurrencyTests.cs`
+- `api/JaxPower.Ipqc.Api.Tests/LineSharedPlanningFixture.cs`
+- `api/JaxPower.Ipqc.Api.Tests/LineSharedPlanningMigrationTests.cs`
+- `api/JaxPower.Ipqc.Api.Tests/LineSharedPlanningPostgresTests.cs`
+- `api/JaxPower.Ipqc.Api.Tests/LineSharedSchedulerTests.cs`
+- `api/JaxPower.Ipqc.Api.Tests/LineSharedSnapshotTests.cs`
+- `api/JaxPower.Ipqc.Api.Tests/PersonalSessionFixture.cs`
+- `api/JaxPower.Ipqc.Api/Contracts/LinePatrolContracts.cs`
+- `api/JaxPower.Ipqc.Api/Contracts/LineSharedPlanContracts.cs`
+- `api/JaxPower.Ipqc.Api/Contracts/PlanningSnapshotContracts.cs`
+- `api/JaxPower.Ipqc.Api/Data/IpqcDbContext.cs`
+- `api/JaxPower.Ipqc.Api/Data/Migrations/20261111142052_R3203LineSharedPlanningSnapshots.Designer.cs`
+- `api/JaxPower.Ipqc.Api/Data/Migrations/20261111142052_R3203LineSharedPlanningSnapshots.cs`
+- `api/JaxPower.Ipqc.Api/Data/Migrations/IpqcDbContextModelSnapshot.cs`
+- `api/JaxPower.Ipqc.Api/Domain/PatrolPlan.cs`
+- `api/JaxPower.Ipqc.Api/Endpoints/LineSharedPlanEndpoints.cs`
+- `api/JaxPower.Ipqc.Api/Program.cs`
+- `api/JaxPower.Ipqc.Api/Services/ConfiguredLineDirectory.cs`
+- `api/JaxPower.Ipqc.Api/Services/LinePatrolReadService.cs`
+- `api/JaxPower.Ipqc.Api/Services/LineSharedPlanService.cs`
+- `api/JaxPower.Ipqc.Api/Services/LineSharedPlanningStore.cs`
+- `api/JaxPower.Ipqc.Api/Services/LineSharedTaskGenerationService.cs`
+- `api/JaxPower.Ipqc.Api/Services/PatrolStandardService.cs`
+- `api/JaxPower.Ipqc.Api/Services/PatrolTaskGenerationService.cs`
+- `api/JaxPower.Ipqc.Api/Services/PlanningSnapshot.cs`
+- `api/JaxPower.Ipqc.Api/Services/ProductionLineService.cs`
+- `docs/04_ARCHITECTURE.md`
+- `docs/10_DEPLOYMENT_CHECKLIST.md`
+- `docs/17_R3203_SHARED_PLANNING.md`
+- `web/src/features/patrol-plans/LineSharedPlansPanel.test.ts`
+- `web/src/features/patrol-plans/LineSharedPlansPanel.vue`
+- `web/src/features/patrol-plans/PatrolPlansPage.vue`
+- `web/src/features/patrol-plans/lineSharedApi.test.ts`
+- `web/src/features/patrol-plans/lineSharedApi.ts`
+- `web/src/features/patrol-plans/lineSharedValidation.ts`
+- `web/src/i18n/locales/en.ts`
+- `web/src/i18n/locales/zh-CN.ts`

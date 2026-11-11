@@ -73,7 +73,8 @@ public sealed class LineSharedPlanningConcurrencyTests
     {
         await using var f = await PersonalSessionFixture.CreateAsync(postgres); f.Clock.Now = new(2026, 11, 10, 11, 0, 0, TimeSpan.Zero);
         var s = await Standard(f); var p = await Plan(f, s); var a = await Admin(f);
-        f.Clock.Now = f.Clock.Now.AddMinutes(1);
+        f.Clock.Now = f.Clock.Now.AddHours(1); // Day07 is due while deactivation holds the line root.
+        a = await Admin(f); // Advance the authentication clock as well; use a fresh valid access token.
         f.Fault.Arm("INSERT INTO \"ProvisioningAuditEvents\"", failure: true);
         var failed = await a.PostAsJsonAsync($"/api/admin/production-lines/{f.Line1}/deactivate", new ProvisioningRevisionInput(1));
         Assert.Equal(HttpStatusCode.InternalServerError, failed.StatusCode);
