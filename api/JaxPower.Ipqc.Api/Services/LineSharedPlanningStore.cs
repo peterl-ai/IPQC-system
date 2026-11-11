@@ -25,7 +25,7 @@ public sealed class LineSharedPlanningStore(IpqcDbContext db, PersonalAccess acc
                     var timeout = connection.DefaultTimeout;
                     try
                     {
-                        connection.DefaultTimeout = Math.Min(timeout, 5);
+                        connection.DefaultTimeout = timeout <= 0 ? 5 : Math.Min(timeout, 5);
                         await using var native = connection.BeginTransaction(IsolationLevel.Serializable, deferred: false);
                         await using var tx = await db.Database.UseTransactionAsync(native, ct);
                         await ValidateActor(actor, ct);

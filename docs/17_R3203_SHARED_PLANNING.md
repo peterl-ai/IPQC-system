@@ -64,18 +64,22 @@ Upgrade tests compare every original column across all existing tables, old FKs/
 
 ## Verification ledger
 
-Final-head results and CI links are completed after execution. Local PostgreSQL tests require explicit disposable opt-in and are SKIPPED without it; they are not simulated PostgreSQL PASS. CI uses a real PostgreSQL17 service and isolated per-test databases, running both PersonalSessionPostgresTests and LineSharedPlanningPostgresTests.
+The local ledger below records executed results. The independently verified CI source run is linked explicitly; final evidence-commit HEAD checks are verified at delivery on [PR14 checks](https://github.com/peterl-ai/IPQC-system/pull/14/checks). Local PostgreSQL tests require explicit disposable opt-in and are SKIPPED without it; they are not simulated PostgreSQL PASS. CI uses a real PostgreSQL17 service and isolated per-test databases, running both PersonalSessionPostgresTests and LineSharedPlanningPostgresTests.
 
 | Gate | Result |
 | --- | --- |
-| Release restore/build/full backend | PASS: restore/build (0 warnings/errors);295 PASS/0 FAIL/14 local PostgreSQL SKIP |
-| New focused planning/race tests | Initial focused43 PASS/0 FAIL/5 SKIP; expanded SQLite race9 PASS/0 FAIL |
+| Release restore/build/full backend | PASS: restore/build (0 warnings/errors);296 PASS/0 FAIL/14 local PostgreSQL SKIP |
+| New focused planning/race tests | Final focused acceptance64 PASS/0 FAIL/10 local PostgreSQL SKIP, including13 SQLite concurrency/timeout cases |
 | Web lint/test/typecheck/build | lint/typecheck PASS;77 tests PASS/0 FAIL; build PASS (existing large-bundle warning) |
 | SQLite fresh/populated/historical/recovery | PASS:8 migration cases including both interruption/recovery paths; old column/FK/index comparisons |
 | Both EF models / PostgreSQL SQL | PASS:2 CLI model checks; native additive idempotent PostgreSQL SQL reviewed |
-| Real disposable PostgreSQL | Local SKIPPED; CI PENDING |
-| Git whitespace / scoped secret / remote content | PENDING final verification |
-| UAT/PAD/production rollout/restore | NOT RUN; outside this authorization |
+| Real disposable PostgreSQL | Local14 SKIPPED; real PostgreSQL17 CI14 PASS/0 FAIL/0 SKIP (10 new shared cases +4 existing personal-session cases) |
+| Git whitespace / scoped secret / remote content | PASS: whitespace/private-key-token scan;40 remote source/document blobs matched; signed docs/nine old migrations unchanged;22 unrelated file fingerprints preserved |
+| UAT/PAD/production rollout/restore | SKIPPED / NOT RUN; outside this authorization |
+
+CI source evidence: [run43042194302](https://github.com/peterl-ai/IPQC-system/actions/runs/43042194302) at `d35612156c896f8c6fb523bc67b0def1ccbe4b75` passed all three jobs: backend295/0/14 local-opt-in skips, Web77/0, real PostgreSQL14/0/0. The subsequent bounded-SQLite-timeout cap adds one local regression (full296/0/14); it does not change the PostgreSQL path. Final HEAD CI is independently checked after this evidence commit and linked in the delivery/PR status. The initial PostgreSQL run exposed an overstrong no-due-occurrence test assumption; the corrected fixture advances to a genuinely due Day07 occurrence and refreshes its synthetic Admin token. The corrected real-provider test passed.
+
+Commands: `dotnet restore api/JaxPower.Ipqc.slnx`; `dotnet build api/JaxPower.Ipqc.slnx --configuration Release --no-restore`; `dotnet test api/JaxPower.Ipqc.slnx --configuration Release --no-build` (TRX retained outside the repository); focused filter `FullyQualifiedName~LineShared`; Web `npm run lint`, `npm run test`, `npm run typecheck`, `npm run build`; EF `migrations has-pending-model-changes` for Sqlite/Postgres and `migrations script` with native PostgreSQL provider/idempotent output. One overlapping local build encountered a Windows testhost file lock; sequential rerun built with0 warnings/errors. No failing product verification remains in the completed local ledger.
 
 ## R03-01..36 evidence map
 
@@ -97,7 +101,7 @@ Test classes reside in `api/JaxPower.Ipqc.Api.Tests/`; Web evidence resides in `
 |12|Dst_day_round; Stored_calendar_key; existing legacy DST tests|
 |13|Bad_and_unadmitted_plans_are_isolated_catchup_is_bounded; existing scheduler catch-up|
 |14|Creation_instant...; Bad_and_unadmitted...; LineFence; configured-directory errors|
-|15|AdmissionAndWorkers; Transient_retries; SnapshotRollback|
+|15|AdmissionAndWorkers; Transient_retries; Unbounded_sqlite_connection_timeout_is_capped_and_restored; SnapshotRollback|
 |16|Cross_plan_winner_and_historical_collision|
 |17|StaleDiscovery pauses after committed candidate discovery and changes source facts|
 |18|StaleDiscovery both winner orders; concurrent CAS|

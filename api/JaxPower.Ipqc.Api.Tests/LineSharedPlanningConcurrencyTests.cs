@@ -197,4 +197,16 @@ public sealed class LineSharedPlanningConcurrencyTests
     [Theory]
     [InlineData("Logout")][InlineData("Role")][InlineData("Deactivation")]
     public Task R03_22_Current_family_recheck_rejects_each_security_closure(string closure) => ActorRace(false, closure);
+    [Fact]
+    public async Task R03_15_Unbounded_sqlite_connection_timeout_is_capped_and_restored()
+    {
+        await using var f = await PersonalSessionFixture.CreateAsync(); using var scope = f.Factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<IpqcDbContext>();
+        var connection = (Microsoft.Data.Sqlite.SqliteConnection)db.Database.GetDbConnection(); connection.DefaultTimeout = 0;
+        await scope.ServiceProvider.GetRequiredService<LineSharedPlanningStore>().WriteAsync(null, () =>
+        {
+            Assert.Equal(5, connection.DefaultTimeout); return Task.FromResult(true);
+        }, CancellationToken.None);
+        Assert.Equal(0, connection.DefaultTimeout);
+    }
 }
