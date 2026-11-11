@@ -68,17 +68,18 @@ The local ledger below records executed results. The independently verified CI s
 
 | Gate | Result |
 | --- | --- |
-| Release restore/build/full backend | PASS: restore/build (0 warnings/errors);296 PASS/0 FAIL/14 local PostgreSQL SKIP |
-| New focused planning/race tests | Final focused acceptance64 PASS/0 FAIL/10 local PostgreSQL SKIP, including13 SQLite concurrency/timeout cases |
+| Release restore/build/full backend | PASS: restore/build (0 warnings/errors);297 PASS/0 FAIL/14 local PostgreSQL SKIP |
+| New focused planning/race tests | Final focused acceptance65 PASS/0 FAIL/10 local PostgreSQL SKIP, including13 SQLite concurrency/timeout cases and one synthetic provider-error classification unit |
 | Web lint/test/typecheck/build | lint/typecheck PASS;77 tests PASS/0 FAIL; build PASS (existing large-bundle warning) |
 | SQLite fresh/populated/historical/recovery | PASS:8 migration cases including both interruption/recovery paths; old column/FK/index comparisons |
 | Both EF models / PostgreSQL SQL | PASS:2 CLI model checks; native additive idempotent PostgreSQL SQL reviewed |
 | Real disposable PostgreSQL | Local14 SKIPPED; real PostgreSQL17 CI14 PASS/0 FAIL/0 SKIP (10 new shared cases +4 existing personal-session cases) |
-| Git whitespace / scoped secret / remote content | PASS: whitespace/private-key-token scan;40 remote source/document blobs matched; signed docs/nine old migrations unchanged;22 unrelated file fingerprints preserved |
+| Git whitespace / scoped secret / remote content | PASS: whitespace/private-key-token scan;42 remote source/document blobs matched; signed docs/nine old migrations unchanged;22 unrelated file fingerprints preserved |
 | UAT/PAD/production rollout/restore | SKIPPED / NOT RUN; outside this authorization |
 
-CI source evidence: [run43042194302](https://github.com/peterl-ai/IPQC-system/actions/runs/43042194302) at `d35612156c896f8c6fb523bc67b0def1ccbe4b75` passed all three jobs: backend295/0/14 local-opt-in skips, Web77/0, real PostgreSQL14/0/0. The subsequent bounded-SQLite-timeout cap adds one local regression (full296/0/14); it does not change the PostgreSQL path. Final HEAD CI is independently checked after this evidence commit and linked in the delivery/PR status. The initial PostgreSQL run exposed an overstrong no-due-occurrence test assumption; the corrected fixture advances to a genuinely due Day07 occurrence and refreshes its synthetic Admin token. The corrected real-provider test passed.
+CI source evidence: the final application/test source is `56dd831d0f23901db2791e5844ee90f3261f5c73`; [PR run43044372463](https://github.com/peterl-ai/IPQC-system/actions/runs/43044372463) and [push run43044362435](https://github.com/peterl-ai/IPQC-system/actions/runs/43044362435) execute backend/Web and real PostgreSQL separately. Real PostgreSQL14/0/0 is confirmed in both runs. Final documentation-commit HEAD checks are independently verified at delivery and linked in PR status. Local full backend is297/0/14 and Web77/0. The provider-error classification unit constructs exceptions only; it is not counted as live PostgreSQL evidence.
 
+The first shared line-fence test incorrectly expected lock waiting without a due occurrence; its fixture was corrected to a genuine Day07 occurrence with a fresh synthetic Admin token. Subsequent required PostgreSQL regression exposed an existing R32-02 security-mutation serialization retry gap: Npgsql/EF wraps40001 in InvalidOperationException, which the prior classifier did not unwrap. Secret-free SQL shape/GUID/timestamp diagnostics distinguished this from expected uniqueness-constraint test errors. The narrow PersonalSessionStore classifier repair recognizes only the existing safe rollback conflict states through EF wrappers; it does not add network/unknown-commit retries, new authentication behavior or schema. Both real-provider suites pass after the repair. This is a compatibility-only delta from the proposed file inventory: PersonalSessionStore.cs plus strengthened PersonalSessionConcurrencyTests.cs diagnostics, alongside the already extended shared fixture.
 Commands: `dotnet restore api/JaxPower.Ipqc.slnx`; `dotnet build api/JaxPower.Ipqc.slnx --configuration Release --no-restore`; `dotnet test api/JaxPower.Ipqc.slnx --configuration Release --no-build` (TRX retained outside the repository); focused filter `FullyQualifiedName~LineShared`; Web `npm run lint`, `npm run test`, `npm run typecheck`, `npm run build`; EF `migrations has-pending-model-changes` for Sqlite/Postgres and `migrations script` with native PostgreSQL provider/idempotent output. One overlapping local build encountered a Windows testhost file lock; sequential rerun built with0 warnings/errors. No failing product verification remains in the completed local ledger.
 
 ## R03-01..36 evidence map
@@ -101,7 +102,7 @@ Test classes reside in `api/JaxPower.Ipqc.Api.Tests/`; Web evidence resides in `
 |12|Dst_day_round; Stored_calendar_key; existing legacy DST tests|
 |13|Bad_and_unadmitted_plans_are_isolated_catchup_is_bounded; existing scheduler catch-up|
 |14|Creation_instant...; Bad_and_unadmitted...; LineFence; configured-directory errors|
-|15|AdmissionAndWorkers; Transient_retries; Unbounded_sqlite_connection_timeout_is_capped_and_restored; SnapshotRollback|
+|15|AdmissionAndWorkers; Ef_wrapped_known_postgres_conflicts; Transient_retries; Unbounded_sqlite_connection_timeout_is_capped_and_restored; SnapshotRollback|
 |16|Cross_plan_winner_and_historical_collision|
 |17|StaleDiscovery pauses after committed candidate discovery and changes source facts|
 |18|StaleDiscovery both winner orders; concurrent CAS|
@@ -121,7 +122,7 @@ Test classes reside in `api/JaxPower.Ipqc.Api.Tests/`; Web evidence resides in `
 |32|Both_models_and_postgres_native_additive_sql_preserve_history; both EF CLI model checks|
 |33|LineSharedPlanningPostgresTests (real opt-in CI) and equivalent SQLite concurrency tests|
 |34|lineSharedApi.test.ts; LineSharedPlansPanel.test.ts (both languages/conflict/input retention); full Web regression|
-|35|Full existing backend/Web suites and real PersonalSessionPostgresTests|
+|35|Full existing backend/Web suites and real PersonalSessionPostgresTests; EF-wrapped serialization regression fix and diagnostics|
 |36|Release/Web/provider/CI/whitespace/secret/remote verification ledger; no deployment|
 
 ## Remaining gates and limits
@@ -143,6 +144,7 @@ Stop for independent PR review. Do not merge/deploy or begin R32-04.
 - `api/JaxPower.Ipqc.Api.Tests/LineSharedPlanningPostgresTests.cs`
 - `api/JaxPower.Ipqc.Api.Tests/LineSharedSchedulerTests.cs`
 - `api/JaxPower.Ipqc.Api.Tests/LineSharedSnapshotTests.cs`
+- `api/JaxPower.Ipqc.Api.Tests/PersonalSessionConcurrencyTests.cs`
 - `api/JaxPower.Ipqc.Api.Tests/PersonalSessionFixture.cs`
 - `api/JaxPower.Ipqc.Api/Contracts/LinePatrolContracts.cs`
 - `api/JaxPower.Ipqc.Api/Contracts/LineSharedPlanContracts.cs`
@@ -161,6 +163,7 @@ Stop for independent PR review. Do not merge/deploy or begin R32-04.
 - `api/JaxPower.Ipqc.Api/Services/LineSharedTaskGenerationService.cs`
 - `api/JaxPower.Ipqc.Api/Services/PatrolStandardService.cs`
 - `api/JaxPower.Ipqc.Api/Services/PatrolTaskGenerationService.cs`
+- `api/JaxPower.Ipqc.Api/Services/PersonalSessionStore.cs`
 - `api/JaxPower.Ipqc.Api/Services/PlanningSnapshot.cs`
 - `api/JaxPower.Ipqc.Api/Services/ProductionLineService.cs`
 - `docs/04_ARCHITECTURE.md`
