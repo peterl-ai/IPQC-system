@@ -23,6 +23,10 @@ builder.Services.AddScoped<LocalAuthService>();
 builder.Services.AddScoped<PersonalSessionStore>();
 builder.Services.AddScoped<PersonalAccess>();
 builder.Services.AddScoped<LinePatrolReadService>();
+builder.Services.AddScoped<ConfiguredLineDirectory>();
+builder.Services.AddScoped<LineSharedPlanningStore>();
+builder.Services.AddScoped<LineSharedPlanService>();
+builder.Services.AddScoped<LineSharedTaskGenerationService>();
 builder.Services.AddSingleton(new PersonalAccessOptions {
     EnvironmentId = builder.Configuration["PersonalAccess:EnvironmentId"],
     LineIds = builder.Configuration.GetSection("LinePatrol:LineIds").Get<string[]>() ?? [] });
@@ -270,6 +274,7 @@ group.MapPost("/import", async (IFormFile file, PatrolStandardExcel excel, Patro
 }).DisableAntiforgery().RequireAuthorization(IpqcPermissions.StandardsWrite);
 
 app.MapPatrolPlans();
+app.MapLineSharedPlans();
 app.MapPatrolTasks();
 app.MapCompletedPatrolRecords();
 

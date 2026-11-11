@@ -8,7 +8,8 @@ public sealed record ValidatedTaskAccess(Guid UserId, Guid PersonalSessionId, st
 public sealed record LineTaskSummary(Guid Id, string TaskNo, Guid LineId, int WorkflowVersion, string Status,
     DateTime ScheduledOccurrenceUtc, DateTime GeneratedAtUtc, int CurrentRevisionNo,
     string? PlanNoSnapshot, string? PlanNameSnapshot, string? StandardNameSnapshot, string? LineNameSnapshot,
-    string ReadFoundationStatus, bool CanExecute, ValidatedTaskAccess ValidatedAccess);
+    string ReadFoundationStatus, bool CanExecute, ValidatedTaskAccess ValidatedAccess, int? PlanningSnapshotVersion = null, long? SourcePlanRevision = null,
+    string? RoundSnapshot = null, string? ScheduledLocalDateSnapshot = null, string PlanningSnapshotStatus = "HistoricalUnadmitted");
 public sealed record PagedLineTasks(List<LineTaskSummary> Items, int Page, int PageSize, int Total);
 public sealed record LineTaskDefinition(Guid Id, Guid SourcePatrolStandardItemId, int SequenceNo,
     string ProcessCode, string ProcessName, string InspectionItemCategory, string InspectionItem,
@@ -18,4 +19,4 @@ public sealed record LineTaskDefinition(Guid Id, Guid SourcePatrolStandardItemId
 public sealed record LineTaskDetail(LineTaskSummary Summary, Guid PatrolPlanId, Guid PatrolStandardId,
     string? FactoryCodeSnapshot, string? FactoryNameSnapshot, string? WorkshopCodeSnapshot,
     string? LineCodeSnapshot, string? MaterialCodeSnapshot, DateTime SourceStandardUpdatedAtUtc,
-    List<LineTaskDefinition> Items, bool CanExecute = false);
+    List<LineTaskDefinition> Items, bool CanExecute = false, PlanningDefinitionV1? PlanningSnapshot = null);

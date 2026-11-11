@@ -6,7 +6,7 @@ using Microsoft.EntityFrameworkCore;
 
 namespace JaxPower.Ipqc.Api.Services;
 
-public sealed class LinePatrolReadService(IpqcDbContext db, PersonalAccessOptions options)
+public sealed class LinePatrolReadService(IpqcDbContext db, ConfiguredLineDirectory directory)
 {
     public static OfflineAccessReceipt Receipt(PersonalAuthority authority) => new(1, authority.UserId,
         authority.PersonalSessionId, authority.EnvironmentId, authority.VerifiedAtUtc,
@@ -14,13 +14,7 @@ public sealed class LinePatrolReadService(IpqcDbContext db, PersonalAccessOption
             ? authority.VerifiedAtUtc.AddHours(72) : authority.PersonalSessionExpiresAtUtc,
         authority.PersonalSessionExpiresAtUtc);
 
-    public async Task<List<PersonalLine>> LinesAsync(CancellationToken ct)
-    {
-        var ids = options.ConfiguredLines();
-        var lines = await db.ProductionLines.AsNoTracking().Where(x => ids.Contains(x.Id) && x.IsActive).ToListAsync(ct);
-        if (lines.Count != 2) throw new PersonalAccessException("LineConfigurationUnavailable", 503);
-        return ids.Select((id, i) => { var row = lines.Single(x => x.Id == id); return new PersonalLine(id, row.Code, row.Name, i + 1); }).ToList();
-    }
+    public Task<List<PersonalLine>> LinesAsync(CancellationToken ct) => directory.LinesAsync(ct);
 
     private IQueryable<PatrolTask> Tasks() => db.PatrolTasks.AsNoTracking()
         .Where(x => x.WorkflowVersion == WorkflowVersion.LineSharedV1)
@@ -55,11 +49,12 @@ public sealed class LinePatrolReadService(IpqcDbContext db, PersonalAccessOption
                 x.SourcePatrolStandardItemId, x.SequenceNo, x.ProcessCode, x.ProcessName,
                 x.InspectionItemCategory, x.InspectionItem, x.InspectionContent, x.UpperLimitOperator,
                 x.UpperLimitValue, x.LowerLimitOperator, x.LowerLimitValue, x.InspectionType,
-                x.SamplingPlan, x.SampleCount, x.PhotoRequirement, x.DefectLevel)).ToList());
+                x.SamplingPlan, x.SampleCount, x.PhotoRequirement, x.DefectLevel)).ToList(), false, PlanningSnapshot.Read(task));
     }
 
     private static string Availability(PatrolTask task)
     {
+        if (PlanningSnapshot.Status(task) == "Invalid") return "UnsupportedSnapshot";
         if (task.Status is not ("PendingInspection" or "InProgress") || task.CurrentRevisionNo != 0 ||
             task.Submissions.Count != 0 || task.Reviews.Count != 0 || task.SubmittedAtUtc is not null ||
             task.CompletedAtUtc is not null || task.OverallInspectionResult is not null ||
@@ -78,6 +73,7 @@ public sealed class LinePatrolReadService(IpqcDbContext db, PersonalAccessOption
         Utc(task.ScheduledOccurrenceUtc), Utc(task.GeneratedAtUtc), task.CurrentRevisionNo,
         task.PlanNoSnapshot, task.PlanNameSnapshot, task.StandardNameSnapshot, task.LineNameSnapshot,
         Availability(task), false, new(authority.UserId, authority.PersonalSessionId, authority.EnvironmentId,
-            authority.VerifiedAtUtc, task.Id, task.LineId.Value, (int)task.WorkflowVersion));
+            authority.VerifiedAtUtc, task.Id, task.LineId.Value, (int)task.WorkflowVersion), task.PlanningSnapshotVersion, PlanningSnapshot.Read(task)?.SourcePlanRevision,
+        PlanningSnapshot.Read(task)?.Round, PlanningSnapshot.Read(task)?.ScheduledLocalDate, PlanningSnapshot.Status(task));
     private static DateTime Utc(DateTime value) => DateTime.SpecifyKind(value, DateTimeKind.Utc);
 }

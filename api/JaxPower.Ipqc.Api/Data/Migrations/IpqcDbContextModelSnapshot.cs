@@ -399,6 +399,10 @@ namespace JaxPower.Ipqc.Api.Data.Migrations
                         .IsRequired()
                         .HasColumnType("TEXT");
 
+                    b.Property<long?>("SharedPlanRevision")
+                        .IsConcurrencyToken()
+                        .HasColumnType("INTEGER");
+
                     b.Property<string>("TimeZoneId")
                         .IsRequired()
                         .HasMaxLength(100)
@@ -431,6 +435,8 @@ namespace JaxPower.Ipqc.Api.Data.Migrations
 
                     b.ToTable("PatrolPlans", t =>
                         {
+                            t.HasCheckConstraint("CK_PatrolPlans_SharedAdmission", "\"SharedPlanRevision\" IS NULL OR (\"WorkflowVersion\" = 2 AND \"SharedPlanRevision\" >= 1)");
+
                             t.HasCheckConstraint("CK_PatrolPlans_Workflow", "\"WorkflowVersion\" IN (1, 2) AND (\"WorkflowVersion\" = 1 OR \"LineId\" IS NOT NULL)");
                         });
                 });
@@ -697,6 +703,12 @@ namespace JaxPower.Ipqc.Api.Data.Migrations
                         .HasMaxLength(50)
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("PlanningSnapshotJson")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("PlanningSnapshotVersion")
+                        .HasColumnType("INTEGER");
+
                     b.Property<DateTime>("ScheduledOccurrenceUtc")
                         .HasColumnType("TEXT");
 
@@ -743,12 +755,17 @@ namespace JaxPower.Ipqc.Api.Data.Migrations
 
                     b.HasIndex("AssignedInspectorUserId");
 
-                    b.HasIndex("LineId");
-
                     b.HasIndex("PatrolStandardId");
 
                     b.HasIndex("TaskNo")
                         .IsUnique();
+
+                    b.HasIndex("LineId");
+
+                    b.HasIndex("LineId", "ScheduledOccurrenceUtc")
+                        .IsUnique()
+                        .HasDatabaseName("IX_PatrolTasks_AdmittedLineOccurrence")
+                        .HasFilter("\"WorkflowVersion\" = 2 AND \"PlanningSnapshotVersion\" = 1");
 
                     b.HasIndex("PatrolPlanId", "ScheduledOccurrenceUtc")
                         .IsUnique();
@@ -761,6 +778,8 @@ namespace JaxPower.Ipqc.Api.Data.Migrations
 
                     b.ToTable("PatrolTasks", t =>
                         {
+                            t.HasCheckConstraint("CK_PatrolTasks_PlanningSnapshot", "(\"PlanningSnapshotVersion\" IS NULL AND \"PlanningSnapshotJson\" IS NULL) OR (\"WorkflowVersion\" = 2 AND \"PlanningSnapshotVersion\" IS NOT NULL AND \"PlanningSnapshotVersion\" = 1 AND \"PlanningSnapshotJson\" IS NOT NULL AND length(\"PlanningSnapshotJson\") > 0 AND \"AssignedInspectorUserId\" IS NULL AND \"AssignedInspectorKey\" = '')");
+
                             t.HasCheckConstraint("CK_PatrolTasks_Workflow", "\"WorkflowVersion\" IN (1, 2) AND (\"WorkflowVersion\" = 1 OR \"LineId\" IS NOT NULL)");
                         });
                 });
@@ -1673,7 +1692,7 @@ namespace JaxPower.Ipqc.Api.Data.Migrations
                 {
                     b.Navigation("Samples");
                 });
-            // Shared migrations use provider-native defaults; preserve this after scaffolding.
+            // Preserve provider-neutral snapshot types; resolve native store types per provider.
             foreach (var entity in modelBuilder.Model.GetEntityTypes())
                 foreach (var property in entity.GetProperties()) property.SetColumnType(null);
 #pragma warning restore 612, 618
