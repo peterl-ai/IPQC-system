@@ -23,6 +23,7 @@ public sealed class PatrolStandardService(IpqcDbContext db, TimeProvider clock, 
         if (items.Count > 1000) errors[nameof(input.InspectionItems)] = ["No more than 1000 inspection items are allowed."];
         for (var i = 0; i < items.Count; i++)
         {
+            if (items[i] is null) { errors[$"InspectionItems[{i}]"] = ["An inspection item definition is required."]; continue; }
             if (ItemValues(items[i]).All(string.IsNullOrWhiteSpace)) errors[$"InspectionItems[{i}]"] = ["An inspection item must contain at least one value."];
             if (ItemValues(items[i]).Any(v => v?.Length > 2000)) errors[$"InspectionItems[{i}]"] = ["Each inspection item value must be 2000 characters or fewer."];
             if (!string.IsNullOrWhiteSpace(items[i].InspectionType) &&
@@ -52,6 +53,7 @@ public sealed class PatrolStandardService(IpqcDbContext db, TimeProvider clock, 
         for (var i = 0; i < input.InspectionItems.Count; i++)
         {
             var item = input.InspectionItems[i];
+            if (item is null) return $"Inspection item {i + 1}: a definition is required.";
             var issue = InspectionJudgmentService.ValidateDefinition(item.InspectionType, item.SampleCount,
                 item.LowerLimitOperator?.Trim(), item.LowerLimitValue?.Trim(),
                 item.UpperLimitOperator?.Trim(), item.UpperLimitValue?.Trim());
@@ -106,7 +108,9 @@ public sealed class PatrolStandardService(IpqcDbContext db, TimeProvider clock, 
     {
         var row = await db.PatrolStandards.Include(x => x.InspectionItems).FirstOrDefaultAsync(x => x.Id == id, ct);
         if (row is null) return null;
-        if (await db.PatrolPlans.AnyAsync(x => x.PatrolStandardId == id && x.WorkflowVersion == WorkflowVersion.LineSharedV1 && x.SharedPlanRevision > 0 && x.IsEnabled, ct) && ExecutabilityIssue(input) is not null)
+        var enabledShared = await db.PatrolPlans.AnyAsync(x => x.PatrolStandardId == id &&
+            x.WorkflowVersion == WorkflowVersion.LineSharedV1 && x.SharedPlanRevision > 0 && x.IsEnabled, ct);
+        if (enabledShared && Validate(input).Count != 0)
             throw new PersonalAccessException("SharedStandardNotReady", 400);
         ApplyHeader(row, input);
         row.UpdatedBy = actor;
@@ -134,7 +138,15 @@ public sealed class PatrolStandardService(IpqcDbContext db, TimeProvider clock, 
             row.InspectionItems.Add(added);
             db.PatrolStandardItems.Add(added);
         }
-        db.PatrolStandardItems.RemoveRange(existingById.Values.Where(x => !retainedIds.Contains(x.Id)));
+        foreach (var removed in existingById.Values.Where(x => !retainedIds.Contains(x.Id)))
+        {
+            row.InspectionItems.Remove(removed);
+            db.PatrolStandardItems.Remove(removed);
+        }
+        // Check the actual reconciled definition under the same gate as Plan enable/generation.
+        // Removed children must be excluded; retained/new IDs and assigned order are authoritative.
+        if (enabledShared && !LineSharedPlanService.Ready(row))
+            throw new PersonalAccessException("SharedStandardNotReady", 400);
         await db.SaveChangesAsync(ct);
         return await GetAsync(id, ct);
     }, ct);

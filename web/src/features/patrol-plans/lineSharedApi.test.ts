@@ -40,4 +40,11 @@ describe('R03-34 shared planning contracts', () => {
     expect(Object.values(en.sharedPlan).every(Boolean)).toBe(true); expect(Object.values(zh.sharedPlan).every(Boolean)).toBe(true)
     expect(en.sharedPlan.notice).toContain('read-only'); expect(zh.sharedPlan.notice).toContain('只读')
   })
+  it('reads the current Plan through the existing GET endpoint without using a client cache', async () => {
+    const fetch = vi.fn().mockResolvedValue(json({ id: 'plan', ...draft, sharedPlanRevision: 4 }))
+    vi.stubGlobal('fetch', fetch)
+    expect((await lineSharedApi.get('plan')).sharedPlanRevision).toBe(4)
+    expect(fetch).toHaveBeenCalledWith('/api/line-patrol-plans/plan', expect.objectContaining({ cache: 'no-store' }))
+    expect((fetch.mock.calls[0][1].headers as Headers).get('Authorization')).toBe('Bearer synthetic')
+  })
 })

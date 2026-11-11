@@ -27,6 +27,7 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
 }
 export const lineSharedApi = {
   lines: () => request<SharedLine[]>('/lines'),
+  get: (id: string) => request<SharedPlan>('/' + encodeURIComponent(id), { cache: 'no-store' }),
   list: (page = 1) => request<{ items: SharedPlan[]; total: number }>(`?page=${page}&pageSize=10`),
   save: (id: string | null, draft: SharedPlanDraft) => request<SharedPlan>(id ? `/${id}` : '', { method: id ? 'PUT' : 'POST', body: JSON.stringify(draft) }),
   toggle: (row: SharedPlan) => request<SharedPlan>(`/${row.id}/${row.isEnabled ? 'disable' : 'enable'}`, { method: 'POST', body: JSON.stringify({ expectedRevision: row.sharedPlanRevision }) }),

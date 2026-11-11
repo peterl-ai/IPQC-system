@@ -26,7 +26,8 @@ public sealed class LineSharedPlanService(IpqcDbContext db, LineSharedPlanningSt
         catch (Exception ex) when (ex is JsonException or NullReferenceException or ArgumentException) { return []; }
     }
     public static bool Ready(PatrolStandard s) => !string.IsNullOrWhiteSpace(s.PatrolStandardName) && !string.IsNullOrWhiteSpace(s.LineName) &&
-        s.InspectionItems.Count is > 0 and <= 1000 && s.InspectionItems.All(x => x.Id != Guid.Empty && x.SequenceNo > 0) &&
+        s.InspectionItems.Count is > 0 and <= 1000 && s.InspectionItems.All(x => x is not null && x.Id != Guid.Empty && x.SequenceNo > 0) &&
+        s.InspectionItems.Select(x => x.Id).Distinct().Count() == s.InspectionItems.Count &&
         s.InspectionItems.Select(x => x.SequenceNo).Distinct().Count() == s.InspectionItems.Count &&
         s.InspectionItems.All(x => InspectionJudgmentService.ValidateDefinition(x.InspectionType, x.SampleCount,
             x.LowerLimitOperator, x.LowerLimitValue, x.UpperLimitOperator, x.UpperLimitValue) is null);

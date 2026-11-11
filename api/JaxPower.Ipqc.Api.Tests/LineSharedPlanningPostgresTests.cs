@@ -50,4 +50,9 @@ public sealed class LineSharedPlanningPostgresTests
         foreach (var closure in new[] { "Logout", "Role", "Deactivation" })
             await LineSharedPlanningConcurrencyTests.ActorRace(true, closure);
     }
+    [DisposablePostgresFact]
+    public Task Full_shared_standard_readiness_rejects_direct_and_http_bypasses_atomically() =>
+        LineSharedStandardReadinessTests.InvalidUpdates(true, ["standard-name", "line-name", "1001-items", "missing-items", "null-items", "unknown-type", "invalid-limits", "sample-count", "null-item"]);
+    [DisposablePostgresFact]
+    public Task Shared_standard_identity_reconciliation_keeps_an_enabled_plan_ready() => LineSharedStandardReadinessTests.ValidUpdate(true);
 }
