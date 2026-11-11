@@ -17,7 +17,10 @@ public sealed class PersonalSessionStore(IpqcDbContext db)
     public static bool IsTransient(Exception ex) => ex is SqliteException { SqliteErrorCode: 5 or 6 } ||
         ex is PostgresException { SqlState: PostgresErrorCodes.SerializationFailure or
             PostgresErrorCodes.DeadlockDetected or PostgresErrorCodes.LockNotAvailable } ||
-        ex is DbUpdateConcurrencyException || ex is DbUpdateException { InnerException: { } inner } && IsTransient(inner);
+        ex is DbUpdateConcurrencyException ||
+        // Npgsql's default EF execution strategy wraps known transient database errors.
+        // Do not broaden this to network/unknown-commit retries or unrelated InvalidOperationException.
+        ex is DbUpdateException or InvalidOperationException && ex.InnerException is { } inner && IsTransient(inner);
 
     public async Task<T> WriteAsync<T>(Guid userId, Func<Task<T>> operation, CancellationToken ct,
         bool serializable = false)

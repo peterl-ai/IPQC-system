@@ -34,6 +34,7 @@ internal sealed class PersonalClock : TimeProvider
 // Pauses or fails real relational commands after the old refresh row was consumed.
 internal sealed class SessionFault : DbCommandInterceptor
 {
+    public System.Collections.Concurrent.ConcurrentQueue<string> SessionSql { get; } = new();
     private Func<DbCommand, bool>? match;
     private bool fail;
     private int busyRemaining;
@@ -46,10 +47,13 @@ internal sealed class SessionFault : DbCommandInterceptor
         Release = new(TaskCreationOptions.RunContinuationsAsynchronously);
         match = c => c.CommandText.Contains(sqlFragment, StringComparison.Ordinal);
     }
-    public void ArmBusy(int failures)
-    { Arm("UPDATE \"ApplicationUsers\""); busyRemaining = failures; }
+    public void ArmBusy(int failures, string fragment = "UPDATE \"ApplicationUsers\"")
+    { Arm(fragment); busyRemaining = failures; }
     private async Task Check(DbCommand command, CancellationToken ct)
     {
+        if (command.CommandText.Contains("RefreshTokenSessions", StringComparison.Ordinal))
+            SessionSql.Enqueue(command.CommandText + " | " + string.Join(",", command.Parameters.Cast<DbParameter>()
+                .Where(p => p.Value is Guid or DateTime or DBNull).Select(p => p.ParameterName + "=" + p.Value)));
         var predicate = match;
         if (predicate is null || !predicate(command) || Interlocked.CompareExchange(ref match, null, predicate) != predicate) return;
         Entered.TrySetResult();
@@ -72,9 +76,18 @@ internal sealed class SessionFault : DbCommandInterceptor
 internal sealed class SessionCommitFault : DbTransactionInterceptor
 {
     public bool Armed { get; set; }
+    public bool FailTaskCommit { get; set; }
+    public Func<Task>? AfterCommit;
+    public override async Task TransactionCommittedAsync(DbTransaction transaction, TransactionEndEventData eventData, CancellationToken cancellationToken = default)
+    {
+        var callback = Interlocked.Exchange(ref AfterCommit, null);
+        if (callback is not null) await callback();
+    }
     public override ValueTask<InterceptionResult> TransactionCommittingAsync(DbTransaction transaction,
         TransactionEventData eventData, InterceptionResult result, CancellationToken cancellationToken = default)
     {
+        if (FailTaskCommit && eventData.Context!.ChangeTracker.Entries<PatrolTask>().Any())
+        { FailTaskCommit = false; throw new InvalidOperationException("Synthetic planning commit failure"); }
         if (Armed) { Armed = false; throw new InvalidOperationException("Synthetic pre-commit failure"); }
         return ValueTask.FromResult(result);
     }

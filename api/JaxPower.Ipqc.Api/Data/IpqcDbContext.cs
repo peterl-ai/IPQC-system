@@ -118,6 +118,8 @@ public sealed partial class IpqcDbContext(DbContextOptions<IpqcDbContext> option
             item.Property(property.Name).HasMaxLength(2000);
 
         var plan = modelBuilder.Entity<PatrolPlan>();
+        plan.Property(x => x.SharedPlanRevision).IsConcurrencyToken();
+        plan.ToTable(t => t.HasCheckConstraint("CK_PatrolPlans_SharedAdmission", "\"SharedPlanRevision\" IS NULL OR (\"WorkflowVersion\" = 2 AND \"SharedPlanRevision\" >= 1)"));
         plan.Property(x => x.WorkflowVersion).HasDefaultValue(WorkflowVersion.LegacyPersonalV1).HasSentinel(WorkflowVersion.LegacyPersonalV1).IsConcurrencyToken();
         plan.HasOne(x => x.Line).WithMany().HasForeignKey(x => x.LineId).OnDelete(DeleteBehavior.Restrict);
         plan.ToTable(t => t.HasCheckConstraint("CK_PatrolPlans_Workflow", "\"WorkflowVersion\" IN (1, 2) AND (\"WorkflowVersion\" = 1 OR \"LineId\" IS NOT NULL)"));
@@ -146,6 +148,11 @@ public sealed partial class IpqcDbContext(DbContextOptions<IpqcDbContext> option
         assignee.HasOne(x => x.User).WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Restrict);
 
         var task = modelBuilder.Entity<PatrolTask>();
+        task.HasIndex(x => x.LineId);
+        task.ToTable(t => t.HasCheckConstraint("CK_PatrolTasks_PlanningSnapshot", "(\"PlanningSnapshotVersion\" IS NULL AND \"PlanningSnapshotJson\" IS NULL) OR (\"WorkflowVersion\" = 2 AND \"PlanningSnapshotVersion\" IS NOT NULL AND \"PlanningSnapshotVersion\" = 1 AND \"PlanningSnapshotJson\" IS NOT NULL AND length(\"PlanningSnapshotJson\") > 0 AND \"AssignedInspectorUserId\" IS NULL AND \"AssignedInspectorKey\" = '')"));
+        task.HasIndex(x => new { x.LineId, x.ScheduledOccurrenceUtc }).IsUnique()
+            .HasDatabaseName("IX_PatrolTasks_AdmittedLineOccurrence")
+            .HasFilter("\"WorkflowVersion\" = 2 AND \"PlanningSnapshotVersion\" = 1");
         task.HasIndex(x => new { x.WorkflowVersion, x.LineId, x.ScheduledOccurrenceUtc, x.Id });
         task.Property(x => x.WorkflowVersion).HasDefaultValue(WorkflowVersion.LegacyPersonalV1).HasSentinel(WorkflowVersion.LegacyPersonalV1).IsConcurrencyToken();
         task.HasOne(x => x.Line).WithMany().HasForeignKey(x => x.LineId).OnDelete(DeleteBehavior.Restrict);

@@ -7,7 +7,7 @@ using Npgsql;
 namespace JaxPower.Ipqc.Api.Services;
 
 public sealed class PatrolTaskGenerationService(IpqcDbContext db, TimeProvider clock, IConfiguration configuration,
-    ILogger<PatrolTaskGenerationService> logger)
+    ILogger<PatrolTaskGenerationService> logger, LineSharedTaskGenerationService shared)
 {
     public async Task<int> GenerateDueAsync(CancellationToken ct = default)
     {
@@ -111,7 +111,7 @@ public sealed class PatrolTaskGenerationService(IpqcDbContext db, TimeProvider c
                 created += planCreated;
             }
         }
-        return created;
+        return created + await shared.GenerateDueAsync(ct);
     }
 
     private void DetachPendingTasks(Guid planId)

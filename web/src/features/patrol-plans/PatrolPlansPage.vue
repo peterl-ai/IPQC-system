@@ -1,7 +1,9 @@
 <template>
   <section class="workspace-page">
     <PageHeader :eyebrow="t('nav.linePatrol')" :title="t('page.plans.title')" :subtitle="t('page.plans.subtitle')" />
-    <div class="data-panel">
+    <a-radio-group v-model:value="sharedPanel" button-style="solid"><a-radio-button :value="false">{{ t('sharedPlan.legacy') }}</a-radio-button><a-radio-button :value="true">{{ t('sharedPlan.title') }}</a-radio-button></a-radio-group>
+    <LineSharedPlansPanel v-if="sharedPanel" />
+    <div v-show="!sharedPanel" class="data-panel">
       <a-alert v-if="error" type="error" show-icon :message="error" />
       <div class="filter-bar">
         <a-form layout="inline" @finish="search">
@@ -64,7 +66,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, defineAsyncComponent, onMounted, reactive, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { message, type TableColumnsType } from 'ant-design-vue'
 import { PlusOutlined, ReloadOutlined, SearchOutlined } from '@ant-design/icons-vue'
@@ -73,6 +75,8 @@ import StatusTag from '@/components/StatusTag.vue'
 import { patrolPlansApi, type Assignee, type Plan, type PlanDraft, type ScheduleDefinition, type StandardOption } from './api'
 import { validatePlanDraft } from './validation'
 
+const LineSharedPlansPanel = defineAsyncComponent(() => import('./LineSharedPlansPanel.vue'))
+const sharedPanel = ref(false)
 const { t } = useI18n()
 const plans = ref<Plan[]>([])
 const standards = ref<StandardOption[]>([])

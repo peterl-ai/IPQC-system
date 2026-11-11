@@ -5,7 +5,7 @@ using Microsoft.EntityFrameworkCore;
 
 namespace JaxPower.Ipqc.Api.Services;
 
-public sealed class ProductionLineService(IpqcDbContext db, ProvisioningStore store)
+public sealed class ProductionLineService(IpqcDbContext db, ProvisioningStore store, TimeProvider clock)
 {
     public static LineOutput Output(ProductionLine x) => new(x.Id, x.Code, x.Name, x.IsActive, x.Revision);
     public static ProvisioningSnapshot Snapshot(ProductionLine x) => new(x.Name, x.Revision, x.Code, x.IsActive);
@@ -34,6 +34,20 @@ public sealed class ProductionLineService(IpqcDbContext db, ProvisioningStore st
         ProvisioningStore.Revision(row.Revision, revision);
         var before = Snapshot(row);
         if (active == false && await db.RegisteredDevices.AnyAsync(x => x.LineId == id, ct)) throw new ProvisioningException("LineInUse");
+        // Coordinate with generation's line -> Plan order, preserving the provisioning audit transaction.
+        if (db.Database.IsNpgsql())
+            _ = await db.ProductionLines.FromSqlInterpolated($"SELECT * FROM \"ProductionLines\" WHERE \"Id\" = {id} FOR UPDATE").AsNoTracking().ToListAsync(ct);
+        if (active is { } next && next != row.IsActive)
+        {
+            var now = LineSharedPlanService.Micro(clock.GetUtcNow().UtcDateTime);
+            var plans = await db.PatrolPlans.Where(x => x.LineId == id && x.WorkflowVersion == WorkflowVersion.LineSharedV1 && x.SharedPlanRevision > 0).ToListAsync(ct);
+            foreach (var plan in plans)
+            {
+                plan.SharedPlanRevision = checked(plan.SharedPlanRevision!.Value + 1);
+                if (now > plan.GenerationNotBeforeUtc) plan.GenerationNotBeforeUtc = now;
+                plan.UpdatedAtUtc = now; plan.UpdatedBy = username;
+            }
+        }
         if (active is { } enabled) row.IsActive = enabled;
         else row.Name = ProvisioningStore.Text(name, 200);
         row.Revision = checked(row.Revision + 1);

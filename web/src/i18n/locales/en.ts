@@ -1,4 +1,18 @@
 export default {
+  sharedPlan: {
+    reconcileTitle: 'Review the current Plan version', reconcileDraft: 'Your draft is preserved. Compare the server values, keep editing, then explicitly acknowledge a revision or discard the draft and load the server version. Nothing is retried automatically.',
+    reconcileToggle: 'The committed Plan status has been refreshed below and in the table. Inspect it before choosing Enable or Disable again; no action was retried.',
+    compareValues: 'Plan conflict comparison', valueField: 'Field', yourDraft: 'Your unsaved draft', serverValues: 'Fetched server values', serverRevision: 'Fetched server revision: {revision}',
+    keepDraftAcknowledge: 'Keep draft and acknowledge revision {revision}', loadServer: 'Discard draft and load server version', refreshCurrent: 'Refresh current Plan', refreshing: 'Reading the current server version…',
+    revisionAcknowledged: 'Revision acknowledged. Your next Save is an explicit action and may conflict again if another change commits.', planMissing: 'This Plan is no longer available. Your draft is preserved; saving is blocked until a current version can be verified.',
+    SharedPlanOverlap: 'This Plan overlaps another enabled Plan for the same line and round.', DuplicateSharedPlanNo: 'This Plan number is already in use.', SharedPlanUnadmitted: 'This historical Plan is read-only and has not been admitted for shared scheduling.',
+    title: 'Shared Line Plans', legacy: 'Personal Plans', notice: 'Planning only. Tasks remain read-only; inspection and Submit are unavailable.',
+    Day: 'Day 07:00', Night: 'Night 19:00', rounds: 'New York rounds', scheduling: 'Scheduling enabled', revision: 'Revision', historical: 'Historical / unadmitted',
+    conflict: 'Configuration changed or overlaps another plan. Keep your entries; reload and reconcile before saving again.',
+    loginRequired: 'A current personal session is required. Sign in online again.', InvalidSharedPlanInput: 'Check the plan fields, line, rounds and effective interval.',
+    SharedStandardNotReady: 'The Standard is not ready for scheduling.', LineConfigurationUnavailable: 'Both configured lines must exist and be active.',
+    PersonalAccessConfigurationUnavailable: 'Personal access configuration is unavailable.', Forbidden: 'Your current account cannot manage shared plans.', Unavailable: 'Shared planning is unavailable. Try again later.',
+  },
   enrollment: {
   "title": "Enrollment History",
   "boundary": "Historical candidates never authorize patrol. New enrollment and certificate issuance are retired.",

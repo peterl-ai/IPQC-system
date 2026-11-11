@@ -114,3 +114,7 @@ Phase 1D enforces a unique key on `(PatrolPlanId, ScheduledOccurrenceUtc)`.
 
 ## Legacy migration
 None. Jinko GQMS remains the system used for historical lookup before JAX IPQC go-live.
+
+## R32-03 shared planning
+
+See [R32-03 implemented contracts and verification](17_R3203_SHARED_PLANNING.md): separate current-family Admin/PQE shared Plan APIs; provider-specific planning/line/account serialization; ownerless 07/19 New York scheduling and immutable planning snapshots. Shared tasks remain read-only/non-executing. The single additive migration preserves historical null markers, old indexes/FKs and retired enrollment history. SQLite rebuild interruption after schema commit requires offline verified-backup restoration before retry; production rollout/restore remains an external gate, not authorized here. Legacy scheduling, authentication, reports and reservation/cleanup controls remain in effect.

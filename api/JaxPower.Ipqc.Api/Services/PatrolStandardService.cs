@@ -5,7 +5,7 @@ using Microsoft.EntityFrameworkCore;
 
 namespace JaxPower.Ipqc.Api.Services;
 
-public sealed class PatrolStandardService(IpqcDbContext db, TimeProvider clock)
+public sealed class PatrolStandardService(IpqcDbContext db, TimeProvider clock, LineSharedPlanningStore planning)
 {
     public static Dictionary<string, string[]> Validate(StandardInput input)
     {
@@ -23,6 +23,7 @@ public sealed class PatrolStandardService(IpqcDbContext db, TimeProvider clock)
         if (items.Count > 1000) errors[nameof(input.InspectionItems)] = ["No more than 1000 inspection items are allowed."];
         for (var i = 0; i < items.Count; i++)
         {
+            if (items[i] is null) { errors[$"InspectionItems[{i}]"] = ["An inspection item definition is required."]; continue; }
             if (ItemValues(items[i]).All(string.IsNullOrWhiteSpace)) errors[$"InspectionItems[{i}]"] = ["An inspection item must contain at least one value."];
             if (ItemValues(items[i]).Any(v => v?.Length > 2000)) errors[$"InspectionItems[{i}]"] = ["Each inspection item value must be 2000 characters or fewer."];
             if (!string.IsNullOrWhiteSpace(items[i].InspectionType) &&
@@ -52,6 +53,7 @@ public sealed class PatrolStandardService(IpqcDbContext db, TimeProvider clock)
         for (var i = 0; i < input.InspectionItems.Count; i++)
         {
             var item = input.InspectionItems[i];
+            if (item is null) return $"Inspection item {i + 1}: a definition is required.";
             var issue = InspectionJudgmentService.ValidateDefinition(item.InspectionType, item.SampleCount,
                 item.LowerLimitOperator?.Trim(), item.LowerLimitValue?.Trim(),
                 item.UpperLimitOperator?.Trim(), item.UpperLimitValue?.Trim());
@@ -102,11 +104,14 @@ public sealed class PatrolStandardService(IpqcDbContext db, TimeProvider clock)
         return ToOutput(row);
     }
 
-    public async Task<StandardOutput?> UpdateAsync(Guid id, StandardInput input, string actor, CancellationToken ct)
+    public Task<StandardOutput?> UpdateAsync(Guid id, StandardInput input, string actor, CancellationToken ct) => planning.WriteAsync<StandardOutput?>(null, async () =>
     {
         var row = await db.PatrolStandards.Include(x => x.InspectionItems).FirstOrDefaultAsync(x => x.Id == id, ct);
         if (row is null) return null;
-        await using var tx = await db.Database.BeginTransactionAsync(ct);
+        var enabledShared = await db.PatrolPlans.AnyAsync(x => x.PatrolStandardId == id &&
+            x.WorkflowVersion == WorkflowVersion.LineSharedV1 && x.SharedPlanRevision > 0 && x.IsEnabled, ct);
+        if (enabledShared && Validate(input).Count != 0)
+            throw new PersonalAccessException("SharedStandardNotReady", 400);
         ApplyHeader(row, input);
         row.UpdatedBy = actor;
         row.UpdatedAtUtc = clock.GetUtcNow().UtcDateTime;
@@ -133,20 +138,29 @@ public sealed class PatrolStandardService(IpqcDbContext db, TimeProvider clock)
             row.InspectionItems.Add(added);
             db.PatrolStandardItems.Add(added);
         }
-        db.PatrolStandardItems.RemoveRange(existingById.Values.Where(x => !retainedIds.Contains(x.Id)));
+        foreach (var removed in existingById.Values.Where(x => !retainedIds.Contains(x.Id)))
+        {
+            row.InspectionItems.Remove(removed);
+            db.PatrolStandardItems.Remove(removed);
+        }
+        // Check the actual reconciled definition under the same gate as Plan enable/generation.
+        // Removed children must be excluded; retained/new IDs and assigned order are authoritative.
+        if (enabledShared && !LineSharedPlanService.Ready(row))
+            throw new PersonalAccessException("SharedStandardNotReady", 400);
         await db.SaveChangesAsync(ct);
-        await tx.CommitAsync(ct);
         return await GetAsync(id, ct);
-    }
+    }, ct);
 
-    public async Task<bool> DeleteAsync(Guid id, CancellationToken ct)
+    public Task<bool> DeleteAsync(Guid id, CancellationToken ct) => planning.WriteAsync(null, async () =>
     {
         var row = await db.PatrolStandards.FindAsync([id], ct);
         if (row is null) return false;
+        if (await db.PatrolPlans.AnyAsync(x => x.PatrolStandardId == id, ct) || await db.PatrolTasks.AnyAsync(x => x.PatrolStandardId == id, ct))
+            throw new PersonalAccessException("StandardInUse", 409);
         db.PatrolStandards.Remove(row);
         await db.SaveChangesAsync(ct);
         return true;
-    }
+    }, ct);
 
     public async Task<StandardOutput?> CopyAsync(Guid id, string? name, string actor, CancellationToken ct)
     {

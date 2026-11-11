@@ -23,6 +23,10 @@ builder.Services.AddScoped<LocalAuthService>();
 builder.Services.AddScoped<PersonalSessionStore>();
 builder.Services.AddScoped<PersonalAccess>();
 builder.Services.AddScoped<LinePatrolReadService>();
+builder.Services.AddScoped<ConfiguredLineDirectory>();
+builder.Services.AddScoped<LineSharedPlanningStore>();
+builder.Services.AddScoped<LineSharedPlanService>();
+builder.Services.AddScoped<LineSharedTaskGenerationService>();
 builder.Services.AddSingleton(new PersonalAccessOptions {
     EnvironmentId = builder.Configuration["PersonalAccess:EnvironmentId"],
     LineIds = builder.Configuration.GetSection("LinePatrol:LineIds").Get<string[]>() ?? [] });
@@ -154,7 +158,8 @@ if (app.Environment.IsDevelopment())
 if (!app.Environment.IsDevelopment()) app.UseExceptionHandler();
 app.Use(async (context, next) =>
 {
-    if (context.Request.Path.StartsWithSegments("/api/auth") || context.Request.Path.StartsWithSegments("/api/line-patrol"))
+    if (context.Request.Path.StartsWithSegments("/api/auth") || context.Request.Path.StartsWithSegments("/api/line-patrol") ||
+        context.Request.Path.StartsWithSegments("/api/line-patrol-plans"))
         context.Response.Headers.CacheControl = "no-store";
     try { await next(context); }
     catch (PersonalAccessException ex) when (!context.Response.HasStarted)
@@ -270,6 +275,7 @@ group.MapPost("/import", async (IFormFile file, PatrolStandardExcel excel, Patro
 }).DisableAntiforgery().RequireAuthorization(IpqcPermissions.StandardsWrite);
 
 app.MapPatrolPlans();
+app.MapLineSharedPlans();
 app.MapPatrolTasks();
 app.MapCompletedPatrolRecords();
 
