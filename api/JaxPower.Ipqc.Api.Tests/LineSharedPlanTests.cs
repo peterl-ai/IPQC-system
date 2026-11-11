@@ -110,4 +110,54 @@ public sealed class LineSharedPlanTests
         var legacy = await f.Read(db => db.PatrolTasks.Where(x => x.Id == legacyTask).Select(x => x.PatrolPlanId).SingleAsync());
         Assert.Equal(HttpStatusCode.NotFound, (await client.PutAsJsonAsync($"/api/line-patrol-plans/{legacy}", Input(f, Guid.Empty))).StatusCode);
     }
+    [Theory]
+    [InlineData("admin")][InlineData("pqe")]
+    public async Task Shared_plan_successful_gets_are_no_store_and_revocation_still_rejects_the_family(string username)
+    {
+        await using var f = await PersonalSessionFixture.CreateAsync(); var standard = await Standard(f); var plan = await Plan(f, standard);
+        var auth = await f.Login(username); var client = f.Client(auth.AccessToken);
+        foreach (var path in new[] { "/api/line-patrol-plans/lines", "/api/line-patrol-plans", $"/api/line-patrol-plans/{plan.Id}" })
+        {
+            using var response = await client.GetAsync(path);
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            Assert.True(response.Headers.CacheControl?.NoStore == true, $"Missing no-store on successful GET {path}");
+            if (path.EndsWith("/lines", StringComparison.Ordinal))
+                Assert.Equal(new[] { f.Line1, f.Line2 }, (await response.Content.ReadFromJsonAsync<List<PersonalLine>>())!.Select(x => x.Id));
+            else if (path == "/api/line-patrol-plans")
+            {
+                var page = (await response.Content.ReadFromJsonAsync<SharedPlanPage>())!;
+                Assert.Equal(1, page.Total); Assert.Equal(plan.Id, Assert.Single(page.Items).Id);
+            }
+            else Assert.Equal(plan.Id, (await response.Content.ReadFromJsonAsync<SharedPlanOutput>())!.Id);
+        }
+        using var logout = await client.PostAsJsonAsync("/api/auth/logout", new RefreshInput(auth.RefreshToken));
+        Assert.Equal(HttpStatusCode.NoContent, logout.StatusCode); Assert.True(logout.Headers.CacheControl!.NoStore);
+        foreach (var path in new[] { "/api/line-patrol-plans/lines", "/api/line-patrol-plans", $"/api/line-patrol-plans/{plan.Id}" })
+        {
+            using var response = await client.GetAsync(path);
+            Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode); Assert.True(response.Headers.CacheControl!.NoStore);
+        }
+        // Legacy JWT behavior is unchanged; family closure is enforced on the current-family surface.
+        using var legacy = await client.GetAsync("/api/patrol-plans"); Assert.Equal(HttpStatusCode.OK, legacy.StatusCode);
+        Assert.Null(legacy.Headers.CacheControl);
+    }
+    [Fact]
+    public async Task Existing_personal_and_auth_responses_keep_no_store_and_shared_plan_rbac_is_unchanged()
+    {
+        await using var f = await PersonalSessionFixture.CreateAsync(); var task = await f.Task();
+        using var login = await f.Anonymous.PostAsJsonAsync("/api/auth/login", new LoginInput("dev-ipqa-1", TestAccounts.Password, "Native"));
+        Assert.Equal(HttpStatusCode.OK, login.StatusCode); Assert.True(login.Headers.CacheControl!.NoStore);
+        var auth = (await login.Content.ReadFromJsonAsync<AuthOutput>())!; var client = f.Client(auth.AccessToken);
+        foreach (var path in new[] { "/api/line-patrol/lines", $"/api/line-patrol/tasks?lineId={f.Line1}", $"/api/line-patrol/tasks/{task}" })
+        {
+            using var response = await client.GetAsync(path);
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode); Assert.True(response.Headers.CacheControl!.NoStore);
+        }
+        using var verify = await client.PostAsync("/api/line-patrol/access/verify", null);
+        Assert.Equal(HttpStatusCode.OK, verify.StatusCode); Assert.True(verify.Headers.CacheControl!.NoStore);
+        using var forbidden = await client.GetAsync("/api/line-patrol-plans");
+        Assert.Equal(HttpStatusCode.Forbidden, forbidden.StatusCode); Assert.True(forbidden.Headers.CacheControl?.NoStore == true);
+        using var anonymous = await f.Anonymous.GetAsync("/api/line-patrol-plans/lines");
+        Assert.Equal(HttpStatusCode.Unauthorized, anonymous.StatusCode); Assert.True(anonymous.Headers.CacheControl?.NoStore == true);
+    }
 }

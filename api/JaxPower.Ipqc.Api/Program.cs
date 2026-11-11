@@ -158,7 +158,8 @@ if (app.Environment.IsDevelopment())
 if (!app.Environment.IsDevelopment()) app.UseExceptionHandler();
 app.Use(async (context, next) =>
 {
-    if (context.Request.Path.StartsWithSegments("/api/auth") || context.Request.Path.StartsWithSegments("/api/line-patrol"))
+    if (context.Request.Path.StartsWithSegments("/api/auth") || context.Request.Path.StartsWithSegments("/api/line-patrol") ||
+        context.Request.Path.StartsWithSegments("/api/line-patrol-plans"))
         context.Response.Headers.CacheControl = "no-store";
     try { await next(context); }
     catch (PersonalAccessException ex) when (!context.Response.HasStarted)
