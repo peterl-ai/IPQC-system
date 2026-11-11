@@ -34,6 +34,7 @@ internal sealed class PersonalClock : TimeProvider
 // Pauses or fails real relational commands after the old refresh row was consumed.
 internal sealed class SessionFault : DbCommandInterceptor
 {
+    public System.Collections.Concurrent.ConcurrentQueue<string> SessionSql { get; } = new();
     private Func<DbCommand, bool>? match;
     private bool fail;
     private int busyRemaining;
@@ -50,6 +51,9 @@ internal sealed class SessionFault : DbCommandInterceptor
     { Arm(fragment); busyRemaining = failures; }
     private async Task Check(DbCommand command, CancellationToken ct)
     {
+        if (command.CommandText.Contains("RefreshTokenSessions", StringComparison.Ordinal))
+            SessionSql.Enqueue(command.CommandText + " | " + string.Join(",", command.Parameters.Cast<DbParameter>()
+                .Where(p => p.Value is Guid or DateTime or DBNull).Select(p => p.ParameterName + "=" + p.Value)));
         var predicate = match;
         if (predicate is null || !predicate(command) || Interlocked.CompareExchange(ref match, null, predicate) != predicate) return;
         Entered.TrySetResult();

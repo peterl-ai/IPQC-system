@@ -118,6 +118,7 @@ public sealed class PersonalSessionConcurrencyTests
     internal static async Task SecurityRace(PersonalSessionFixture f, string action)
     {
         var auth = await f.Login(); var admin = await f.Login("admin");
+        f.Fault.SessionSql.Clear();
         f.Fault.Arm("INSERT INTO \"RefreshTokenSessions\"");
         var refresh = f.Anonymous.PostAsJsonAsync("/api/auth/refresh", new RefreshInput(auth.RefreshToken));
         await f.Fault.Entered.Task.WaitAsync(TimeSpan.FromSeconds(10));
@@ -129,7 +130,10 @@ public sealed class PersonalSessionConcurrencyTests
             "deactivate" => client.PostAsync($"/api/users/{TestAccounts.Ipqa1Id}/deactivate", null),
             _ => f.Client(auth.AccessToken).PostAsJsonAsync("/api/auth/change-password", new ChangePasswordInput(TestAccounts.Password, "SyntheticChanged123A"))
         };
-        f.Fault.Release.TrySetResult(); (await refresh).EnsureSuccessStatusCode(); (await security).EnsureSuccessStatusCode();
+        f.Fault.Release.TrySetResult();
+        var rotated = await refresh; var secured = await security;
+        Assert.True(rotated.IsSuccessStatusCode, $"{action}: refresh {(int)rotated.StatusCode}; {await rotated.Content.ReadAsStringAsync()}; {string.Join("\n", f.Fault.SessionSql.TakeLast(12))}");
+        Assert.True(secured.IsSuccessStatusCode, $"{action}: security {(int)secured.StatusCode}; {await secured.Content.ReadAsStringAsync()}; {string.Join("\n", f.Fault.SessionSql.TakeLast(12))}");
         Assert.Equal(0, await f.Read(db => db.RefreshTokenSessions.CountAsync(x => x.UserId == TestAccounts.Ipqa1Id && x.RevokedAtUtc == null)));
         Assert.Equal(HttpStatusCode.Unauthorized, (await f.Client(auth.AccessToken).GetAsync("/api/me")).StatusCode);
         Assert.Equal(HttpStatusCode.Unauthorized, (await f.Anonymous.PostAsJsonAsync("/api/auth/refresh", new RefreshInput(auth.RefreshToken))).StatusCode);
