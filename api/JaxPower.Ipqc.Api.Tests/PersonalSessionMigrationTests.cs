@@ -73,7 +73,7 @@ public sealed class PersonalSessionMigrationTests
     public void PostgreSQL_sql_is_additive_native_typed_and_down_cannot_destroy_personal_history()
     {
         using var db = new IpqcDbContext(new DbContextOptionsBuilder<IpqcDbContext>().UseNpgsql("Host=localhost;Database=model_only;Username=unused").Options);
-        var sql = db.GetService<IMigrator>().GenerateScript(Previous, options: MigrationsSqlGenerationOptions.Idempotent);
+        var sql = db.GetService<IMigrator>().GenerateScript(Previous, Current, options: MigrationsSqlGenerationOptions.Idempotent);
         Assert.Contains("\"PersonalSessionId\" uuid", sql); Assert.Contains("\"PersonalSessionEnvironmentId\" character varying(200)", sql);
         Assert.Contains("WHERE \"PersonalSessionId\" IS NOT NULL AND \"RevokedAtUtc\" IS NULL", sql);
         Assert.Contains("IX_PatrolTasks_WorkflowVersion_LineId_ScheduledOccurrenceUtc_Id", sql);

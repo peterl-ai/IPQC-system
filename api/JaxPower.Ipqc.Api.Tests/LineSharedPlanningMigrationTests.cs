@@ -103,7 +103,7 @@ public sealed class LineSharedPlanningMigrationTests
     {
         using var db = new IpqcDbContext(new DbContextOptionsBuilder<IpqcDbContext>().UseNpgsql("Host=localhost;Database=model_only;Username=unused").Options);
         Assert.False(db.Database.HasPendingModelChanges());
-        var sql = db.GetService<IMigrator>().GenerateScript(Previous, options: MigrationsSqlGenerationOptions.Idempotent);
+        var sql = db.GetService<IMigrator>().GenerateScript(Previous, Current, options: MigrationsSqlGenerationOptions.Idempotent);
         Assert.Contains("\"SharedPlanRevision\" bigint", sql); Assert.Contains("\"PlanningSnapshotVersion\" integer", sql);
         Assert.Contains("\"PlanningSnapshotJson\" text", sql); Assert.Contains("CK_PatrolPlans_SharedAdmission", sql);
         Assert.Contains("IX_PatrolTasks_AdmittedLineOccurrence", sql); Assert.DoesNotContain("DROP TABLE", sql); Assert.DoesNotContain("DROP INDEX", sql);

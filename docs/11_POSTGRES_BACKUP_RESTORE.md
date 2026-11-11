@@ -1,5 +1,16 @@
 # PostgreSQL backup and restore runbook (Web v1)
 
+## R32-04 context authority recovery
+
+Retain WorkContexts/WorkContextAuditEvents during application rollback; destructive
+Down is prohibited. Close provenance/context ingress before reverting to a binary
+without account-security context hooks. Restore must reconcile account/session and
+sticky source revocations before reopening. If history cannot establish safe source
+eligibility, preserve bytes and accepted history, quarantine unaccepted dependencies
+and use a reviewed audited forward repair. Do not revive contexts or delete their audit.
+Actual operation receipts/F2/F3 recovery remains deferred. See
+[WorkContext contract](18_R3204_WORK_CONTEXT.md). No production restore drill is claimed.
+
 ## R32-02 authority recovery before reopening
 
 An older backup can resurrect refresh rows revoked after that backup. Keep ingress closed, scheduler/outbound integration and optional enrollment cleanup disabled during restore. Reconcile account security; rotate/reconcile personal JWT signing trust and revoke restored refresh authority before reopening authentication/new personal reads, recording the maintenance operation through the approved operating process. Require fresh online login/verification; an old client receipt is never online authority. Do not remove family columns, infer historical lineage or introduce a device epoch. Restored accepted business/audit history stays intact. Later WorkContext/Submit/evidence recovery adds its own reconciliation before those writes are enabled. No automatic production script or completed IT drill is claimed. R32-02 Down refuses destructive personal-family removal; application rollback retains schema and disables new personal business ingress. See [contract](16_R3202_PERSONAL_ACCESS.md).

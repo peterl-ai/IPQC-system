@@ -22,6 +22,10 @@ builder.Services.AddScoped<IPasswordHasher<ApplicationUser>, PasswordHasher<Appl
 builder.Services.AddScoped<LocalAuthService>();
 builder.Services.AddScoped<PersonalSessionStore>();
 builder.Services.AddScoped<PersonalAccess>();
+builder.Services.AddScoped<WorkContextStore>();
+builder.Services.AddScoped<WorkContextSecurity>();
+builder.Services.AddScoped<WorkContextService>();
+builder.Services.AddSingleton<WorkContextLimits>();
 builder.Services.AddScoped<LinePatrolReadService>();
 builder.Services.AddScoped<ConfiguredLineDirectory>();
 builder.Services.AddScoped<LineSharedPlanningStore>();
@@ -159,9 +163,15 @@ if (!app.Environment.IsDevelopment()) app.UseExceptionHandler();
 app.Use(async (context, next) =>
 {
     if (context.Request.Path.StartsWithSegments("/api/auth") || context.Request.Path.StartsWithSegments("/api/line-patrol") ||
-        context.Request.Path.StartsWithSegments("/api/line-patrol-plans"))
+        context.Request.Path.StartsWithSegments("/api/line-patrol-plans") || context.Request.Path.StartsWithSegments("/api/admin/work-contexts"))
         context.Response.Headers.CacheControl = "no-store";
     try { await next(context); }
+    catch (WorkContextSourceRevokedException ex) when (!context.Response.HasStarted)
+    {
+        context.Response.Headers.CacheControl = "no-store";
+        await Results.Problem(statusCode: 409, title: ex.Message,
+            extensions: new Dictionary<string, object?> { ["code"] = ex.Message, ["sourceContextIds"] = ex.SourceContextIds }).ExecuteAsync(context);
+    }
     catch (PersonalAccessException ex) when (!context.Response.HasStarted)
     {
         context.Response.Headers.CacheControl = "no-store";
@@ -198,6 +208,8 @@ app.Use(async (context, next) =>
     await next(context);
 });
 
+app.Use(WorkContextEndpoints.Limits);
+app.MapWorkContexts();
 app.MapAuth();
 app.MapLinePatrol();
 app.MapUsers();

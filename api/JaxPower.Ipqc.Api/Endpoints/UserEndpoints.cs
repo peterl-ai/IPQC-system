@@ -47,7 +47,7 @@ public static class UserEndpoints
         group.MapPost("/{id:guid}/reset-password", async (Guid id, ResetPasswordInput input,
             ApplicationUserService service, HttpContext http, CancellationToken ct) =>
         {
-            try { return await service.ResetPasswordAsync(id, input.TemporaryPassword,
+            try { return await service.ResetPasswordAsync(id, input.TemporaryPassword, IpqcPermissions.UserId(http.User),
                 IpqcPermissions.Username(http.User), ct) is { } row ? Results.Ok(row) : Results.NotFound(); }
             catch (Exception ex) when (Expected(ex)) { return Error(ex); }
         }).RequireAuthorization(IpqcPermissions.UsersWrite);
