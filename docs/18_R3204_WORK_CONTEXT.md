@@ -1,5 +1,10 @@
 # R32-04 WorkContext foundation
 
+R32-05 identity follow-up, 2026-11-12: [initial attempt implementation](19_R3205_INSPECTION_IDENTITY.md)
+adds real empty identities and explicit Admin initialization. The historical statements
+below that attempts were unimplemented describe their recorded earlier baseline.
+WorkContext still accepts no business work; shared `canExecute=false` remains.
+
 ## Security-fix reconciliation after PR #17, 2026-11-12
 
 **IMPLEMENTED / MERGED_TO_MAIN:** [PR #17](https://github.com/peterl-ai/IPQC-system/pull/17)

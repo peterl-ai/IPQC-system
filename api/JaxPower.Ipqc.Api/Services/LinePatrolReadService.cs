@@ -18,7 +18,10 @@ public sealed class LinePatrolReadService(IpqcDbContext db, ConfiguredLineDirect
 
     private IQueryable<PatrolTask> Tasks() => db.PatrolTasks.AsNoTracking()
         .Where(x => x.WorkflowVersion == WorkflowVersion.LineSharedV1)
-        .Include(x => x.Items).ThenInclude(x => x.Samples).Include(x => x.Submissions).Include(x => x.Reviews).AsSplitQuery();
+        .Include(x => x.Items).ThenInclude(x => x.Samples)
+        .Include(x => x.Items).ThenInclude(x => x.InspectionAttempts)
+        .Include(x => x.Items).ThenInclude(x => x.CurrentInspectionAttempt)
+        .Include(x => x.Submissions).Include(x => x.Reviews).AsSplitQuery();
 
     public async Task<PagedLineTasks> ListAsync(Guid lineId, int page, int pageSize, PersonalAuthority authority, CancellationToken ct)
     {

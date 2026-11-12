@@ -64,6 +64,7 @@ public sealed class LineSharedTaskGenerationService(IpqcDbContext db, LineShared
                             .ExecuteUpdateAsync(u => u.SetProperty(x => x.SharedPlanRevision, x => x.SharedPlanRevision), ct) != 1) return 0;
                         var task = Build(p, s, line, occurrence, now);
                         task.PlanningSnapshotJson = PlanningSnapshot.Serialize(PlanningSnapshot.Freeze(task, p, s, line));
+                        InitialInspectionIdentity.Create(task, now);
                         db.PatrolTasks.Add(task);
                         return 1;
                     }, ct);
