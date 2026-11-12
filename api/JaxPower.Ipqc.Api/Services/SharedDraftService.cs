@@ -25,12 +25,16 @@ public sealed class SharedDraftService(IpqcDbContext db, WorkContextStore store,
 
     public Task<DraftBatchResult> AcceptAsync(Guid taskId,DraftBatchInput input,ClaimsPrincipal actor,CancellationToken ct)
     {
-        var sources=input.Operations?.Take(51).Where(x=>x is not null).Select(x=>x.SourceWorkContextId).Distinct().ToArray() ?? [];
+        // Snapshot all request-owned collections before the store can await locks.
+        // Source-owner discovery and acceptance must use the very same manifest.
+        // Preserve malformed/null members for authenticated Shape validation.
+        var b=input with {
+            Operations=input.Operations?.Select(o=>o is null ? o! : o with { Dependencies=o.Dependencies?.ToList()! }).ToList()!,
+            AcceptedReferences=input.AcceptedReferences?.ToList()!,SourceProofs=input.SourceProofs?.ToList()!
+        };
+        var sources=SourceIds(b);
         return store.RunAsync(actor,false,taskId,sources,async authority=> {
-            Shape(input);
-            // Freeze request-owned collections before awaits/canonicalization; never persist proof transport.
-            var b=input with { Operations=input.Operations!.Select(o=>o with { Dependencies=o.Dependencies.ToList() }).ToList(),
-                AcceptedReferences=input.AcceptedReferences.ToList(),SourceProofs=input.SourceProofs.ToList() };
+            Shape(b);
             var task=await identity.Target(taskId,b.ExpectedTaskLineId,ct);
             if(b.ExpectedWorkflowVersion!=(int)task.WorkflowVersion || b.ExpectedEnvironmentId!=authority.EnvironmentId)
                 throw Error("DraftScopeMismatch");
@@ -140,6 +144,9 @@ public sealed class SharedDraftService(IpqcDbContext db, WorkContextStore store,
             return new DraftBatchResult(outcome,all,false);
         },ct);
     }
+
+    private static Guid[] SourceIds(DraftBatchInput b)=>b.Operations?.Take(51).Where(x=>x is not null)
+        .Select(x=>x.SourceWorkContextId).Distinct().ToArray() ?? [];
 
     private static void Shape(DraftBatchInput b)
     {

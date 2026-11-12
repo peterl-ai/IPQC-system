@@ -207,6 +207,24 @@ only to prove serialization; it does not fabricate a submission or claim a forma
 workflow producer. Existing planning/legacy/security provider regressions remain
 required. No green foundation test promotes any deferred subcase to PASS.
 
+## Developer self-review correction
+
+P2: the initial service copied mutable request collections only after awaiting the
+store's locks, although source-owner discovery used the earlier collection. A caller
+mutating those collections while waiting could make locking and validation inspect
+different manifests. Acceptance now snapshots all collections, including dependency
+lists, synchronously before lock discovery. Both providers run a deterministic
+direct-service regression that pauses the authority read, mutates the originals,
+then verifies only the frozen original operation is accepted. HTTP clients cannot
+directly mutate an already-bound server DTO; no remote exploit is claimed.
+
+Direct wrong-role/missing-family/forced-change negative checks and canonical
+dependency/set order, null/empty and zero vectors were strengthened during review.
+These are coverage improvements, not additional confirmed application defects.
+The older development fixes for projection staging/value attribution and receipt
+version/replay classification are part of the delivered implementation; no claim
+is made that a green test proves the deferred business producers exist.
+
 Stop after this one PR and verified CI for independent Final Review/Peter's merge
 decision. No F2, F3, Android, formal Submit/PQE, production data reconciliation or
 subsequent implementation PR is started automatically.

@@ -23,6 +23,13 @@ public sealed class SharedDraftCanonicalTests
         var hashes=new Dictionary<Guid,string>{{op.OperationId,DraftCanonical.Hash(actual)}};
         Assert.Equal(DraftCanonical.Batch(Id(1),b,hashes),DraftCanonical.Batch(Id(1),b with {SourceProofs=[]},hashes));
         Assert.DoesNotContain("not-in-business-hash",actual);
+        Assert.NotEqual(DraftCanonical.Operation(Id(1),b,op with {Data=new(null,0m,null)}),DraftCanonical.Operation(Id(1),b,op with {Data=new(null,0m,"")}));
+        Assert.Equal(DraftCanonical.Operation(Id(1),b,op with {Data=new(null,0m,null)}),DraftCanonical.Operation(Id(1),b,op with {Data=new(null,-0.000m,null)}));
+        var references=new List<DraftOperationReference>{new(Id(12),new string('A',64)),new(Id(11),new string('B',64))};
+        Assert.Equal(DraftCanonical.Operation(Id(1),b,op with {Dependencies=references}),DraftCanonical.Operation(Id(1),b,op with {Dependencies=references.AsEnumerable().Reverse().ToList()}));
+        var multiple=new Dictionary<Guid,string>{{Id(12),new string('A',64)},{Id(11),new string('B',64)}};
+        Assert.Equal(DraftCanonical.Batch(Id(1),b with {AcceptedReferences=references},multiple),
+            DraftCanonical.Batch(Id(1),b with {AcceptedReferences=references.AsEnumerable().Reverse().ToList()},multiple.Reverse().ToDictionary()));
     }
     [Fact] public async Task OP11_No_source_secret_or_credentials_in_business_storage_or_responses()
     {await using var f=await PersonalSessionFixture.CreateAsync();await Redaction(f);}

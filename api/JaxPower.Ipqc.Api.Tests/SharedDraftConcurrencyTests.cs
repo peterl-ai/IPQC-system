@@ -10,6 +10,22 @@ namespace JaxPower.Ipqc.Api.Tests;
 
 public sealed class SharedDraftConcurrencyTests
 {
+    [Fact] public async Task OP10_Request_manifest_is_frozen_before_waiting_for_authority()
+    {await using var f=await PersonalSessionFixture.CreateAsync();await FrozenRequest(f);}
+    internal static async Task FrozenRequest(PersonalSessionFixture f) {
+        var s=await SharedDraftFixture.Setup(f);var op=s.Capture();var b=s.Batch(op);
+        using var scope=f.Factory.Services.CreateScope();var service=scope.ServiceProvider.GetRequiredService<SharedDraftService>();
+        f.Fault.Arm("FROM \"ApplicationUsers\"");
+        var accepting=service.AcceptAsync(s.TaskId,b,WorkContextFixture.Principal(s.B),default);
+        DraftBatchResult result;
+        try {
+            await f.Fault.Entered.Task.WaitAsync(TimeSpan.FromSeconds(15));
+            op.Dependencies.Add(new(Guid.NewGuid(),new string('A',64)));
+            b.Operations.Clear();b.AcceptedReferences.Add(new(Guid.NewGuid(),new string('B',64)));b.SourceProofs.Clear();
+        } finally {f.Fault.Release.TrySetResult();result=await accepting;}
+        Assert.Equal(op.OperationId,Assert.Single(result.Operations).OperationId);
+        Assert.Equal(s.Source.Context.UserId,result.Operations[0].ContributorUserId);await s.AssertCounts(1,1,1,1);
+    }
     [Fact] public async Task OP10_Multi_source_reverse_manifests_share_one_account_order()
     {await using var f=await PersonalSessionFixture.CreateAsync();await MultiSource(f);}
     internal static async Task MultiSource(PersonalSessionFixture f) {

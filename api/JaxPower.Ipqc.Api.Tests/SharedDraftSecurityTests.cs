@@ -100,6 +100,19 @@ public sealed class SharedDraftSecurityTests
         await Deny(async()=>await service.ReadAsync(s.TaskId,fake,default));
         await Deny(async()=>await service.BatchReceiptAsync(s.TaskId,b.BatchId,fake,default));
         await Deny(async()=>await service.OperationReceiptAsync(s.TaskId,b.Operations[0].OperationId,fake,default));
+        var noFamilyPrincipal=new ClaimsPrincipal(new ClaimsIdentity(WorkContextFixture.Principal(s.B).Claims.Where(c=>c.Type!=PersonalAccess.FamilyClaim),"synthetic"));
+        await Deny(async()=>await service.AcceptAsync(s.TaskId,b,noFamilyPrincipal,default));
+        foreach(var name in new[]{"admin","pqe"}) {
+            var role=await f.Login(name);
+            var denied=await Assert.ThrowsAsync<PersonalAccessException>(()=>service.AcceptAsync(s.TaskId,b,WorkContextFixture.Principal(role),default));
+            Assert.Equal(403,denied.Status);
+        }
+        await f.Edit(async db=>(await db.ApplicationUsers.SingleAsync(x=>x.Id==s.B.User.Id)).MustChangePassword=true);
+        var forced=await Assert.ThrowsAsync<PersonalAccessException>(()=>service.AcceptAsync(s.TaskId,b,WorkContextFixture.Principal(s.B),default));
+        Assert.Equal(403,forced.Status);
+        Assert.Equal(HttpStatusCode.Forbidden,(await s.Client().PostAsync(url,new StringContent("{broken",Encoding.UTF8,"application/json"))).StatusCode);
+        await f.Edit(async db=>(await db.ApplicationUsers.SingleAsync(x=>x.Id==s.B.User.Id)).MustChangePassword=false);
+        await s.AssertCounts(0,0,0,0);
         var accepted=await s.Accept(b);var op=Assert.Single(accepted.Operations);
         await f.Edit(async db=>(await db.PatrolTasks.SingleAsync(x=>x.Id==s.TaskId)).Status="Completed");
         Assert.Equal(op,(await s.Client().GetFromJsonAsync<DraftOperationReceipt>(s.Root+$"/operations/{op.OperationId}/receipt"))!);

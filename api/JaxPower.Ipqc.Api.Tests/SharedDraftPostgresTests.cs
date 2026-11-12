@@ -2,6 +2,7 @@ namespace JaxPower.Ipqc.Api.Tests;
 
 public sealed class SharedDraftPostgresTests
 {
+    [DisposablePostgresFact] public Task Frozen_request_manifest()=>Run(SharedDraftConcurrencyTests.FrozenRequest);
     [DisposablePostgresFact] public Task Multi_source_account_order()=>Run(SharedDraftConcurrencyTests.MultiSource);
     [DisposablePostgresFact] public Task Line_first()=>Run(f=>SharedDraftConcurrencyTests.LineRace(f,true));
     [DisposablePostgresFact] public Task Acceptance_before_line_deactivation()=>Run(f=>SharedDraftConcurrencyTests.LineRace(f,false));
