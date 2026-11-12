@@ -41,6 +41,13 @@ public sealed class WorkContextService(IpqcDbContext db, WorkContextStore store,
             var receipt = LinePatrolReadService.Receipt(a);
             var proof = Base64UrlEncoder.Encode(RandomNumberGenerator.GetBytes(32));
             var user = await db.ApplicationUsers.AsNoTracking().SingleAsync(x => x.Id == a.UserId, ct);
+            // Publish issuance on the already NO KEY UPDATE-locked owner's MVCC row. A waiting
+            // SERIALIZABLE security writer must retry its stale snapshot after this commits.
+            // Keep AuthVersion/other business values and READ COMMITTED family checks unchanged;
+            // making issuance SERIALIZABLE would instead miss a preceding RC-only logout.
+            if (db.Database.IsNpgsql() && await db.ApplicationUsers.Where(x => x.Id == a.UserId)
+                .ExecuteUpdateAsync(u => u.SetProperty(x => x.AuthVersion, x => x.AuthVersion), ct) != 1)
+                throw new DbUpdateConcurrencyException("WorkContext owner changed during issuance.");
             var c = new WorkContext { Id = Guid.NewGuid(), ProofSecretHash = Hash(proof), EnvironmentId = a.EnvironmentId,
                 UserId = a.UserId, IssuedPersonalSessionId = a.PersonalSessionId, IssuedAuthVersion = user.AuthVersion,
                 TaskId = t.Id, LineId = t.LineId!.Value, IssuedAtUtc = a.VerifiedAtUtc,

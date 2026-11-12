@@ -29,9 +29,25 @@ public sealed class WorkContextConcurrencyTests
         issue ??= f.Client(auth.AccessToken).PostAsJsonAsync(Root(task), Input(f));
         reset ??= SecurityAction();
         f.Fault.Release.TrySetResult();
-        var r = await issue; await reset;
+        var r = await issue; var changed = await reset;
+        Assert.NotNull(changed);
+        Assert.Equal(action != "deactivate", changed.IsActive);
+        Assert.Equal(action == "role" ? "PQE" : "IPQA", changed.Role);
+        var account = await f.Read(db => db.ApplicationUsers.AsNoTracking().SingleAsync(x => x.Id == TestAccounts.Ipqa1Id));
+        Assert.Equal(changed.IsActive, account.IsActive); Assert.Equal(changed.Role, account.Role);
+        Assert.Equal(action == "reset", account.MustChangePassword); Assert.Equal(2, account.AuthVersion);
+        Assert.Equal(0, await f.Read(db => db.RefreshTokenSessions.CountAsync(x => x.UserId == TestAccounts.Ipqa1Id && x.RevokedAtUtc == null)));
         Assert.Equal(securityFirst ? HttpStatusCode.Unauthorized : HttpStatusCode.Created, r.StatusCode);
+        Assert.Equal(securityFirst ? 0 : 1, await f.Read(db => db.WorkContexts.CountAsync()));
         Assert.Equal(0, await f.Read(db => db.WorkContexts.CountAsync(x => x.SecurityRevokedAtUtc == null)));
+        Assert.Equal(securityFirst ? 0 : 2, await f.Read(db => db.WorkContextAuditEvents.CountAsync()));
+        if (!securityFirst)
+        {
+            var revoked = await f.Read(db => db.WorkContextAuditEvents.SingleAsync(x => x.Action == "ContextSecurityRevoked"));
+            Assert.Equal(TestAccounts.AdminId, revoked.ActorUserId);
+            Assert.Equal(TestAccounts.Ipqa1Id, revoked.SourceUserId);
+            Assert.NotNull(revoked.BeforeJson); Assert.NotEmpty(revoked.AfterJson);
+        }
     }
     [Theory][InlineData(false)][InlineData(true)]
     public async Task R04_23_Preflight_and_explicit_revocation_serialize(bool revokeFirst)
