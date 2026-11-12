@@ -57,7 +57,8 @@ locks. Existing Admin/PQE/legacy account API permissions and family compatibilit
 unchanged. No ownership transfer or legacy write bypass. Historical receipt recovery
 requires current task-read authority, but not an editable task/current old attempt.
 
-Every response retains `canExecute=false`; batch results also say
+Task summary, draft and batch availability retains `canExecute=false`; receipt DTOs
+describe historical facts and grant no execution authority. Batch results also say
 `acceptsFormalInspection=false`, and draft completeness is
 `NotEvaluatedForFormalSubmission`. A sample's server judgment is not an item/formal
 completion decision. No GET creates a draft, context, attempt, audit or acceptance fact.
@@ -221,6 +222,9 @@ directly mutate an already-bound server DTO; no remote exploit is claimed.
 Direct wrong-role/missing-family/forced-change negative checks and canonical
 dependency/set order, null/empty and zero vectors were strengthened during review.
 These are coverage improvements, not additional confirmed application defects.
+P3 documentation correction: availability flags belong to task/draft/batch outputs;
+receipt DTOs report historical facts and do not contain a canExecute property. The
+API section now states that distinction instead of claiming every response has it.
 The older development fixes for projection staging/value attribution and receipt
 version/replay classification are part of the delivered implementation; no claim
 is made that a green test proves the deferred business producers exist.
