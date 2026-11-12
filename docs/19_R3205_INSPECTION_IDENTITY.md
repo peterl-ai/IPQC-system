@@ -135,6 +135,12 @@ explicitly insert their historical child rows rather than assuming navigation at
 inserted them. Logout race assertions bind the actual closing family and preserve other
 families; they do not incorrectly require all Admin sessions to close.
 
+Developer self-review of the complete base-to-HEAD diff found a P2 test-oracle gap:
+the first cross-task negative used an unadmitted target and could reject before
+exercising joint scope. It now generates a second genuinely initialized authorized
+task on the other configured line, proves its read succeeds, then requires404 for
+the first task's attempt under that task. SQLite and live PG invoke the same scenario.
+
 ## Deferred boundary
 
 No captured sample/ClientSampleId mapping, SharedDraft/DraftVersion write, operation

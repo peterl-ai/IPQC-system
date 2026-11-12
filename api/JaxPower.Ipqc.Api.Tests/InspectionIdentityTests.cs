@@ -67,13 +67,18 @@ public sealed class InspectionIdentityTests
             Assert.Equal(HttpStatusCode.NotFound, (await client.GetAsync(Root(task) + "/" + item.SourcePatrolStandardItemId)).StatusCode);
         }
         Assert.Equal(HttpStatusCode.NotFound, (await client.GetAsync(Root(task) + "/" + Guid.NewGuid())).StatusCode);
-        var other = await f.Task();
-        Assert.Equal(HttpStatusCode.NotFound, (await client.GetAsync(Root(other) + "/" + data.Items[0].InspectionAttemptId)).StatusCode);
         Assert.Equal(HttpStatusCode.Conflict, (await client.GetAsync(Root(task) + "?expectedTaskLineId=" + f.Line2)).StatusCode);
         var again = (await client.GetFromJsonAsync<InspectionIdentityOutput>(Root(task)))!;
         Assert.Equal(data.Items, again.Items);
         await WorkContextFixture.Issue(f, task, auth);
         Assert.Equal(before.Attempts, await f.Read(db => db.InspectionAttempts.CountAsync()));
+        // Use another fully initialized, authorized task: an unsupported target could
+        // reject early and falsely appear to prove the actual cross-task boundary.
+        await LineSharedPlanningFixture.Plan(f,await LineSharedPlanningFixture.Standard(f),f.Line2);
+        Assert.Equal(1,await LineSharedPlanningFixture.Generate(f));
+        var other = (await LineSharedPlanningFixture.Tasks(f)).Single(x=>x.LineId==f.Line2).Id;
+        Assert.Equal("Initialized",(await client.GetFromJsonAsync<InspectionIdentityOutput>(Root(other)))!.State);
+        Assert.Equal(HttpStatusCode.NotFound,(await client.GetAsync(Root(other)+"/"+data.Items[0].InspectionAttemptId)).StatusCode);
         await f.Read(async db => {
             var t = await db.PatrolTasks.SingleAsync(x => x.Id == task);
             Assert.Equal(before.Task.Status, t.Status); Assert.Null(t.StartedAtUtc); Assert.Equal(0, t.CurrentRevisionNo);
