@@ -1,5 +1,73 @@
 # R32-04 WorkContext foundation
 
+## Security-fix reconciliation after PR #17, 2026-11-12
+
+**IMPLEMENTED / MERGED_TO_MAIN:** [PR #17](https://github.com/peterl-ai/IPQC-system/pull/17)
+merged as `b76972bc1f24d7e32e9537e263782d4960354acb`, from reviewed feature HEAD
+`cdbaecf6b4bf6755ed4c1dcb900fd7ec00b44940`. This is the verified current main
+baseline for reconciling PR #16, not the older foundation-only baseline below.
+
+Exact merged-main [CI 43297756405](https://github.com/peterl-ai/IPQC-system/actions/runs/43297756405)
+completed SUCCESS: Release build0 warnings/errors; backend375 PASS/0 FAIL/50
+opt-in PostgreSQL SKIP; separate real PostgreSQL17 job50 PASS/0 FAIL/0 SKIP;
+Web90 PASS/18 files with lint/typecheck/build PASS. The PG job executes the
+security-race regressions; backend SKIPs are not executed PostgreSQL evidence.
+
+PR #17 confirmed the stale SERIALIZABLE snapshot after waiting for issuance's
+account lock. Its PostgreSQL-only `AuthVersion = AuthVersion` publication fence
+forces stale security writers to retry with40001, without changing logical
+AuthVersion, existing isolation levels or current-family authentication.
+Historical context reconciliation was not performed and is not implied.
+
+The earlier failing runs remain historical evidence, including
+[43284538286 attempt1](https://github.com/peterl-ai/IPQC-system/actions/runs/43284538286/attempts/1)
+and [43285887976](https://github.com/peterl-ai/IPQC-system/actions/runs/43285887976).
+Their earlier unresolved-security/hold statements below describe the pre-fix
+state; they are superseded by this verified fix, not erased or reclassified as
+passing reruns. PR #16 still awaits independent Final Review and Peter's merge
+decision. D01(A) remains approved; other technical proposals and all22 future
+identity/operation acceptance cases remain proposed / DEFERRED / NOT RUN.
+No shared inspection, F2/F3 or Android is activated; `canExecute=false` remains.
+
+## Post-merge status and proposed follow-up, 2026-11-12
+
+Foundation status: **MERGED_TO_MAIN**. [PR #15](https://github.com/peterl-ai/IPQC-system/pull/15)
+merged as `6fa84de00d5e719ab4474a77daa89d55eea4f086`, from feature HEAD
+`846f984b67d74d87595945eaca4e86ad01285ba9`. Merge CI
+[43262427172](https://github.com/peterl-ai/IPQC-system/actions/runs/43262427172)
+passed: backend374 PASS/0 FAIL/33 opt-in SKIP, separate real PostgreSQL17
+33 PASS/0 FAIL/0 SKIP, Web90 PASS/18 files plus lint/typecheck/build.
+These verify the foundation, not deferred operation acceptance or execution.
+
+The [proposed shared inspection identity/acceptance contract](architecture/IPQC_SHARED_INSPECTION_IDENTITY_ACCEPTANCE_CONTRACT_V1_2026-11-12.md)
+distinguishes approved requirements, implemented facts, technical proposals,
+Peter-approved D01(A) and DEFERRED / NOT RUN cases. Real attempt identity is a
+prerequisite to operation acceptance; no fake attempt/sample or accepted receipt
+is introduced. DraftVersion/ledger/receipts, business manifests/quarantine,
+inspection attempts, F2/F3 and Android remain unimplemented. WorkContext preflight
+still accepts no work, and all shared tasks remain `canExecute=false`.
+
+Peter's 2026-11-12 standing authorization permits later clearly scoped work under
+already-approved requirements without repeated routine implementation approval.
+Material unresolved decisions still require Peter. Peter selected D01(A): future
+task generation creates initial attempts; eligible existing tasks use explicit
+initialization. This does not approve all other technical proposals or implement
+attempts. Merge, production operations and destructive cleanup remain excluded.
+This task authorizes only the two-document PR and stops for independent review.
+
+Historical delivery (before PR #17): PR #16's earlier documentation HEAD `a318033f432da7ca64be710c797466b97232a7e4`
+exposed an unchanged PostgreSQL security-race test failure: Issue_before_deactivation,
+expected0 unrevoked contexts, actual1 (PR CI43284538286 attempt1). The companion
+push PG job passed33/0/0; root cause remains unresolved. Peter chose to keep the
+documentation scope, defer merge and arrange security work separately. A passing
+retry is not a fix; no application/test/CI change is included here.
+
+The self-review/authorization language below records the pre-merge foundation
+delivery. Its “unmerged” migration wording is historical: that definition is now
+merged and must not be rewritten. Persistent early-draft databases still require
+owner-reviewed reconciliation. Original tests, findings and deferred evidence
+remain recorded below without being relabeled as new-contract results.
+
 ## Mandatory developer self-review, 2026-11-12
 
 The complete main-to-HEAD application, test, CI, migration and generated-model diff
