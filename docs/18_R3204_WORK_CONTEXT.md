@@ -1,5 +1,35 @@
 # R32-04 WorkContext foundation
 
+## Post-merge status and proposed follow-up, 2026-11-12
+
+Foundation status: **MERGED_TO_MAIN**. [PR #15](https://github.com/peterl-ai/IPQC-system/pull/15)
+merged as `6fa84de00d5e719ab4474a77daa89d55eea4f086`, from feature HEAD
+`846f984b67d74d87595945eaca4e86ad01285ba9`. Merge CI
+[43262427172](https://github.com/peterl-ai/IPQC-system/actions/runs/43262427172)
+passed: backend374 PASS/0 FAIL/33 opt-in SKIP, separate real PostgreSQL17
+33 PASS/0 FAIL/0 SKIP, Web90 PASS/18 files plus lint/typecheck/build.
+These verify the foundation, not deferred operation acceptance or execution.
+
+The [proposed shared inspection identity/acceptance contract](architecture/IPQC_SHARED_INSPECTION_IDENTITY_ACCEPTANCE_CONTRACT_V1_2026-11-12.md)
+distinguishes approved requirements, implemented facts, technical proposals,
+OPEN DECISION D01 and DEFERRED / NOT RUN cases. Real attempt identity is a
+prerequisite to operation acceptance; no fake attempt/sample or accepted receipt
+is introduced. DraftVersion/ledger/receipts, business manifests/quarantine,
+inspection attempts, F2/F3 and Android remain unimplemented. WorkContext preflight
+still accepts no work, and all shared tasks remain `canExecute=false`.
+
+Peter's 2026-11-12 standing authorization permits later clearly scoped work under
+already-approved requirements without repeated routine implementation approval.
+Material unresolved decisions still require Peter; proposal publication does not
+decide D01. Merge, production operations and destructive cleanup remain excluded.
+This task authorizes only the two-document PR and stops for independent review.
+
+The self-review/authorization language below records the pre-merge foundation
+delivery. Its “unmerged” migration wording is historical: that definition is now
+merged and must not be rewritten. Persistent early-draft databases still require
+owner-reviewed reconciliation. Original tests, findings and deferred evidence
+remain recorded below without being relabeled as new-contract results.
+
 ## Mandatory developer self-review, 2026-11-12
 
 The complete main-to-HEAD application, test, CI, migration and generated-model diff
