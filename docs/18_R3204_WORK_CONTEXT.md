@@ -12,7 +12,7 @@ These verify the foundation, not deferred operation acceptance or execution.
 
 The [proposed shared inspection identity/acceptance contract](architecture/IPQC_SHARED_INSPECTION_IDENTITY_ACCEPTANCE_CONTRACT_V1_2026-11-12.md)
 distinguishes approved requirements, implemented facts, technical proposals,
-OPEN DECISION D01 and DEFERRED / NOT RUN cases. Real attempt identity is a
+Peter-approved D01(A) and DEFERRED / NOT RUN cases. Real attempt identity is a
 prerequisite to operation acceptance; no fake attempt/sample or accepted receipt
 is introduced. DraftVersion/ledger/receipts, business manifests/quarantine,
 inspection attempts, F2/F3 and Android remain unimplemented. WorkContext preflight
@@ -20,9 +20,18 @@ still accepts no work, and all shared tasks remain `canExecute=false`.
 
 Peter's 2026-11-12 standing authorization permits later clearly scoped work under
 already-approved requirements without repeated routine implementation approval.
-Material unresolved decisions still require Peter; proposal publication does not
-decide D01. Merge, production operations and destructive cleanup remain excluded.
+Material unresolved decisions still require Peter. Peter selected D01(A): future
+task generation creates initial attempts; eligible existing tasks use explicit
+initialization. This does not approve all other technical proposals or implement
+attempts. Merge, production operations and destructive cleanup remain excluded.
 This task authorizes only the two-document PR and stops for independent review.
+
+PR #16's earlier documentation HEAD `a318033f432da7ca64be710c797466b97232a7e4`
+exposed an unchanged PostgreSQL security-race test failure: Issue_before_deactivation,
+expected0 unrevoked contexts, actual1 (PR CI43284538286 attempt1). The companion
+push PG job passed33/0/0; root cause remains unresolved. Peter chose to keep the
+documentation scope, defer merge and arrange security work separately. A passing
+retry is not a fix; no application/test/CI change is included here.
 
 The self-review/authorization language below records the pre-merge foundation
 delivery. Its “unmerged” migration wording is historical: that definition is now
