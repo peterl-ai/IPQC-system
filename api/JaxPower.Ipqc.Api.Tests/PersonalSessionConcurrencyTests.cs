@@ -100,7 +100,7 @@ public sealed class PersonalSessionConcurrencyTests
         f.Fault.Arm("UPDATE \"ApplicationUsers\"");
         using var scope = f.Factory.Services.CreateScope();
         var reset = scope.ServiceProvider.GetRequiredService<ApplicationUserService>().ResetPasswordAsync(
-            TestAccounts.Ipqa1Id, "SyntheticChanged123A", "admin", default);
+            TestAccounts.Ipqa1Id, "SyntheticChanged123A", TestAccounts.AdminId, "admin", default);
         await f.Fault.Entered.Task.WaitAsync(TimeSpan.FromSeconds(10));
         var oldLogin = f.Anonymous.PostAsJsonAsync("/api/auth/login", new LoginInput("dev-ipqa-1", TestAccounts.Password, "Native"));
         f.Fault.Release.TrySetResult(); await reset;
@@ -152,7 +152,7 @@ public sealed class PersonalSessionConcurrencyTests
             var service = scope.ServiceProvider.GetRequiredService<LocalAuthService>();
             await Assert.ThrowsAsync<DbUpdateException>(async () =>
             {
-                if (action == "reset") await users.ResetPasswordAsync(TestAccounts.Ipqa1Id, "SyntheticChanged123A", "admin", default);
+                if (action == "reset") await users.ResetPasswordAsync(TestAccounts.Ipqa1Id, "SyntheticChanged123A", TestAccounts.AdminId, "admin", default);
                 else if (action == "role") await users.UpdateAsync(TestAccounts.Ipqa1Id, new UserUpdateInput("Changed", "PQE"), TestAccounts.AdminId, "admin", default);
                 else await service.ChangePasswordAsync(TestAccounts.Ipqa1Id, TestAccounts.Password, "SyntheticChanged123A", default);
             });

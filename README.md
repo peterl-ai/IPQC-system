@@ -20,6 +20,12 @@ Admin/PQE shared Plans now use actual configured lines, fixed New York Day07/Nig
 
 ## Product direction
 
+The first R32-04 backend foundation adds task-scoped WorkContext source proofs,
+read-only preflight and atomic source-security revocation/audit. See
+[contracts and verification boundaries](docs/18_R3204_WORK_CONTEXT.md).
+Shared tasks remain `canExecute=false`; no shared inspection acceptance, Submit,
+photos or Android is activated. PR review is separate from production authorization.
+
 The product has two major clients:
 
 1. **Web application** — Phase 1. Used by Admin, PQE, and IPQA for Line Patrol configuration, scheduling, approval, history, reports, and administration.

@@ -16,7 +16,7 @@ public sealed class UserInputException(Dictionary<string, string[]> errors) : Ex
 }
 
 public sealed class ApplicationUserService(IpqcDbContext db, IPasswordHasher<ApplicationUser> hasher,
-    TimeProvider clock, PersonalSessionStore sessions)
+    TimeProvider clock, PersonalSessionStore sessions, WorkContextSecurity contexts)
 {
     public static bool ValidRole(string? role) => role is "Admin" or "PQE" or "IPQA";
     private static DateTime Utc(DateTime value) => DateTime.SpecifyKind(value, DateTimeKind.Utc);
@@ -100,12 +100,15 @@ public sealed class ApplicationUserService(IpqcDbContext db, IPasswordHasher<App
                     (await db.PatrolPlanAssignees.AnyAsync(x => x.UserId == id && x.IsActive && x.PatrolPlan.IsEnabled, ct) ||
                      await db.PatrolTasks.AnyAsync(x => x.AssignedInspectorUserId == id && x.Status != "Completed", ct)))
                     throw new UserConflictException("IPQA has an enabled Plan or unfinished Task assignment.");
+                var losesEligibility = user.IsActive && !nextActive || user.Role == "IPQA" && nextRole != "IPQA";
                 var changedSecurity = user.Role != nextRole || user.IsActive != nextActive;
                 user.Role = nextRole!;
                 user.IsActive = nextActive;
                 if (update is not null) user.DisplayName = update.DisplayName!.Trim();
                 user.UpdatedAtUtc = clock.GetUtcNow().UtcDateTime;
                 user.UpdatedBy = actor;
+                if (losesEligibility)
+                    await contexts.RevokeUserAsync(id, actorId, actor, !nextActive ? "AccountDeactivated" : "IpqaEligibilityLost", ct);
                 if (changedSecurity)
                 {
                     user.AuthVersion++;
@@ -121,7 +124,7 @@ public sealed class ApplicationUserService(IpqcDbContext db, IPasswordHasher<App
         { throw new UserConflictException("User state changed concurrently. Retry the operation."); }
     }
 
-    public async Task<UserOutput?> ResetPasswordAsync(Guid id, string? password, string actor,
+    public async Task<UserOutput?> ResetPasswordAsync(Guid id, string? password, Guid actorId, string actor,
         CancellationToken ct)
     {
         if (!LocalAuthService.ValidPassword(password))
@@ -130,6 +133,7 @@ public sealed class ApplicationUserService(IpqcDbContext db, IPasswordHasher<App
         {
             var user = await db.ApplicationUsers.FindAsync([id], ct);
             if (user is null) return null;
+            await contexts.RevokeUserAsync(id, actorId, actor, "AdminPasswordReset", ct);
             user.PasswordHash = hasher.HashPassword(user, password!);
             user.MustChangePassword = true;
             user.AuthVersion++;
