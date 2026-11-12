@@ -1,10 +1,42 @@
 using Microsoft.EntityFrameworkCore;
 using Xunit;
+using Xunit.Abstractions;
 
 namespace JaxPower.Ipqc.Api.Tests;
 
-public sealed class WorkContextPostgresTests
+public sealed class WorkContextPostgresTests(ITestOutputHelper output)
 {
+    [DisposablePostgresFact] public async Task Snapshot_waiter_deactivation() { await using var f = await PersonalSessionFixture.CreateAsync(true); await WorkContextRevocationRace.WaitingSecurity(f, "deactivate", output); }
+    [DisposablePostgresFact] public async Task Snapshot_waiter_role_loss() { await using var f = await PersonalSessionFixture.CreateAsync(true); await WorkContextRevocationRace.WaitingSecurity(f, "role", output); }
+    [DisposablePostgresFact] public async Task Snapshot_waiter_password_reset() { await using var f = await PersonalSessionFixture.CreateAsync(true); await WorkContextRevocationRace.WaitingSecurity(f, "reset", output); }
+    [DisposablePostgresFact] public async Task Unprobed_waiter_deactivation() { await using var f = await PersonalSessionFixture.CreateAsync(true); await WorkContextRevocationRace.WaitingSecurity(f, "deactivate", output, false); }
+    [DisposablePostgresFact] public async Task Unprobed_waiter_role_loss() { await using var f = await PersonalSessionFixture.CreateAsync(true); await WorkContextRevocationRace.WaitingSecurity(f, "role", output, false); }
+    [DisposablePostgresFact] public async Task Unprobed_waiter_password_reset() { await using var f = await PersonalSessionFixture.CreateAsync(true); await WorkContextRevocationRace.WaitingSecurity(f, "reset", output, false); }
+    [DisposablePostgresFact] public async Task Logout_before_waiting_issuance() { await using var f = await PersonalSessionFixture.CreateAsync(true); await WorkContextRevocationRace.FamilyBeforeIssuance(f, true, output); }
+    [DisposablePostgresFact] public async Task Refresh_before_waiting_issuance() { await using var f = await PersonalSessionFixture.CreateAsync(true); await WorkContextRevocationRace.FamilyBeforeIssuance(f, false, output); }
+    [DisposablePostgresFact] public async Task Normal_logout() { await using var f = await PersonalSessionFixture.CreateAsync(true); await WorkContextSecurityTests.NormalSessionChange(f, "logout"); }
+    [DisposablePostgresFact] public async Task Normal_expiry() { await using var f = await PersonalSessionFixture.CreateAsync(true); await WorkContextSecurityTests.NormalSessionChange(f, "expiry"); }
+    [DisposablePostgresFact] public async Task Normal_self_password() { await using var f = await PersonalSessionFixture.CreateAsync(true); await WorkContextSecurityTests.NormalSessionChange(f, "self-password"); }
+    [DisposablePostgresFact] public async Task Normal_refresh() { await using var f = await PersonalSessionFixture.CreateAsync(true); await WorkContextSecurityTests.NormalSessionChange(f, "refresh"); }
+    [DisposablePostgresFact] public async Task Deactivation_rollback() { await using var f = await PersonalSessionFixture.CreateAsync(true); await WorkContextSecurityTests.Rollback(f, "deactivate"); }
+    [DisposablePostgresFact] public async Task Role_loss_rollback() { await using var f = await PersonalSessionFixture.CreateAsync(true); await WorkContextSecurityTests.Rollback(f, "role"); }
+    [DisposablePostgresFact] public async Task Reactivation_stays_revoked() { await using var f = await PersonalSessionFixture.CreateAsync(true); await WorkContextSecurityTests.Security(f, "deactivate"); }
+    [DisposablePostgresFact] public async Task Role_restoration_stays_revoked() { await using var f = await PersonalSessionFixture.CreateAsync(true); await WorkContextSecurityTests.Security(f, "role"); }
+    [DisposablePostgresFact] public async Task Issuance_preserves_owner_and_session_business_values()
+    {
+        await using var f = await PersonalSessionFixture.CreateAsync(true);
+        var task = await WorkContextFixture.Task(f); var auth = await f.Login();
+        async Task<string> Facts() => await f.Read(async db => System.Text.Json.JsonSerializer.Serialize(new {
+            User = await db.ApplicationUsers.AsNoTracking().SingleAsync(x => x.Id == TestAccounts.Ipqa1Id),
+            Sessions = await db.RefreshTokenSessions.AsNoTracking().Where(x => x.UserId == TestAccounts.Ipqa1Id).OrderBy(x => x.Id)
+                .Select(x => new { x.Id, x.TokenHash, x.AuthVersion, x.CreatedAtUtc, x.ExpiresAtUtc, x.RevokedAtUtc,
+                    x.ReplacedBySessionId, x.PersonalSessionId, x.PersonalSessionEnvironmentId }).ToListAsync() }));
+        var before = await Facts();
+        await WorkContextFixture.Issue(f, task, auth);
+        Assert.Equal(before, await Facts());
+        Assert.Equal(1, await f.Read(db => db.WorkContexts.CountAsync()));
+        Assert.Equal(1, await f.Read(db => db.WorkContextAuditEvents.CountAsync()));
+    }
     [DisposablePostgresFact] public async Task Foundation() { await using var f = await PersonalSessionFixture.CreateAsync(true); await WorkContextTests.Foundation(f); }
     [DisposablePostgresFact] public async Task Issue_first() { await using var f = await PersonalSessionFixture.CreateAsync(true); await WorkContextConcurrencyTests.IssueRace(f, false); }
     [DisposablePostgresFact] public async Task Reset_first() { await using var f = await PersonalSessionFixture.CreateAsync(true); await WorkContextConcurrencyTests.IssueRace(f, true); }
