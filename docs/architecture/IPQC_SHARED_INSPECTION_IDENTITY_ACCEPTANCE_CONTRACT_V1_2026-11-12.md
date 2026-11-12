@@ -2,6 +2,35 @@
 
 Date: 2026-11-12. Status: **PROPOSED TECHNICAL CONTRACT — D01 option A separately approved by Peter; other proposals remain under documentation review, not implemented or globally signed off.**
 
+## Security-fix reconciliation after PR #17, 2026-11-12
+
+**IMPLEMENTED / MERGED_TO_MAIN:** [PR #17](https://github.com/peterl-ai/IPQC-system/pull/17)
+merged as `b76972bc1f24d7e32e9537e263782d4960354acb`, from reviewed feature HEAD
+`cdbaecf6b4bf6755ed4c1dcb900fd7ec00b44940`. This is the verified current main
+baseline for reconciling PR #16, not the older foundation-only baseline below.
+
+Exact merged-main [CI 43297756405](https://github.com/peterl-ai/IPQC-system/actions/runs/43297756405)
+completed SUCCESS: Release build0 warnings/errors; backend375 PASS/0 FAIL/50
+opt-in PostgreSQL SKIP; separate real PostgreSQL17 job50 PASS/0 FAIL/0 SKIP;
+Web90 PASS/18 files with lint/typecheck/build PASS. The PG job executes the
+security-race regressions; backend SKIPs are not executed PostgreSQL evidence.
+
+PR #17 confirmed the stale SERIALIZABLE snapshot after waiting for issuance's
+account lock. Its PostgreSQL-only `AuthVersion = AuthVersion` publication fence
+forces stale security writers to retry with40001, without changing logical
+AuthVersion, existing isolation levels or current-family authentication.
+Historical context reconciliation was not performed and is not implied.
+
+The earlier failing runs remain historical evidence, including
+[43284538286 attempt1](https://github.com/peterl-ai/IPQC-system/actions/runs/43284538286/attempts/1)
+and [43285887976](https://github.com/peterl-ai/IPQC-system/actions/runs/43285887976).
+Their earlier unresolved-security/hold statements below describe the pre-fix
+state; they are superseded by this verified fix, not erased or reclassified as
+passing reruns. PR #16 still awaits independent Final Review and Peter's merge
+decision. D01(A) remains approved; other technical proposals and all22 future
+identity/operation acceptance cases remain proposed / DEFERRED / NOT RUN.
+No shared inspection, F2/F3 or Android is activated; `canExecute=false` remains.
+
 ## 1. Authority, status vocabulary and verified baseline
 
 Peter authorized this two-file documentation PR on 2026-11-12 and granted standing development authorization for later small, clearly scoped work implementing already-approved requirements. Routine PR implementation does not need repeated permission. Material architecture/business alternatives still require Peter's decision; merging, production operations and destructive cleanup remain excluded. This task stops after one PR and verified CI. Neither publishing nor merging this proposal silently selects an OPEN DECISION or implements its tables/routes.
@@ -21,11 +50,11 @@ Authoritative references, unchanged by this PR:
 - [R32-04 Readiness](IPQC_R32-04_IMPLEMENTATION_READINESS_REPORT_2026-11-11.md), especially §9 and deferred cases R04-D01..D08. Its original NOT RUN matrix is historical planning evidence.
 - [R32-02 implemented personal access](../16_R3202_PERSONAL_ACCESS.md), [R32-03 implemented planning](../17_R3203_SHARED_PLANNING.md), [R32-04 implemented WorkContext](../18_R3204_WORK_CONTEXT.md).
 
-**IMPLEMENTED baseline:** [PR #15](https://github.com/peterl-ai/IPQC-system/pull/15) merged as `6fa84de00d5e719ab4474a77daa89d55eea4f086`; its feature HEAD was `846f984b67d74d87595945eaca4e86ad01285ba9`. Live main at verification was the merge SHA, with no open PR. The main/feature trees both equal `59a3e3544e815cdfd6f903ab62c72d36582d45f3`. Local main was fast-forwarded without resetting/stashing/cleaning unrelated work.
+**IMPLEMENTED foundation baseline (historical verification):** [PR #15](https://github.com/peterl-ai/IPQC-system/pull/15) merged as `6fa84de00d5e719ab4474a77daa89d55eea4f086`; its feature HEAD was `846f984b67d74d87595945eaca4e86ad01285ba9`. Live main at verification was the merge SHA, with no open PR. The main/feature trees both equal `59a3e3544e815cdfd6f903ab62c72d36582d45f3`. Local main was fast-forwarded without resetting/stashing/cleaning unrelated work.
 
 The merge [CI run 43262427172](https://github.com/peterl-ai/IPQC-system/actions/runs/43262427172) passed: backend374/0FAIL/33opt-inSKIP, separate real PostgreSQL17 job33/0FAIL/0SKIP, Web90/18 files plus lint/typecheck/build. These are **existing foundation regression results**, not tests of any proposed contract below. This documentation PR's exact-HEAD CI is reported separately in PR delivery.
 
-**Review gate, 2026-11-12:** while validating this documentation PR's earlier HEAD `a318033f432da7ca64be710c797466b97232a7e4`, [PR CI 43284538286, attempt1](https://github.com/peterl-ai/IPQC-system/actions/runs/43284538286/attempts/1) had PostgreSQL32 PASS/1 FAIL/0 SKIP: `WorkContextPostgresTests.Issue_before_deactivation` reached `WorkContextConcurrencyTests.cs:34`, expected0 unrevoked contexts but found1. The unchanged companion push PG job passed33/0/0. Root cause/security impact remain unresolved; a passing rerun cannot erase that evidence or establish an infrastructure flake. Peter chose to retain this two-document PR, defer merge and arrange a separate security fix. No application/test/CI change or second branch is included here. Final delivery reports subsequent CI attempts/HEAD separately.
+**Historical review gate before PR #17, 2026-11-12:** while validating this documentation PR's earlier HEAD `a318033f432da7ca64be710c797466b97232a7e4`, [PR CI 43284538286, attempt1](https://github.com/peterl-ai/IPQC-system/actions/runs/43284538286/attempts/1) had PostgreSQL32 PASS/1 FAIL/0 SKIP: `WorkContextPostgresTests.Issue_before_deactivation` reached `WorkContextConcurrencyTests.cs:34`, expected0 unrevoked contexts but found1. The unchanged companion push PG job passed33/0/0. Root cause/security impact remain unresolved; a passing rerun cannot erase that evidence or establish an infrastructure flake. Peter chose to retain this two-document PR, defer merge and arrange a separate security fix. No application/test/CI change or second branch is included here. Final delivery reports subsequent CI attempts/HEAD separately.
 
 ## 2. Observed implementation seams
 
@@ -169,9 +198,9 @@ Unaccepted revoked-source work and dependent unverified evidence are quarantined
 
 **PROPOSED TECHNICAL CONTRACT — PostgreSQL:** extend the implemented account-first protocol: discover immutable source-owner IDs solely for lock discovery; lock B and distinct new-source owners in sorted GUID order `FOR NO KEY UPDATE`; reread authority/source facts. Lock sorted configured line roots `FOR SHARE`, Task `FOR UPDATE`, draft root, sorted item/attempt scopes, then sorted source contexts and operation/receipt records as needed. Recheck all discoveries. Task locking serializes creation of missing draft/ledger keys; unique constraints and conditional version updates remain required. No acquisition of the planning advisory gate after holding task/context locks. Do not upgrade all account locks to FOR UPDATE and recreate audit-FK deadlocks.
 
-Under approved D01(A), the future eager generator must remain planning-gate→line→new Task/attempts, without acquiring accounts after the planning gate; explicit initialization uses the reviewed current-account→line→Task order. No path may take one order and later request the earlier gate. Existing account-security actions lock their account then contexts in their current transaction, without nested stores. The complete future graph must test both race orders with security, planning/line changes, refresh/logout and multiple sources. This is a proposed lock protocol, **not proof of deadlock freedom**; real PostgreSQL tests are mandatory. D01 does not approve ignoring the existing CI race noted in §1.
+Under approved D01(A), the future eager generator must remain planning-gate→line→new Task/attempts, without acquiring accounts after the planning gate; explicit initialization uses the reviewed current-account→line→Task order. No path may take one order and later request the earlier gate. Existing account-security actions lock their account then contexts in their current transaction, without nested stores. The complete future graph must test both race orders with security, planning/line changes, refresh/logout and multiple sources. This is a proposed lock protocol, **not proof of deadlock freedom**; real PostgreSQL tests are mandatory. The earlier CI race noted in §1 is resolved by PR #17; future operation acceptance still requires its own proved protocol.
 
-Snapshot visibility is part of this protocol: [PostgreSQL17 isolation rules](https://www.postgresql.org/docs/17/transaction-iso.html) distinguish statement snapshots from Repeatable Read/Serializable transaction snapshots. Acquiring a previously blocked row lock is not proof that every later query sees newly committed contexts. Test a security transaction whose snapshot starts while issuance holds the account lock, then verify that successful security completion covers the committed context. This requirement is not a proven diagnosis of the CI failure.
+Snapshot visibility is part of this protocol: [PostgreSQL17 isolation rules](https://www.postgresql.org/docs/17/transaction-iso.html) distinguish statement snapshots from Repeatable Read/Serializable transaction snapshots. Acquiring a previously blocked row lock is not proof that every later query sees newly committed contexts. Test a security transaction whose snapshot starts while issuance holds the account lock, then verify that successful security completion covers the committed context. This was a hypothesis when the proposal was first published; PR #17 confirmed the stale-snapshot diagnosis and repaired issuance publication, as recorded above. Future operation acceptance still requires separate implementation and tests.
 
 Only known rolled-back provider conflicts get bounded whole-transaction retries, using the repository's at-most3 attempts/5s lock-wait convention. Unknown commit/network outcomes use receipt reconciliation, not blind write retry. No network/storage calls or success delivery inside an uncommitted database transaction. Fault injection at version claim, ledger insert, projection, audit, receipt and commit must show all-or-nothing behavior.
 
@@ -181,11 +210,11 @@ Application rollback retains expanded schema/ledger/audit and closes new ingress
 
 ## 8. Small future PR sequence and gates
 
-**PROPOSED TECHNICAL CONTRACT:** reorder only prerequisite engineering work, not approved business outcomes. Every future PR starts from verified merged main, stays independently reviewable and stops for independent Final Review/Peter's merge decision. Standing authorization covers clearly scoped approved work; D01(A) has Peter's separate decision, while other proposals keep their stated status. Neither authorizes starting another PR in this task. Peter deferred this PR's merge pending independent review and the separately arranged security issue.
+**PROPOSED TECHNICAL CONTRACT:** reorder only prerequisite engineering work, not approved business outcomes. Every future PR starts from verified merged main, stays independently reviewable and stops for independent Final Review/Peter's merge decision. Standing authorization covers clearly scoped approved work; D01(A) has Peter's separate decision, while other proposals keep their stated status. Neither authorizes starting another PR in this task. The security blocker is resolved by merged PR #17; PR #16 still requires independent Final Review and Peter's merge decision. No R32-05 work is started here.
 
 | Slice / proposed title | Minimum coherent scope | Exit/dependency |
 | --- | --- | --- |
-| Next identity slice, after the separately arranged security work: `R32-05 prerequisite: establish real shared inspection attempt identities` | Under approved D01(A): additive identity/applicability model, truthful initial creation path, stable TaskItem binding, initial minimum snapshot, read contract and duplicate/rollback/provider tests. No fake samples/acceptance, no formal event producer; exact file/migration inventory must be verified for that slice | Existing-task inventory and satisfactory security baseline; canExecute=false; future execution-aware WorkContext/eligibility contract explicitly reviewed |
+| Next planned identity slice, after PR #16 review/merge and a fresh baseline/inventory: `R32-05 prerequisite: establish real shared inspection attempt identities` | Under approved D01(A): additive identity/applicability model, truthful initial creation path, stable TaskItem binding, initial minimum snapshot, read contract and duplicate/rollback/provider tests. No fake samples/acceptance, no formal event producer; exact file/migration inventory must be verified for that slice | Existing-task inventory and satisfactory security baseline; canExecute=false; future execution-aware WorkContext/eligibility contract explicitly reviewed |
 | `R32-04 follow-up: atomically accept typed shared sample draft operations` | After real attempts: a minimal typed real sample draft operation set with stable sample mapping, DraftVersion CAS, immutable ledger/receipts, manifest/source validation, audit and rollback together. Do not split out a pretend accepting CAS/empty ledger PR | Current attempt/source/eligibility checks and real provider races pass; incomplete draft is not completed inspection; no Submit or broad execution activation |
 | Later R32-05 slices | Actual sample/disposition/header/PIC/state contracts, targeted reinspection producers tied to real domain events; preserve legacy behavior | Coordinate real formal NG/PQE triggers with R32-07; no synthetic submissions to make tests pass |
 | R32-06 / F3 and R32-07 / F2 | Actual storage/Ready/reference/retention; explicit frozen Submit, exact review events and six takeover invariants | Separate scoped readiness; no byte acceptance or formal Submit activated by draft sync |

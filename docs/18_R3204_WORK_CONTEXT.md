@@ -1,5 +1,34 @@
 # R32-04 WorkContext foundation
 
+## Security-fix reconciliation after PR #17, 2026-11-12
+
+**IMPLEMENTED / MERGED_TO_MAIN:** [PR #17](https://github.com/peterl-ai/IPQC-system/pull/17)
+merged as `b76972bc1f24d7e32e9537e263782d4960354acb`, from reviewed feature HEAD
+`cdbaecf6b4bf6755ed4c1dcb900fd7ec00b44940`. This is the verified current main
+baseline for reconciling PR #16, not the older foundation-only baseline below.
+
+Exact merged-main [CI 43297756405](https://github.com/peterl-ai/IPQC-system/actions/runs/43297756405)
+completed SUCCESS: Release build0 warnings/errors; backend375 PASS/0 FAIL/50
+opt-in PostgreSQL SKIP; separate real PostgreSQL17 job50 PASS/0 FAIL/0 SKIP;
+Web90 PASS/18 files with lint/typecheck/build PASS. The PG job executes the
+security-race regressions; backend SKIPs are not executed PostgreSQL evidence.
+
+PR #17 confirmed the stale SERIALIZABLE snapshot after waiting for issuance's
+account lock. Its PostgreSQL-only `AuthVersion = AuthVersion` publication fence
+forces stale security writers to retry with40001, without changing logical
+AuthVersion, existing isolation levels or current-family authentication.
+Historical context reconciliation was not performed and is not implied.
+
+The earlier failing runs remain historical evidence, including
+[43284538286 attempt1](https://github.com/peterl-ai/IPQC-system/actions/runs/43284538286/attempts/1)
+and [43285887976](https://github.com/peterl-ai/IPQC-system/actions/runs/43285887976).
+Their earlier unresolved-security/hold statements below describe the pre-fix
+state; they are superseded by this verified fix, not erased or reclassified as
+passing reruns. PR #16 still awaits independent Final Review and Peter's merge
+decision. D01(A) remains approved; other technical proposals and all22 future
+identity/operation acceptance cases remain proposed / DEFERRED / NOT RUN.
+No shared inspection, F2/F3 or Android is activated; `canExecute=false` remains.
+
 ## Post-merge status and proposed follow-up, 2026-11-12
 
 Foundation status: **MERGED_TO_MAIN**. [PR #15](https://github.com/peterl-ai/IPQC-system/pull/15)
@@ -26,7 +55,7 @@ initialization. This does not approve all other technical proposals or implement
 attempts. Merge, production operations and destructive cleanup remain excluded.
 This task authorizes only the two-document PR and stops for independent review.
 
-PR #16's earlier documentation HEAD `a318033f432da7ca64be710c797466b97232a7e4`
+Historical delivery (before PR #17): PR #16's earlier documentation HEAD `a318033f432da7ca64be710c797466b97232a7e4`
 exposed an unchanged PostgreSQL security-race test failure: Issue_before_deactivation,
 expected0 unrevoked contexts, actual1 (PR CI43284538286 attempt1). The companion
 push PG job passed33/0/0; root cause remains unresolved. Peter chose to keep the
