@@ -11,18 +11,28 @@ namespace JaxPower.Ipqc.Api.Tests;
 
 public sealed class WorkContextSecurityTests
 {
-    [Theory][InlineData("logout")][InlineData("expiry")][InlineData("self-password")]
+    [Theory][InlineData("logout")][InlineData("expiry")][InlineData("self-password")][InlineData("refresh")]
     public async Task R04_09_21_Normal_session_changes_preserve_historical_proof(string action)
+    { await using var f = await PersonalSessionFixture.CreateAsync(); await NormalSessionChange(f, action); }
+    internal static async Task NormalSessionChange(PersonalSessionFixture f, string action)
     {
-        await using var f = await PersonalSessionFixture.CreateAsync(); var task = await Task(f); var a = await f.Login(); var issued = await Issue(f, task, a);
+        var task = await Task(f); var a = await f.Login(); var issued = await Issue(f, task, a);
         if (action == "logout") (await f.Client(a.AccessToken).PostAsJsonAsync("/api/auth/logout", new RefreshInput(a.RefreshToken))).EnsureSuccessStatusCode();
         if (action == "self-password") (await f.Client(a.AccessToken).PostAsJsonAsync("/api/auth/change-password", new ChangePasswordInput(TestAccounts.Password, "SyntheticChanged123A"))).EnsureSuccessStatusCode();
         if (action == "expiry") f.Clock.Now = f.Clock.Now.AddDays(15);
-        Assert.Equal(0, await f.Read(db => db.RefreshTokenSessions.CountAsync(x => x.PersonalSessionId == a.PersonalSessionId && x.RevokedAtUtc == null && x.ExpiresAtUtc > f.Clock.Now.UtcDateTime)));
+        if (action == "refresh")
+        {
+            var refreshed = await f.Refresh(a.RefreshToken!);
+            Assert.Equal(a.PersonalSessionId, refreshed.PersonalSessionId);
+            Assert.NotEqual(a.RefreshToken, refreshed.RefreshToken);
+        }
+        Assert.Equal(action == "refresh" ? 1 : 0, await f.Read(db => db.RefreshTokenSessions.CountAsync(x => x.PersonalSessionId == a.PersonalSessionId && x.RevokedAtUtc == null && x.ExpiresAtUtc > f.Clock.Now.UtcDateTime)));
         if (action == "self-password") Assert.Equal(2, await f.Read(db => db.ApplicationUsers.Where(x => x.Id == TestAccounts.Ipqa1Id).Select(x => x.AuthVersion).SingleAsync()));
         var b = await f.Login("dev-ipqa-2");
         Assert.Equal(HttpStatusCode.OK, (await f.Client(b.AccessToken).PostAsJsonAsync(Root(task) + "/validate-sources", Sources(f, issued))).StatusCode);
         Assert.Null(await f.Read(db => db.WorkContexts.Select(x => x.SecurityRevokedAtUtc).SingleAsync()));
+        Assert.Equal(1, await f.Read(db => db.WorkContexts.Select(x => x.Revision).SingleAsync()));
+        Assert.Equal(1, await f.Read(db => db.WorkContextAuditEvents.CountAsync()));
     }
     [Theory][InlineData("reset")][InlineData("deactivate")][InlineData("role")][InlineData("explicit")]
     public async Task R04_10_11_18_19_Security_revocation_is_sticky_and_legacy_admin_does_not_need_family(string action)
@@ -65,6 +75,7 @@ public sealed class WorkContextSecurityTests
     internal static async Task Rollback(PersonalSessionFixture f, string action)
     {
         var task = await Task(f); var a = await f.Login(); await Issue(f, task, a);
+        var before = await SecurityGraph(f);
         f.Fault.Arm("INSERT INTO \"WorkContextAuditEvents\"", failure: true);
         using var scope = f.Factory.Services.CreateScope(); var users = scope.ServiceProvider.GetRequiredService<ApplicationUserService>();
         await Assert.ThrowsAnyAsync<Exception>(async () => {
@@ -72,9 +83,23 @@ public sealed class WorkContextSecurityTests
             else if (action == "role") await users.UpdateAsync(TestAccounts.Ipqa1Id, new UserUpdateInput("Synthetic inspector", "PQE"), TestAccounts.AdminId, "admin", default);
             else await users.SetActiveAsync(TestAccounts.Ipqa1Id, false, TestAccounts.AdminId, "admin", default);
         });
+        Assert.Equal(before, await SecurityGraph(f));
         Assert.Null(await f.Read(db => db.WorkContexts.Select(x => x.SecurityRevokedAtUtc).SingleAsync()));
         Assert.Equal(1, await f.Read(db => db.WorkContextAuditEvents.CountAsync()));
         Assert.Equal(HttpStatusCode.OK, (await f.Client(a.AccessToken).GetAsync("/api/line-patrol/lines")).StatusCode);
         Assert.NotNull(await f.Login());
     }
+
+    private static Task<string> SecurityGraph(PersonalSessionFixture f) => f.Read(async db =>
+        System.Text.Json.JsonSerializer.Serialize(new {
+            User = await db.ApplicationUsers.AsNoTracking().Where(x => x.Id == TestAccounts.Ipqa1Id)
+                .Select(x => new { x.Id, x.PasswordHash, x.AuthVersion, x.Role, x.IsActive, x.MustChangePassword,
+                    x.FailedLoginCount, x.LockoutEndUtc, x.UpdatedAtUtc, x.UpdatedBy }).SingleAsync(),
+            Sessions = await db.RefreshTokenSessions.AsNoTracking().Where(x => x.UserId == TestAccounts.Ipqa1Id).OrderBy(x => x.Id)
+                .Select(x => new { x.Id, x.PersonalSessionId, x.AuthVersion, x.RevokedAtUtc, x.ReplacedBySessionId, x.ExpiresAtUtc }).ToListAsync(),
+            Contexts = await db.WorkContexts.AsNoTracking().OrderBy(x => x.Id)
+                .Select(x => new { x.Id, x.Revision, x.SecurityRevokedAtUtc, x.SecurityRevocationReason, x.SecurityRevokedByUserId }).ToListAsync(),
+            Audits = await db.WorkContextAuditEvents.AsNoTracking().OrderBy(x => x.Id)
+                .Select(x => new { x.Id, x.Action, x.BeforeJson, x.AfterJson }).ToListAsync()
+        }));
 }

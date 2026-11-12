@@ -36,6 +36,7 @@ internal sealed class SessionFault : DbCommandInterceptor
 {
     public System.Collections.Concurrent.ConcurrentQueue<string> SessionSql { get; } = new();
     public Func<DbCommand, CancellationToken, Task>? ObserveAsync { get; set; }
+    public Action<DbCommand, Exception>? ObserveFailure { get; set; }
     private Func<DbCommand, bool>? match;
     private bool fail;
     private int busyRemaining;
@@ -73,6 +74,8 @@ internal sealed class SessionFault : DbCommandInterceptor
     public override async ValueTask<InterceptionResult<int>> NonQueryExecutingAsync(DbCommand command,
         CommandEventData eventData, InterceptionResult<int> result, CancellationToken cancellationToken = default)
     { await Check(command, cancellationToken); return result; }
+    public override Task CommandFailedAsync(DbCommand command, CommandErrorEventData eventData, CancellationToken cancellationToken = default)
+    { ObserveFailure?.Invoke(command, eventData.Exception); return System.Threading.Tasks.Task.CompletedTask; }
 }
 
 internal sealed class SessionCommitFault : DbTransactionInterceptor
