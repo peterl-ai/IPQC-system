@@ -1,5 +1,41 @@
 # R32-04 WorkContext foundation
 
+## Mandatory developer self-review, 2026-11-12
+
+The complete main-to-HEAD application, test, CI, migration and generated-model diff
+was compared with approved Rev3.2 and the readiness report. The prior all-PASS
+summary was not used as proof. Confirmed findings on original HEAD
+`c8aa12d666c7c9499bb454e6142b82af5f1e4046`:
+
+| Priority | Original evidence | Fix and regression |
+| --- | --- | --- |
+| P2 | Services/WorkContextStore.cs:73 validated claims/family but never required an authenticated identity | RunAsync rejects unauthenticated principals before SQL; six direct entrypoints reproduced the bypass and now deny401. HTTP was already protected. |
+| P2 | Domain/WorkContext.cs:36 and Services/WorkContextSecurity.cs:34 stored only before/after revision numbers | Persist proof-free typed metadata snapshots in BeforeJson/AfterJson, captured before mutation and in the same audit transaction. Audit HTTP regression reproduced missing fields, then passed. |
+| P2 | Tests/WorkContextSecurityTests.cs:18,40 ignored logout/password/reactivation responses; WorkContextConcurrencyTests.cs:104 ignored deactivation result; PG upgrade checked selected fields only | Require successful operations and actual account/session/line state; assert sticky context state independently; fingerprint every old PG table/column/constraint/index, not selected DTOs. |
+
+The six unauthenticated-entrypoint regressions plus missing-snapshot regression all
+failed before fixes (7 FAIL), then all passed (7 PASS). Additional tests reject use of
+proof/context IDs as bearer authentication and exercise issue-versus-role-loss and
+deactivation in both orders on SQLite and real PostgreSQL CI. No P0/P1 finding was
+confirmed. This is developer self-review, not independent Final Review or merge approval.
+
+The single **unmerged** R3204 migration definition now includes the missing audit
+snapshots; no migration through R3203 was changed. A database that applied an earlier
+draft of R3204 is not automatically upgraded by the revised definition: disposable
+fixtures use fresh databases; any persistent draft installation requires owner-reviewed
+reconciliation. No production migration or destructive cleanup is performed.
+
+Audit snapshots serialize only WorkContextMetadata, never entities with proof hashes.
+The direct-service guard is confined to WorkContextStore; existing Admin account APIs
+and normal logout/self-password behavior retain their prior authentication contracts.
+
+Local self-review validation: Release restore/build PASS (0 warnings/errors), full
+backend374 PASS/0 FAIL/33 opt-in PostgreSQL SKIP;62 WorkContext cases PASS in that
+full run. Web90 PASS/18 files, lint/typecheck/build PASS. Both EF provider models
+clean and native PostgreSQL SQL contains only two new tables plus their checks/FKs/
+indexes, including typed text audit snapshots. Real PostgreSQL results must be read
+from the final exact-HEAD CI/PR delivery, not inferred from these local SKIPs.
+
 First backend foundation PR, separately authorized by Peter, based on main
 `8462014d7d408a1a90ff7fcae50cecac459a7e61`. No merge, production migration,
 deployment or shared inspection activation is authorized.

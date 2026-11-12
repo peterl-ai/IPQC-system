@@ -35,4 +35,6 @@ public sealed class WorkContextAuditEvent
     public string? Reason { get; set; }
     public long? BeforeRevision { get; set; }
     public long AfterRevision { get; set; }
+    public string? BeforeJson { get; set; }
+    public string AfterJson { get; set; } = "";
 }

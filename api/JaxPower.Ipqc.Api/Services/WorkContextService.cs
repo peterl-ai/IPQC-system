@@ -99,7 +99,10 @@ public sealed class WorkContextService(IpqcDbContext db, WorkContextStore store,
             var q = db.WorkContextAuditEvents.AsNoTracking().Where(x => x.WorkContextId == id);
             var rows = await q.OrderBy(x => x.OccurredAtUtc).ThenBy(x => x.Id).Skip((page - 1) * size).Take(size).ToListAsync(ct);
             return new { Items = rows.Select(x => new WorkContextAuditMetadata(x.Id, x.ChangeId, x.WorkContextId, x.Action,
-                Utc(x.OccurredAtUtc), x.ActorType, x.ActorUserId, x.ActorUsername, x.SourceUserId, x.Reason, x.BeforeRevision, x.AfterRevision)),
+                Utc(x.OccurredAtUtc), x.ActorType, x.ActorUserId, x.ActorUsername, x.SourceUserId, x.Reason, x.BeforeRevision, x.AfterRevision,
+                x.BeforeJson is null ? null : System.Text.Json.JsonSerializer.Deserialize<WorkContextMetadata>(x.BeforeJson, WorkContextSecurity.SnapshotJson),
+                System.Text.Json.JsonSerializer.Deserialize<WorkContextMetadata>(x.AfterJson, WorkContextSecurity.SnapshotJson)
+                    ?? throw new InvalidOperationException("Missing WorkContext audit snapshot."))),
                 Total = await q.CountAsync(ct), Page = page, PageSize = size };
         }, ct);
     private async Task<WorkContext> Context(Guid id, CancellationToken ct) => await db.WorkContexts.SingleOrDefaultAsync(x => x.Id == id, ct)

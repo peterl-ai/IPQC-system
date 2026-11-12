@@ -15,9 +15,11 @@ public sealed class WorkContextSecurityTests
     public async Task R04_09_21_Normal_session_changes_preserve_historical_proof(string action)
     {
         await using var f = await PersonalSessionFixture.CreateAsync(); var task = await Task(f); var a = await f.Login(); var issued = await Issue(f, task, a);
-        if (action == "logout") await f.Client(a.AccessToken).PostAsJsonAsync("/api/auth/logout", new RefreshInput(a.RefreshToken));
-        if (action == "self-password") await f.Client(a.AccessToken).PostAsJsonAsync("/api/auth/change-password", new ChangePasswordInput(TestAccounts.Password, "SyntheticChanged123A"));
+        if (action == "logout") (await f.Client(a.AccessToken).PostAsJsonAsync("/api/auth/logout", new RefreshInput(a.RefreshToken))).EnsureSuccessStatusCode();
+        if (action == "self-password") (await f.Client(a.AccessToken).PostAsJsonAsync("/api/auth/change-password", new ChangePasswordInput(TestAccounts.Password, "SyntheticChanged123A"))).EnsureSuccessStatusCode();
         if (action == "expiry") f.Clock.Now = f.Clock.Now.AddDays(15);
+        Assert.Equal(0, await f.Read(db => db.RefreshTokenSessions.CountAsync(x => x.PersonalSessionId == a.PersonalSessionId && x.RevokedAtUtc == null && x.ExpiresAtUtc > f.Clock.Now.UtcDateTime)));
+        if (action == "self-password") Assert.Equal(2, await f.Read(db => db.ApplicationUsers.Where(x => x.Id == TestAccounts.Ipqa1Id).Select(x => x.AuthVersion).SingleAsync()));
         var b = await f.Login("dev-ipqa-2");
         Assert.Equal(HttpStatusCode.OK, (await f.Client(b.AccessToken).PostAsJsonAsync(Root(task) + "/validate-sources", Sources(f, issued))).StatusCode);
         Assert.Null(await f.Read(db => db.WorkContexts.Select(x => x.SecurityRevokedAtUtc).SingleAsync()));
@@ -37,9 +39,12 @@ public sealed class WorkContextSecurityTests
             "role" => await legacy.PutAsJsonAsync($"/api/users/{TestAccounts.Ipqa1Id}", new UserUpdateInput("Synthetic inspector", "PQE")),
             _ => await f.Client(admin.AccessToken).PostAsJsonAsync(url + "/security-revoke", new WorkContextRevokeInput(1, "Synthetic security action")) };
         Assert.True(management.IsSuccessStatusCode, await management.Content.ReadAsStringAsync());
-        if (action == "deactivate") await legacy.PostAsync($"/api/users/{TestAccounts.Ipqa1Id}/activate", null);
-        if (action == "role") await legacy.PutAsJsonAsync($"/api/users/{TestAccounts.Ipqa1Id}", new UserUpdateInput("Synthetic inspector", "IPQA"));
+        if (action == "deactivate") (await legacy.PostAsync($"/api/users/{TestAccounts.Ipqa1Id}/activate", null)).EnsureSuccessStatusCode();
+        if (action == "role") (await legacy.PutAsJsonAsync($"/api/users/{TestAccounts.Ipqa1Id}", new UserUpdateInput("Synthetic inspector", "IPQA"))).EnsureSuccessStatusCode();
         var b = await f.Login("dev-ipqa-2");
+        if (action is "deactivate" or "role")
+            Assert.True(await f.Read(db => db.ApplicationUsers.AnyAsync(x => x.Id == TestAccounts.Ipqa1Id && x.IsActive && x.Role == "IPQA")));
+        Assert.NotNull(await f.Read(db => db.WorkContexts.Select(x => x.SecurityRevokedAtUtc).SingleAsync()));
         var result = await f.Client(b.AccessToken).PostAsJsonAsync(Root(task) + "/validate-sources", Sources(f, issued));
         Assert.Equal(HttpStatusCode.Conflict, result.StatusCode); Assert.Contains("SourceSecurityRevoked", await result.Content.ReadAsStringAsync());
         Assert.Equal(2, await f.Read(db => db.WorkContextAuditEvents.CountAsync()));

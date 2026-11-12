@@ -79,6 +79,8 @@ namespace JaxPower.Ipqc.Api.Data.Migrations
                     ActorUsername = table.Column<string>(type: ActiveProvider.Contains("Npgsql") ? "character varying(100)" : "TEXT", maxLength: 100, nullable: false),
                     SourceUserId = table.Column<Guid>(type: ActiveProvider.Contains("Npgsql") ? "uuid" : "TEXT", nullable: false),
                     Reason = table.Column<string>(type: ActiveProvider.Contains("Npgsql") ? "character varying(2000)" : "TEXT", maxLength: 2000, nullable: true),
+                    BeforeJson = table.Column<string>(type: ActiveProvider.Contains("Npgsql") ? "text" : "TEXT", nullable: true),
+                    AfterJson = table.Column<string>(type: ActiveProvider.Contains("Npgsql") ? "text" : "TEXT", nullable: false),
                     BeforeRevision = table.Column<long>(type: ActiveProvider.Contains("Npgsql") ? "bigint" : "INTEGER", nullable: true),
                     AfterRevision = table.Column<long>(type: ActiveProvider.Contains("Npgsql") ? "bigint" : "INTEGER", nullable: false)
                 },

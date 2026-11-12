@@ -11,19 +11,23 @@ namespace JaxPower.Ipqc.Api.Tests;
 
 public sealed class WorkContextConcurrencyTests
 {
-    [Theory][InlineData(false)][InlineData(true)]
-    public async Task R04_22_Issue_and_security_writer_serialize(bool securityFirst)
-    { await using var f = await PersonalSessionFixture.CreateAsync(); await IssueRace(f, securityFirst); }
-    internal static async Task IssueRace(PersonalSessionFixture f, bool securityFirst)
+    [Theory][InlineData(false, "reset")][InlineData(true, "reset")][InlineData(false, "role")][InlineData(true, "role")][InlineData(false, "deactivate")][InlineData(true, "deactivate")]
+    public async Task R04_22_Issue_and_security_writer_serialize(bool securityFirst, string action)
+    { await using var f = await PersonalSessionFixture.CreateAsync(); await IssueRace(f, securityFirst, action); }
+    internal static async Task IssueRace(PersonalSessionFixture f, bool securityFirst, string action = "reset")
     {
         var task = await Task(f); var auth = await f.Login();
         using var scope = f.Factory.Services.CreateScope(); var users = scope.ServiceProvider.GetRequiredService<ApplicationUserService>();
+        System.Threading.Tasks.Task<UserOutput?> SecurityAction() => action switch {
+            "role" => users.UpdateAsync(TestAccounts.Ipqa1Id, new UserUpdateInput("Synthetic inspector", "PQE"), TestAccounts.AdminId, "admin", default),
+            "deactivate" => users.SetActiveAsync(TestAccounts.Ipqa1Id, false, TestAccounts.AdminId, "admin", default),
+            _ => users.ResetPasswordAsync(TestAccounts.Ipqa1Id, "SyntheticChanged123A", TestAccounts.AdminId, "admin", default) };
         f.Fault.Arm(securityFirst ? "UPDATE \"ApplicationUsers\"" : "INSERT INTO \"WorkContexts\"");
         var issue = securityFirst ? null : f.Client(auth.AccessToken).PostAsJsonAsync(Root(task), Input(f));
-        var reset = securityFirst ? users.ResetPasswordAsync(TestAccounts.Ipqa1Id, "SyntheticChanged123A", TestAccounts.AdminId, "admin", default) : null;
+        var reset = securityFirst ? SecurityAction() : null;
         await f.Fault.Entered.Task.WaitAsync(TimeSpan.FromSeconds(15));
         issue ??= f.Client(auth.AccessToken).PostAsJsonAsync(Root(task), Input(f));
-        reset ??= users.ResetPasswordAsync(TestAccounts.Ipqa1Id, "SyntheticChanged123A", TestAccounts.AdminId, "admin", default);
+        reset ??= SecurityAction();
         f.Fault.Release.TrySetResult();
         var r = await issue; await reset;
         Assert.Equal(securityFirst ? HttpStatusCode.Unauthorized : HttpStatusCode.Created, r.StatusCode);
@@ -101,7 +105,8 @@ public sealed class WorkContextConcurrencyTests
         await f.Fault.Entered.Task.WaitAsync(TimeSpan.FromSeconds(15));
         issue ??= f.Client(auth.AccessToken).PostAsJsonAsync(Root(task), Input(f));
         line ??= f.Client(admin.AccessToken).PostAsJsonAsync($"/api/admin/production-lines/{f.Line1}/deactivate", new ProvisioningRevisionInput(1));
-        f.Fault.Release.TrySetResult(); var r = await issue; await line;
+        f.Fault.Release.TrySetResult(); var r = await issue; (await line).EnsureSuccessStatusCode();
+        Assert.False(await f.Read(db => db.ProductionLines.Where(x => x.Id == f.Line1).Select(x => x.IsActive).SingleAsync()));
         Assert.Equal(lineFirst ? HttpStatusCode.ServiceUnavailable : HttpStatusCode.Created, r.StatusCode);
         if (!lineFirst)
         {

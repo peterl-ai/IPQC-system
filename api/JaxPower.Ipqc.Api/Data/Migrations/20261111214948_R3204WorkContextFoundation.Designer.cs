@@ -1473,6 +1473,13 @@ namespace JaxPower.Ipqc.Api.Data.Migrations
                         .HasMaxLength(100)
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("AfterJson")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("BeforeJson")
+                        .HasColumnType("TEXT");
+
                     b.Property<long>("AfterRevision")
                         .HasColumnType("INTEGER");
 

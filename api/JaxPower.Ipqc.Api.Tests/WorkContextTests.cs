@@ -11,6 +11,56 @@ namespace JaxPower.Ipqc.Api.Tests;
 
 public sealed class WorkContextTests
 {
+    [Fact] public async Task R04_05_12_Proof_and_context_id_cannot_authenticate_requests()
+    {
+        await using var f = await PersonalSessionFixture.CreateAsync(); var task = await Task(f); var issued = await Issue(f, task, await f.Login());
+        foreach (var credential in new[] { issued.ProofSecret, issued.Context.Id.ToString() }) {
+            var r = await f.Client(credential).PostAsJsonAsync(Root(task) + "/validate-sources", Sources(f, issued));
+            Assert.Equal(HttpStatusCode.Unauthorized, r.StatusCode);
+        }
+    }
+    [Theory][InlineData("issue")][InlineData("preflight")][InlineData("read")][InlineData("admin-read")][InlineData("audit")][InlineData("revoke")]
+    public async Task R04_02_12_19_Direct_service_rejects_unauthenticated_claims(string operation)
+    {
+        await using var f = await PersonalSessionFixture.CreateAsync(); var task = await Task(f); var a = await f.Login();
+        var issued = await Issue(f, task, a); var admin = await f.Login("admin");
+        var authenticated = Principal(operation is "admin-read" or "audit" or "revoke" ? admin : a,
+            operation is "admin-read" or "audit" or "revoke" ? "Admin" : "IPQA");
+        var untrusted = new System.Security.Claims.ClaimsPrincipal(new System.Security.Claims.ClaimsIdentity(authenticated.Claims));
+        Assert.False(untrusted.Identity!.IsAuthenticated);
+        using var scope = f.Factory.Services.CreateScope(); var service = scope.ServiceProvider.GetRequiredService<WorkContextService>();
+        var ex = await Assert.ThrowsAsync<PersonalAccessException>(async () => {
+            switch (operation) {
+                case "issue": await service.IssueAsync(task, Input(f), untrusted, default); break;
+                case "preflight": await service.PreflightAsync(task, Sources(f, issued), untrusted, default); break;
+                case "read": await service.ReadAsync(issued.Context.Id, task, untrusted, default); break;
+                case "admin-read": await service.ReadAsync(issued.Context.Id, null, untrusted, default); break;
+                case "audit": await service.AuditAsync(issued.Context.Id, 1, 20, untrusted, default); break;
+                default: await service.RevokeAsync(issued.Context.Id, new(1, "Untrusted"), untrusted, default); break;
+            }
+        });
+        Assert.Equal(401, ex.Status);
+        Assert.Equal(1, await f.Read(db => db.WorkContextAuditEvents.CountAsync()));
+    }
+
+    [Fact] public async Task R04_19_Audit_contains_nonsecret_before_and_after_snapshots()
+    {
+        await using var f = await PersonalSessionFixture.CreateAsync(); var task = await Task(f); var a = await f.Login();
+        var issued = await Issue(f, task, a); var admin = await f.Login("admin"); var url = $"/api/admin/work-contexts/{issued.Context.Id}";
+        (await f.Client(admin.AccessToken).PostAsJsonAsync(url + "/security-revoke", new WorkContextRevokeInput(1, "Synthetic revoke"))).EnsureSuccessStatusCode();
+        var body = await f.Client(admin.AccessToken).GetStringAsync(url + "/audit");
+        var items = System.Text.Json.JsonDocument.Parse(body).RootElement.GetProperty("items").EnumerateArray().ToArray();
+        var created = items.Single(x => x.GetProperty("action").GetString() == "ContextIssued");
+        var revoked = items.Single(x => x.GetProperty("action").GetString() == "ContextSecurityRevoked");
+        Assert.Equal(System.Text.Json.JsonValueKind.Null, created.GetProperty("beforeSnapshot").ValueKind);
+        Assert.Equal(1, created.GetProperty("afterSnapshot").GetProperty("revision").GetInt64());
+        Assert.Equal(1, revoked.GetProperty("beforeSnapshot").GetProperty("revision").GetInt64());
+        Assert.Equal(System.Text.Json.JsonValueKind.Null, revoked.GetProperty("beforeSnapshot").GetProperty("securityRevokedAtUtc").ValueKind);
+        Assert.Equal(2, revoked.GetProperty("afterSnapshot").GetProperty("revision").GetInt64());
+        Assert.Equal("Synthetic revoke", revoked.GetProperty("afterSnapshot").GetProperty("securityRevocationReason").GetString());
+        Assert.DoesNotContain(issued.ProofSecret, body);
+        Assert.DoesNotContain("proofSecretHash", body, StringComparison.OrdinalIgnoreCase);
+    }
     [Theory][InlineData(false)][InlineData(true)]
     public async Task R04_01_06_Receipt_caps_at_original_family_and_both_actual_lines(bool secondLine)
     {

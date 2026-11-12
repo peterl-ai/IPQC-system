@@ -12,6 +12,8 @@ public sealed class WorkContextStore(IpqcDbContext db, PersonalAccess access, Pe
     public async Task<T> RunAsync<T>(ClaimsPrincipal actor, bool admin, Guid? taskId, IEnumerable<Guid> contextIds,
         Func<PersonalAuthority, Task<T>> operation, CancellationToken ct)
     {
+        if (actor.Identity?.IsAuthenticated != true)
+            throw new PersonalAccessException("PersonalSessionRequired", 401);
         for (var attempt = 0; ; attempt++)
         {
             try

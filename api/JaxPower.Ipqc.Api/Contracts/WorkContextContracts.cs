@@ -20,4 +20,4 @@ public sealed record WorkContextPreflight(DateTime ValidatedAtUtc, List<WorkCont
     string Purpose = "SourcePreflightOnly", bool AcceptsWork = false);
 public sealed record WorkContextAuditMetadata(Guid Id, Guid ChangeId, Guid WorkContextId, string Action,
     DateTime OccurredAtUtc, string ActorType, Guid ActorUserId, string ActorUsername, Guid SourceUserId,
-    string? Reason, long? BeforeRevision, long AfterRevision);
+    string? Reason, long? BeforeRevision, long AfterRevision, WorkContextMetadata? BeforeSnapshot, WorkContextMetadata AfterSnapshot);
