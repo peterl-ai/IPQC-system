@@ -333,6 +333,92 @@ namespace JaxPower.Ipqc.Api.Data.Migrations
                         });
                 });
 
+            modelBuilder.Entity("JaxPower.Ipqc.Api.Domain.InspectionAttempt", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("CreatedByPersonalSessionId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("CreatedByUserId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("CreatedByUsername")
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("CreationEventId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("CreationSource")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("FrozenSampleCount")
+                        .IsRequired()
+                        .HasMaxLength(4000)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("InitializationReason")
+                        .HasMaxLength(2000)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("MinimumSampleCount")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<Guid>("PatrolTaskItemId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("PlanningSnapshotVersion")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CreatedByUserId");
+
+                    b.HasIndex("CreationEventId");
+
+                    b.HasIndex("PatrolTaskItemId")
+                        .IsUnique()
+                        .HasFilter("\"Kind\" = 'Initial'");
+
+                    b.ToTable("InspectionAttempts", t =>
+                        {
+                            t.HasCheckConstraint("CK_InspectionAttempts_Identity", "\"Id\" <> '00000000-0000-0000-0000-000000000000' AND \"CreationEventId\" <> '00000000-0000-0000-0000-000000000000' AND \"Kind\" = 'Initial' AND \"PlanningSnapshotVersion\" = 1 AND \"MinimumSampleCount\" BETWEEN 1 AND 50");
+
+                            t.HasCheckConstraint("CK_InspectionAttempts_Provenance", "(\"CreationSource\" = 'TaskGeneration' AND \"CreatedByUserId\" IS NULL AND \"CreatedByUsername\" IS NULL AND \"CreatedByPersonalSessionId\" IS NULL AND \"InitializationReason\" IS NULL) OR (\"CreationSource\" = 'ExplicitInitialization' AND \"CreatedByUserId\" IS NOT NULL AND \"CreatedByUsername\" IS NOT NULL AND length(trim(\"CreatedByUsername\")) > 0 AND \"CreatedByPersonalSessionId\" IS NOT NULL AND \"CreatedByPersonalSessionId\" <> '00000000-0000-0000-0000-000000000000' AND \"InitializationReason\" IS NOT NULL AND length(trim(\"InitializationReason\")) BETWEEN 1 AND 2000)");
+                        });
+                });
+
+            modelBuilder.Entity("JaxPower.Ipqc.Api.Domain.InspectionAttemptApplicability", b =>
+                {
+                    b.Property<Guid>("PatrolTaskItemId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("InspectionAttemptId")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("PatrolTaskItemId");
+
+                    b.HasIndex("InspectionAttemptId")
+                        .IsUnique();
+
+                    b.HasIndex("InspectionAttemptId", "PatrolTaskItemId").HasDatabaseName("IX_AttemptApplicabilities_AttemptScope");
+
+                    b.ToTable("InspectionAttemptApplicabilities");
+                });
+
             modelBuilder.Entity("JaxPower.Ipqc.Api.Domain.PatrolPlan", b =>
                 {
                     b.Property<Guid>("Id")
@@ -1474,11 +1560,11 @@ namespace JaxPower.Ipqc.Api.Data.Migrations
                         .IsRequired()
                         .HasColumnType("TEXT");
 
-                    b.Property<string>("BeforeJson")
-                        .HasColumnType("TEXT");
-
                     b.Property<long>("AfterRevision")
                         .HasColumnType("INTEGER");
+
+                    b.Property<string>("BeforeJson")
+                        .HasColumnType("TEXT");
 
                     b.Property<long?>("BeforeRevision")
                         .HasColumnType("INTEGER");
@@ -1571,6 +1657,42 @@ namespace JaxPower.Ipqc.Api.Data.Migrations
                         .HasForeignKey("EnrollmentId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
+                });
+
+            modelBuilder.Entity("JaxPower.Ipqc.Api.Domain.InspectionAttempt", b =>
+                {
+                    b.HasOne("JaxPower.Ipqc.Api.Domain.ApplicationUser", null)
+                        .WithMany()
+                        .HasForeignKey("CreatedByUserId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("JaxPower.Ipqc.Api.Domain.PatrolTaskItem", "PatrolTaskItem")
+                        .WithMany("InspectionAttempts")
+                        .HasForeignKey("PatrolTaskItemId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("PatrolTaskItem");
+                });
+
+            modelBuilder.Entity("JaxPower.Ipqc.Api.Domain.InspectionAttemptApplicability", b =>
+                {
+                    b.HasOne("JaxPower.Ipqc.Api.Domain.PatrolTaskItem", "PatrolTaskItem")
+                        .WithOne("CurrentInspectionAttempt")
+                        .HasForeignKey("JaxPower.Ipqc.Api.Domain.InspectionAttemptApplicability", "PatrolTaskItemId").HasConstraintName("FK_AttemptApplicabilities_TaskItem")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("JaxPower.Ipqc.Api.Domain.InspectionAttempt", "InspectionAttempt")
+                        .WithMany()
+                        .HasForeignKey("InspectionAttemptId", "PatrolTaskItemId")
+                        .HasPrincipalKey("Id", "PatrolTaskItemId").HasConstraintName("FK_AttemptApplicabilities_AttemptScope")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("InspectionAttempt");
+
+                    b.Navigation("PatrolTaskItem");
                 });
 
             modelBuilder.Entity("JaxPower.Ipqc.Api.Domain.PatrolPlan", b =>
@@ -1878,6 +2000,10 @@ namespace JaxPower.Ipqc.Api.Data.Migrations
 
             modelBuilder.Entity("JaxPower.Ipqc.Api.Domain.PatrolTaskItem", b =>
                 {
+                    b.Navigation("CurrentInspectionAttempt");
+
+                    b.Navigation("InspectionAttempts");
+
                     b.Navigation("Samples");
                 });
 

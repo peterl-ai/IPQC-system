@@ -16,6 +16,8 @@ public static class LineSharedTaskEligibility
             task.Items.Any(x => x.SourcePatrolStandardItemId == Guid.Empty || x.SequenceNo < 1) ||
             task.Items.Select(x => x.SequenceNo).Distinct().Count() != task.Items.Count ||
             task.Items.Select(x => x.SourcePatrolStandardItemId).Distinct().Count() != task.Items.Count) return "UnsupportedSnapshot";
+        if (task.Items.Any(x => x.InspectionAttempts.Count != 0 || x.CurrentInspectionAttempt is not null) &&
+            InitialInspectionIdentity.State(task) != "Initialized") return "UnsupportedState";
         return "FoundationOnly";
     }
 }

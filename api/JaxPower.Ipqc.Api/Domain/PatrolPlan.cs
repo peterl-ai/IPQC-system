@@ -85,6 +85,8 @@ public sealed class PatrolTask
 
 public sealed class PatrolTaskItem
 {
+    public List<InspectionAttempt> InspectionAttempts { get; set; } = [];
+    public InspectionAttemptApplicability? CurrentInspectionAttempt { get; set; }
     public Guid Id { get; set; }
     public Guid PatrolTaskId { get; set; }
     public PatrolTask PatrolTask { get; set; } = null!;

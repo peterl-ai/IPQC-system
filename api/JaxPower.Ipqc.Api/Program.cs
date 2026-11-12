@@ -25,6 +25,7 @@ builder.Services.AddScoped<PersonalAccess>();
 builder.Services.AddScoped<WorkContextStore>();
 builder.Services.AddScoped<WorkContextSecurity>();
 builder.Services.AddScoped<WorkContextService>();
+builder.Services.AddScoped<InspectionAttemptService>();
 builder.Services.AddSingleton<WorkContextLimits>();
 builder.Services.AddScoped<LinePatrolReadService>();
 builder.Services.AddScoped<ConfiguredLineDirectory>();
@@ -163,7 +164,8 @@ if (!app.Environment.IsDevelopment()) app.UseExceptionHandler();
 app.Use(async (context, next) =>
 {
     if (context.Request.Path.StartsWithSegments("/api/auth") || context.Request.Path.StartsWithSegments("/api/line-patrol") ||
-        context.Request.Path.StartsWithSegments("/api/line-patrol-plans") || context.Request.Path.StartsWithSegments("/api/admin/work-contexts"))
+        context.Request.Path.StartsWithSegments("/api/line-patrol-plans") || context.Request.Path.StartsWithSegments("/api/admin/work-contexts") ||
+        context.Request.Path.StartsWithSegments("/api/admin/inspection-identities"))
         context.Response.Headers.CacheControl = "no-store";
     try { await next(context); }
     catch (WorkContextSourceRevokedException ex) when (!context.Response.HasStarted)
@@ -210,6 +212,7 @@ app.Use(async (context, next) =>
 
 app.Use(WorkContextEndpoints.Limits);
 app.MapWorkContexts();
+app.MapInspectionAttempts();
 app.MapAuth();
 app.MapLinePatrol();
 app.MapUsers();

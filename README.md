@@ -26,6 +26,11 @@ read-only preflight and atomic source-security revocation/audit. See
 Shared tasks remain `canExecute=false`; no shared inspection acceptance, Submit,
 photos or Android is activated. PR review is separate from production authorization.
 
+The scoped R32-05 identity foundation creates real empty initial InspectionAttempts
+atomically with new shared tasks and supports explicit audited Admin preparation of
+eligible inventoried existing tasks. See [identity, inventory and migration contracts](docs/19_R3205_INSPECTION_IDENTITY.md).
+This supplies identities only; shared execution remains disabled.
+
 The product has two major clients:
 
 1. **Web application** — Phase 1. Used by Admin, PQE, and IPQA for Line Patrol configuration, scheduling, approval, history, reports, and administration.

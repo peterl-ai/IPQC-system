@@ -135,7 +135,8 @@ public sealed class WorkflowLineMigrationTests
         var data = new Dictionary<string, List<string>>();
         foreach (var (table, columns) in schema)
         {
-            await using var cmd = connection.CreateCommand(); cmd.CommandText = $"SELECT {string.Join(",", columns.Select(x => $"\"{x}\""))} FROM \"{table}\" ORDER BY Id";
+            var names = string.Join(",", columns.Select(x => $"\"{x}\""));
+            await using var cmd = connection.CreateCommand(); cmd.CommandText = $"SELECT {names} FROM \"{table}\" ORDER BY {names}";
             var rows = new List<string>(); await using var r = await cmd.ExecuteReaderAsync();
             while (await r.ReadAsync()) rows.Add(JsonSerializer.Serialize(Enumerable.Range(0, r.FieldCount).Select(i => r.IsDBNull(i) ? null : r.GetValue(i)).ToArray()));
             data[table] = rows;

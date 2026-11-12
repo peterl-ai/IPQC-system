@@ -23,6 +23,8 @@ public sealed class WorkContextService(IpqcDbContext db, WorkContextStore store,
     {
         var lines = await directory.LinesAsync(ct);
         var t = await db.PatrolTasks.AsNoTracking().Include(x => x.Items).ThenInclude(x => x.Samples)
+            .Include(x => x.Items).ThenInclude(x => x.InspectionAttempts)
+            .Include(x => x.Items).ThenInclude(x => x.CurrentInspectionAttempt)
             .Include(x => x.Submissions).Include(x => x.Reviews).AsSplitQuery().SingleOrDefaultAsync(x => x.Id == id, ct);
         if (t is null || t.WorkflowVersion != WorkflowVersion.LineSharedV1 || lines.All(x => x.Id != t.LineId))
             throw new PersonalAccessException("NotFound", 404);
