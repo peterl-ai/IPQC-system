@@ -78,15 +78,15 @@ public sealed class WorkContextPostgresTests(ITestOutputHelper output)
             while (await reader.ReadAsync()) rows.Add(reader.GetString(0));
             return rows;
         }
-        var tables = await Query("SELECT tablename FROM pg_tables WHERE schemaname='public' AND tablename NOT IN ('__EFMigrationsHistory','WorkContexts','WorkContextAuditEvents','InspectionAttempts','InspectionAttemptApplicabilities') ORDER BY tablename");
+        var tables = await Query("SELECT tablename FROM pg_tables WHERE schemaname='public' AND tablename NOT IN ('__EFMigrationsHistory','WorkContexts','WorkContextAuditEvents','InspectionAttempts','InspectionAttemptApplicabilities','SharedDrafts','SharedSamples','SharedSampleProjections','ContributionOperations','ContributionDependencies','AcceptedBatchReceipts','SharedAcceptanceAudits') ORDER BY tablename");
         var facts = new Dictionary<string, List<string>>();
         foreach (var table in tables) {
             var quoted = "\"" + table.Replace("\"", "\"\"") + "\"";
             facts[table] = await Query($"SELECT row_to_json(t)::text FROM {quoted} t ORDER BY \"Id\"");
         }
-        facts["columns"] = await Query("SELECT row_to_json(c)::text FROM information_schema.columns c WHERE table_schema='public' AND table_name NOT IN ('__EFMigrationsHistory','WorkContexts','WorkContextAuditEvents','InspectionAttempts','InspectionAttemptApplicabilities') ORDER BY table_name, ordinal_position");
-        facts["constraints"] = await Query("SELECT conrelid::regclass::text || ':' || conname || ':' || pg_get_constraintdef(oid) FROM pg_constraint WHERE connamespace='public'::regnamespace AND conrelid NOT IN ('\"__EFMigrationsHistory\"'::regclass) AND conrelid::regclass::text NOT IN ('\"WorkContexts\"','\"WorkContextAuditEvents\"','\"InspectionAttempts\"','\"InspectionAttemptApplicabilities\"') ORDER BY conrelid::regclass::text, conname");
-        facts["indexes"] = await Query("SELECT indexdef FROM pg_indexes WHERE schemaname='public' AND tablename NOT IN ('__EFMigrationsHistory','WorkContexts','WorkContextAuditEvents','InspectionAttempts','InspectionAttemptApplicabilities') ORDER BY tablename,indexname");
+        facts["columns"] = await Query("SELECT row_to_json(c)::text FROM information_schema.columns c WHERE table_schema='public' AND table_name NOT IN ('__EFMigrationsHistory','WorkContexts','WorkContextAuditEvents','InspectionAttempts','InspectionAttemptApplicabilities','SharedDrafts','SharedSamples','SharedSampleProjections','ContributionOperations','ContributionDependencies','AcceptedBatchReceipts','SharedAcceptanceAudits') ORDER BY table_name, ordinal_position");
+        facts["constraints"] = await Query("SELECT conrelid::regclass::text || ':' || conname || ':' || pg_get_constraintdef(oid) FROM pg_constraint WHERE connamespace='public'::regnamespace AND conrelid NOT IN ('\"__EFMigrationsHistory\"'::regclass) AND replace(conrelid::regclass::text,'\"','') NOT IN ('WorkContexts','WorkContextAuditEvents','InspectionAttempts','InspectionAttemptApplicabilities','SharedDrafts','SharedSamples','SharedSampleProjections','ContributionOperations','ContributionDependencies','AcceptedBatchReceipts','SharedAcceptanceAudits') ORDER BY conrelid::regclass::text, conname");
+        facts["indexes"] = await Query("SELECT indexdef FROM pg_indexes WHERE schemaname='public' AND tablename NOT IN ('__EFMigrationsHistory','WorkContexts','WorkContextAuditEvents','InspectionAttempts','InspectionAttemptApplicabilities','SharedDrafts','SharedSamples','SharedSampleProjections','ContributionOperations','ContributionDependencies','AcceptedBatchReceipts','SharedAcceptanceAudits') ORDER BY tablename,indexname");
         return System.Text.Json.JsonSerializer.Serialize(facts);
     });
 }

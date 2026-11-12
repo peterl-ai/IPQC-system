@@ -1,5 +1,11 @@
 # R32-04 WorkContext foundation
 
+Typed draft follow-up, 2026-11-12: [operation acceptance](20_R3204_SHARED_DRAFT_ACCEPTANCE.md)
+adds a separate transactional draft-write surface. The original source preflight below
+still accepts no business work and cannot authorize a later write. Earlier statements
+that all operation tables were unimplemented describe their recorded historical baseline.
+Shared `canExecute=false` and formal Submit/F2/F3 exclusions remain.
+
 R32-05 identity follow-up, 2026-11-12: [initial attempt implementation](19_R3205_INSPECTION_IDENTITY.md)
 adds real empty identities and explicit Admin initialization. The historical statements
 below that attempts were unimplemented describe their recorded earlier baseline.

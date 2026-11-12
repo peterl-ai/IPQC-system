@@ -42,6 +42,7 @@ public sealed class PatrolPlanAssignee
 
 public sealed class PatrolTask
 {
+    public SharedDraft? SharedDraft { get; set; }
     public int? PlanningSnapshotVersion { get; set; }
     public string? PlanningSnapshotJson { get; set; }
     public WorkflowVersion WorkflowVersion { get; set; } = WorkflowVersion.LegacyPersonalV1;

@@ -1,5 +1,12 @@
 # R32-05 initial InspectionAttempt identity foundation
 
+Post-merge follow-up, 2026-11-12: PR #18 merged as
+`a3bab9b9a779bb36466277b32ea95392a0f59bba` from reviewed HEAD
+`d3ae4ce61ef0f7d301ee7048e63b0fbed650e5fa`; merged-main CI43307242759 succeeded.
+The [typed draft acceptance slice](20_R3204_SHARED_DRAFT_ACCEPTANCE.md) builds on these
+real identities. The branch/deferred statements below retain their original delivery
+context; formal workflow, reinspection producers, F2/F3 and Android remain deferred.
+
 Date: 2026-11-12. Implementation branch for independent review; not deployment or merge approval.
 Base: `92d5a4b6009d339ff3379d41f77c83bc3a21f76a`, the actual PR #16 merge.
 Its reviewed feature HEAD `99c550bebb95a5d7fac867b9079daecf81755f29` is an ancestor,

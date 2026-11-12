@@ -23,13 +23,17 @@ Admin/PQE shared Plans now use actual configured lines, fixed New York Day07/Nig
 The first R32-04 backend foundation adds task-scoped WorkContext source proofs,
 read-only preflight and atomic source-security revocation/audit. See
 [contracts and verification boundaries](docs/18_R3204_WORK_CONTEXT.md).
-Shared tasks remain `canExecute=false`; no shared inspection acceptance, Submit,
+Shared tasks remain `canExecute=false`; no formal shared inspection completion, Submit,
 photos or Android is activated. PR review is separate from production authorization.
 
 The scoped R32-05 identity foundation creates real empty initial InspectionAttempts
 atomically with new shared tasks and supports explicit audited Admin preparation of
 eligible inventoried existing tasks. See [identity, inventory and migration contracts](docs/19_R3205_INSPECTION_IDENTITY.md).
 This supplies identities only; shared execution remains disabled.
+
+The scoped [typed shared draft acceptance foundation](docs/20_R3204_SHARED_DRAFT_ACCEPTANCE.md)
+adds real sample contributions, DraftVersion CAS and durable provenance/receipts.
+Draft acceptance does not complete or submit an inspection; no execution UI is activated.
 
 The product has two major clients:
 

@@ -13,6 +13,7 @@ public sealed class InspectionAttemptService(IpqcDbContext db, WorkContextStore 
     PersonalAccessOptions options, TimeProvider clock)
 {
     internal IQueryable<PatrolTask> Tasks() => db.PatrolTasks
+        .Include(x=>x.SharedDraft)
         .Include(x => x.Items).ThenInclude(x => x.Samples)
         .Include(x => x.Items).ThenInclude(x => x.InspectionAttempts)
         .Include(x => x.Items).ThenInclude(x => x.CurrentInspectionAttempt)
@@ -27,7 +28,9 @@ public sealed class InspectionAttemptService(IpqcDbContext db, WorkContextStore 
         if (status != "ValidV1") return "InvalidPlanningSnapshot";
         var identity = InitialInspectionIdentity.State(t);
         if (identity is not ("Initialized" or "Uninitialized")) return identity;
-        if (LineSharedTaskEligibility.Availability(t) != "FoundationOnly") return "HistoricalInspectionData";
+        var availability=LineSharedTaskEligibility.Availability(t);
+        if (availability=="DraftFoundation") return "SharedDraftInitialized";
+        if (availability != "FoundationOnly") return "HistoricalInspectionData";
         return identity == "Initialized" ? "AlreadyInitialized" : "EligibleCleanFoundationOnly";
     }
 
@@ -101,7 +104,7 @@ public sealed class InspectionAttemptService(IpqcDbContext db, WorkContextStore 
     internal static InspectionIdentityOutput Output(PatrolTask t)
     {
         var category = Category(t);
-        var state = category == "AlreadyInitialized" ? "Initialized" : category == "EligibleCleanFoundationOnly" ? "Uninitialized" : category;
+        var state = category is "AlreadyInitialized" or "SharedDraftInitialized" ? "Initialized" : category == "EligibleCleanFoundationOnly" ? "Uninitialized" : category;
         return new(t.Id, t.LineId!.Value, (int)t.WorkflowVersion, state, state != "Initialized" ? [] :
             t.Items.OrderBy(x => x.SequenceNo).Select(x => {
                 var a = x.InspectionAttempts.Single();

@@ -17,6 +17,34 @@ namespace JaxPower.Ipqc.Api.Data.Migrations
 #pragma warning disable 612, 618
             modelBuilder.HasAnnotation("ProductVersion", "10.0.12");
 
+            modelBuilder.Entity("JaxPower.Ipqc.Api.Domain.AcceptedBatchReceipt", b =>
+                {
+                    b.Property<Guid>("TaskId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("BatchId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("DraftVersion")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("ReceiptJson")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("RequestFingerprint")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("TaskId", "BatchId");
+
+                    b.ToTable("AcceptedBatchReceipts", t =>
+                        {
+                            t.HasCheckConstraint("CK_AcceptedBatchReceipts_Version", "\"DraftVersion\" > 0 AND length(\"RequestFingerprint\") = 64 AND length(\"ReceiptJson\") > 0");
+                        });
+                });
+
             modelBuilder.Entity("JaxPower.Ipqc.Api.Domain.ApplicationUser", b =>
                 {
                     b.Property<Guid>("Id")
@@ -85,6 +113,123 @@ namespace JaxPower.Ipqc.Api.Data.Migrations
                         .IsUnique();
 
                     b.ToTable("ApplicationUsers");
+                });
+
+            modelBuilder.Entity("JaxPower.Ipqc.Api.Domain.ContributionDependency", b =>
+                {
+                    b.Property<Guid>("TaskId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("OperationId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("DependencyId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ContentHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("TaskId", "OperationId", "DependencyId");
+
+                    b.HasIndex("TaskId", "DependencyId", "ContentHash");
+
+                    b.ToTable("ContributionDependencies", t =>
+                        {
+                            t.HasCheckConstraint("CK_ContributionDependencies_NoSelf", "\"OperationId\" <> \"DependencyId\"");
+                        });
+                });
+
+            modelBuilder.Entity("JaxPower.Ipqc.Api.Domain.ContributionOperation", b =>
+                {
+                    b.Property<Guid>("TaskId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("OperationId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("AcceptedAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("BatchId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("CanonicalPayload")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("CanonicalizationVersion")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("ContentHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("ContributorUserId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("DraftVersion")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("EnvironmentId")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("InspectionAttemptId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("LineId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ReceiptJson")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("SampleId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("SourceWorkContextId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("TaskItemId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("UploadedByUserId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("UploadedPersonalSessionId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("WorkflowVersion")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("TaskId", "OperationId");
+
+                    b.HasIndex("ContributorUserId");
+
+                    b.HasIndex("LineId");
+
+                    b.HasIndex("SourceWorkContextId");
+
+                    b.HasIndex("UploadedByUserId");
+
+                    b.HasIndex("TaskId", "BatchId");
+
+                    b.HasIndex("SampleId", "TaskId", "TaskItemId", "InspectionAttemptId")
+                        .HasDatabaseName("IX_ContributionOperations_SampleScope");
+
+                    b.ToTable("ContributionOperations", t =>
+                        {
+                            t.HasCheckConstraint("CK_ContributionOperations_Contract", "\"OperationId\" <> '00000000-0000-0000-0000-000000000000' AND \"WorkflowVersion\" = 2 AND \"CanonicalizationVersion\" = 1 AND \"Kind\" IN ('CaptureSample','CorrectSample','RemoveSample') AND \"DraftVersion\" > 0 AND length(\"ContentHash\") = 64 AND length(\"CanonicalPayload\") > 0 AND length(\"ReceiptJson\") > 0");
+                        });
                 });
 
             modelBuilder.Entity("JaxPower.Ipqc.Api.Domain.DeviceCredential", b =>
@@ -414,7 +559,8 @@ namespace JaxPower.Ipqc.Api.Data.Migrations
                     b.HasIndex("InspectionAttemptId")
                         .IsUnique();
 
-                    b.HasIndex("InspectionAttemptId", "PatrolTaskItemId").HasDatabaseName("IX_AttemptApplicabilities_AttemptScope");
+                    b.HasIndex("InspectionAttemptId", "PatrolTaskItemId")
+                        .HasDatabaseName("IX_AttemptApplicabilities_AttemptScope");
 
                     b.ToTable("InspectionAttemptApplicabilities");
                 });
@@ -1450,6 +1596,152 @@ namespace JaxPower.Ipqc.Api.Data.Migrations
                         });
                 });
 
+            modelBuilder.Entity("JaxPower.Ipqc.Api.Domain.SharedAcceptanceAudit", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("ActorUserId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("AfterVersion")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<Guid>("BatchId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("BeforeVersion")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("NewOperationCount")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("OccurredAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("PersonalSessionId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("TaskId")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ActorUserId");
+
+                    b.HasIndex("TaskId", "BatchId");
+
+                    b.ToTable("SharedAcceptanceAudits", t =>
+                        {
+                            t.HasCheckConstraint("CK_SharedAcceptanceAudits_Version", "\"BeforeVersion\" >= 0 AND \"AfterVersion\" = \"BeforeVersion\" + 1 AND \"NewOperationCount\" BETWEEN 1 AND 50");
+                        });
+                });
+
+            modelBuilder.Entity("JaxPower.Ipqc.Api.Domain.SharedDraft", b =>
+                {
+                    b.Property<Guid>("TaskId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("DraftVersion")
+                        .IsConcurrencyToken()
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("TaskId");
+
+                    b.ToTable("SharedDrafts", t =>
+                        {
+                            t.HasCheckConstraint("CK_SharedDrafts_Version", "\"DraftVersion\" >= 0");
+                        });
+                });
+
+            modelBuilder.Entity("JaxPower.Ipqc.Api.Domain.SharedSample", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("ClientSampleId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("InspectionAttemptId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("SequenceNo")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<Guid>("TaskId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("TaskItemId")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TaskId");
+
+                    b.HasIndex("InspectionAttemptId", "ClientSampleId")
+                        .IsUnique();
+
+                    b.HasIndex("InspectionAttemptId", "SequenceNo")
+                        .IsUnique();
+
+                    b.HasIndex("InspectionAttemptId", "TaskItemId");
+
+                    b.ToTable("SharedSamples", t =>
+                        {
+                            t.HasCheckConstraint("CK_SharedSamples_Identity", "\"Id\" <> '00000000-0000-0000-0000-000000000000' AND \"ClientSampleId\" <> '00000000-0000-0000-0000-000000000000' AND \"SequenceNo\" >= 1");
+                        });
+                });
+
+            modelBuilder.Entity("JaxPower.Ipqc.Api.Domain.SharedSampleProjection", b =>
+                {
+                    b.Property<Guid>("SampleId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Barcode")
+                        .HasMaxLength(200)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("InspectionType")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("TEXT");
+
+                    b.Property<decimal?>("InspectionValue")
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("IsRemoved")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Judgment")
+                        .IsRequired()
+                        .HasMaxLength(2)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("LastOperationId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("TaskId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("ValueOperationId")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("SampleId");
+
+                    b.HasIndex("SampleId", "TaskId");
+
+                    b.HasIndex("TaskId", "LastOperationId", "SampleId");
+
+                    b.HasIndex("TaskId", "ValueOperationId", "SampleId");
+
+                    b.ToTable("SharedSampleProjections", t =>
+                        {
+                            t.HasCheckConstraint("CK_SharedSampleProjections_Value", "\"Judgment\" IN ('OK','NG') AND ((\"InspectionType\" = 'Qualitative' AND \"InspectionValue\" IS NULL AND \"Barcode\" IS NULL) OR (\"InspectionType\" = 'Quantitative' AND \"InspectionValue\" IS NOT NULL))");
+                        });
+                });
+
             modelBuilder.Entity("JaxPower.Ipqc.Api.Domain.WorkContext", b =>
                 {
                     b.Property<Guid>("Id")
@@ -1601,6 +1893,75 @@ namespace JaxPower.Ipqc.Api.Data.Migrations
                         });
                 });
 
+            modelBuilder.Entity("JaxPower.Ipqc.Api.Domain.AcceptedBatchReceipt", b =>
+                {
+                    b.HasOne("JaxPower.Ipqc.Api.Domain.SharedDraft", null)
+                        .WithMany()
+                        .HasForeignKey("TaskId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("JaxPower.Ipqc.Api.Domain.ContributionDependency", b =>
+                {
+                    b.HasOne("JaxPower.Ipqc.Api.Domain.ContributionOperation", null)
+                        .WithMany()
+                        .HasForeignKey("TaskId", "OperationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_ContributionDependencies_Operation");
+
+                    b.HasOne("JaxPower.Ipqc.Api.Domain.ContributionOperation", null)
+                        .WithMany()
+                        .HasForeignKey("TaskId", "DependencyId", "ContentHash")
+                        .HasPrincipalKey("TaskId", "OperationId", "ContentHash")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_ContributionDependencies_Reference");
+                });
+
+            modelBuilder.Entity("JaxPower.Ipqc.Api.Domain.ContributionOperation", b =>
+                {
+                    b.HasOne("JaxPower.Ipqc.Api.Domain.ApplicationUser", null)
+                        .WithMany()
+                        .HasForeignKey("ContributorUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("JaxPower.Ipqc.Api.Domain.ProductionLine", null)
+                        .WithMany()
+                        .HasForeignKey("LineId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("JaxPower.Ipqc.Api.Domain.WorkContext", null)
+                        .WithMany()
+                        .HasForeignKey("SourceWorkContextId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("JaxPower.Ipqc.Api.Domain.ApplicationUser", null)
+                        .WithMany()
+                        .HasForeignKey("UploadedByUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("JaxPower.Ipqc.Api.Domain.AcceptedBatchReceipt", null)
+                        .WithMany()
+                        .HasForeignKey("TaskId", "BatchId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_ContributionOperations_Batch");
+
+                    b.HasOne("JaxPower.Ipqc.Api.Domain.SharedSample", null)
+                        .WithMany()
+                        .HasForeignKey("SampleId", "TaskId", "TaskItemId", "InspectionAttemptId")
+                        .HasPrincipalKey("Id", "TaskId", "TaskItemId", "InspectionAttemptId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_ContributionOperations_SampleScope");
+                });
+
             modelBuilder.Entity("JaxPower.Ipqc.Api.Domain.DeviceCredential", b =>
                 {
                     b.HasOne("JaxPower.Ipqc.Api.Domain.RegisteredDevice", null)
@@ -1679,16 +2040,18 @@ namespace JaxPower.Ipqc.Api.Data.Migrations
                 {
                     b.HasOne("JaxPower.Ipqc.Api.Domain.PatrolTaskItem", "PatrolTaskItem")
                         .WithOne("CurrentInspectionAttempt")
-                        .HasForeignKey("JaxPower.Ipqc.Api.Domain.InspectionAttemptApplicability", "PatrolTaskItemId").HasConstraintName("FK_AttemptApplicabilities_TaskItem")
+                        .HasForeignKey("JaxPower.Ipqc.Api.Domain.InspectionAttemptApplicability", "PatrolTaskItemId")
                         .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
+                        .IsRequired()
+                        .HasConstraintName("FK_AttemptApplicabilities_TaskItem");
 
                     b.HasOne("JaxPower.Ipqc.Api.Domain.InspectionAttempt", "InspectionAttempt")
                         .WithMany()
                         .HasForeignKey("InspectionAttemptId", "PatrolTaskItemId")
-                        .HasPrincipalKey("Id", "PatrolTaskItemId").HasConstraintName("FK_AttemptApplicabilities_AttemptScope")
+                        .HasPrincipalKey("Id", "PatrolTaskItemId")
                         .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
+                        .IsRequired()
+                        .HasConstraintName("FK_AttemptApplicabilities_AttemptScope");
 
                     b.Navigation("InspectionAttempt");
 
@@ -1925,6 +2288,75 @@ namespace JaxPower.Ipqc.Api.Data.Migrations
                         .IsRequired();
                 });
 
+            modelBuilder.Entity("JaxPower.Ipqc.Api.Domain.SharedAcceptanceAudit", b =>
+                {
+                    b.HasOne("JaxPower.Ipqc.Api.Domain.ApplicationUser", null)
+                        .WithMany()
+                        .HasForeignKey("ActorUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("JaxPower.Ipqc.Api.Domain.AcceptedBatchReceipt", null)
+                        .WithMany()
+                        .HasForeignKey("TaskId", "BatchId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_SharedAcceptanceAudits_Batch");
+                });
+
+            modelBuilder.Entity("JaxPower.Ipqc.Api.Domain.SharedDraft", b =>
+                {
+                    b.HasOne("JaxPower.Ipqc.Api.Domain.PatrolTask", null)
+                        .WithOne("SharedDraft")
+                        .HasForeignKey("JaxPower.Ipqc.Api.Domain.SharedDraft", "TaskId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("JaxPower.Ipqc.Api.Domain.SharedSample", b =>
+                {
+                    b.HasOne("JaxPower.Ipqc.Api.Domain.SharedDraft", null)
+                        .WithMany()
+                        .HasForeignKey("TaskId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("JaxPower.Ipqc.Api.Domain.InspectionAttempt", null)
+                        .WithMany()
+                        .HasForeignKey("InspectionAttemptId", "TaskItemId")
+                        .HasPrincipalKey("Id", "PatrolTaskItemId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_SharedSamples_AttemptScope");
+                });
+
+            modelBuilder.Entity("JaxPower.Ipqc.Api.Domain.SharedSampleProjection", b =>
+                {
+                    b.HasOne("JaxPower.Ipqc.Api.Domain.SharedSample", null)
+                        .WithMany()
+                        .HasForeignKey("SampleId", "TaskId")
+                        .HasPrincipalKey("Id", "TaskId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_SharedSampleProjections_Sample");
+
+                    b.HasOne("JaxPower.Ipqc.Api.Domain.ContributionOperation", null)
+                        .WithMany()
+                        .HasForeignKey("TaskId", "LastOperationId", "SampleId")
+                        .HasPrincipalKey("TaskId", "OperationId", "SampleId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_SharedSampleProjections_LastOperation");
+
+                    b.HasOne("JaxPower.Ipqc.Api.Domain.ContributionOperation", null)
+                        .WithMany()
+                        .HasForeignKey("TaskId", "ValueOperationId", "SampleId")
+                        .HasPrincipalKey("TaskId", "OperationId", "SampleId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_SharedSampleProjections_ValueOperation");
+                });
+
             modelBuilder.Entity("JaxPower.Ipqc.Api.Domain.WorkContext", b =>
                 {
                     b.HasOne("JaxPower.Ipqc.Api.Domain.ProductionLine", null)
@@ -1995,6 +2427,8 @@ namespace JaxPower.Ipqc.Api.Data.Migrations
 
                     b.Navigation("Reviews");
 
+                    b.Navigation("SharedDraft");
+
                     b.Navigation("Submissions");
                 });
 
@@ -2016,7 +2450,7 @@ namespace JaxPower.Ipqc.Api.Data.Migrations
                 {
                     b.Navigation("Samples");
                 });
-            // Keep the existing provider-neutral model convention.
+            // Keep provider-default types resolved by the active provider.
             foreach (var entity in modelBuilder.Model.GetEntityTypes())
                 foreach (var property in entity.GetProperties()) property.SetColumnType(null);
 #pragma warning restore 612, 618

@@ -26,6 +26,8 @@ builder.Services.AddScoped<WorkContextStore>();
 builder.Services.AddScoped<WorkContextSecurity>();
 builder.Services.AddScoped<WorkContextService>();
 builder.Services.AddScoped<InspectionAttemptService>();
+builder.Services.AddScoped<SharedDraftService>();
+builder.Services.AddSingleton<SharedDraftLimits>();
 builder.Services.AddSingleton<WorkContextLimits>();
 builder.Services.AddScoped<LinePatrolReadService>();
 builder.Services.AddScoped<ConfiguredLineDirectory>();
@@ -168,6 +170,12 @@ app.Use(async (context, next) =>
         context.Request.Path.StartsWithSegments("/api/admin/inspection-identities"))
         context.Response.Headers.CacheControl = "no-store";
     try { await next(context); }
+    catch (DraftQuarantineException ex) when (!context.Response.HasStarted)
+    {
+        await Results.Problem(statusCode:409,title:ex.Message,extensions:new Dictionary<string,object?> {
+            ["code"]=ex.Message,["quarantineRequired"]=true,["operationIds"]=ex.OperationIds,["sourceContextIds"]=ex.SourceContextIds,
+            ["preserveOriginals"]=true }).ExecuteAsync(context);
+    }
     catch (WorkContextSourceRevokedException ex) when (!context.Response.HasStarted)
     {
         context.Response.Headers.CacheControl = "no-store";
@@ -211,6 +219,8 @@ app.Use(async (context, next) =>
 });
 
 app.Use(WorkContextEndpoints.Limits);
+app.Use(SharedDraftEndpoints.Limits);
+app.MapSharedDrafts();
 app.MapWorkContexts();
 app.MapInspectionAttempts();
 app.MapAuth();

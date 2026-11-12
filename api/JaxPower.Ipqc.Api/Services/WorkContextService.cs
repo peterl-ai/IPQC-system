@@ -23,6 +23,7 @@ public sealed class WorkContextService(IpqcDbContext db, WorkContextStore store,
     {
         var lines = await directory.LinesAsync(ct);
         var t = await db.PatrolTasks.AsNoTracking().Include(x => x.Items).ThenInclude(x => x.Samples)
+            .Include(x=>x.SharedDraft)
             .Include(x => x.Items).ThenInclude(x => x.InspectionAttempts)
             .Include(x => x.Items).ThenInclude(x => x.CurrentInspectionAttempt)
             .Include(x => x.Submissions).Include(x => x.Reviews).AsSplitQuery().SingleOrDefaultAsync(x => x.Id == id, ct);
@@ -34,7 +35,7 @@ public sealed class WorkContextService(IpqcDbContext db, WorkContextStore store,
     {
         if (line != t.LineId || workflow != (int)t.WorkflowVersion || environment != a.EnvironmentId)
             throw Conflict("WorkContextScopeMismatch");
-        if (PlanningSnapshot.Status(t) != "ValidV1" || LineSharedTaskEligibility.Availability(t) != "FoundationOnly")
+        if (PlanningSnapshot.Status(t) != "ValidV1" || LineSharedTaskEligibility.Availability(t) is not ("FoundationOnly" or "DraftFoundation"))
             throw Conflict("TaskReadContractUnavailable");
     }
     public Task<WorkContextIssued> IssueAsync(Guid taskId, WorkContextIssueInput input, ClaimsPrincipal actor, CancellationToken ct) =>
@@ -117,7 +118,7 @@ public sealed class WorkContextService(IpqcDbContext db, WorkContextStore store,
     private async Task<WorkContext> Context(Guid id, CancellationToken ct) => await db.WorkContexts.SingleOrDefaultAsync(x => x.Id == id, ct)
         ?? throw new PersonalAccessException("NotFound", 404);
     private static string Hash(string proof) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(proof)));
-    private static bool ValidProof(string? proof, string hash)
+    internal static bool ValidProof(string? proof, string hash)
     {
         if (proof is not { Length: 43 } || proof.Any(c => !char.IsAsciiLetterOrDigit(c) && c is not '-' and not '_')) return false;
         try {
