@@ -1,10 +1,14 @@
 using Microsoft.EntityFrameworkCore;
 using Xunit;
+using Xunit.Abstractions;
 
 namespace JaxPower.Ipqc.Api.Tests;
 
-public sealed class WorkContextPostgresTests
+public sealed class WorkContextPostgresTests(ITestOutputHelper output)
 {
+    [DisposablePostgresFact] public async Task Snapshot_waiter_deactivation() { await using var f = await PersonalSessionFixture.CreateAsync(true); await WorkContextRevocationRace.WaitingSecurity(f, "deactivate", output); }
+    [DisposablePostgresFact] public async Task Snapshot_waiter_role_loss() { await using var f = await PersonalSessionFixture.CreateAsync(true); await WorkContextRevocationRace.WaitingSecurity(f, "role", output); }
+    [DisposablePostgresFact] public async Task Snapshot_waiter_password_reset() { await using var f = await PersonalSessionFixture.CreateAsync(true); await WorkContextRevocationRace.WaitingSecurity(f, "reset", output); }
     [DisposablePostgresFact] public async Task Foundation() { await using var f = await PersonalSessionFixture.CreateAsync(true); await WorkContextTests.Foundation(f); }
     [DisposablePostgresFact] public async Task Issue_first() { await using var f = await PersonalSessionFixture.CreateAsync(true); await WorkContextConcurrencyTests.IssueRace(f, false); }
     [DisposablePostgresFact] public async Task Reset_first() { await using var f = await PersonalSessionFixture.CreateAsync(true); await WorkContextConcurrencyTests.IssueRace(f, true); }

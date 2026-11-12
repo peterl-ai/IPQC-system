@@ -35,6 +35,7 @@ internal sealed class PersonalClock : TimeProvider
 internal sealed class SessionFault : DbCommandInterceptor
 {
     public System.Collections.Concurrent.ConcurrentQueue<string> SessionSql { get; } = new();
+    public Func<DbCommand, CancellationToken, Task>? ObserveAsync { get; set; }
     private Func<DbCommand, bool>? match;
     private bool fail;
     private int busyRemaining;
@@ -51,6 +52,7 @@ internal sealed class SessionFault : DbCommandInterceptor
     { Arm(fragment); busyRemaining = failures; }
     private async Task Check(DbCommand command, CancellationToken ct)
     {
+        if (ObserveAsync is { } observe) await observe(command, ct);
         if (command.CommandText.Contains("RefreshTokenSessions", StringComparison.Ordinal))
             SessionSql.Enqueue(command.CommandText + " | " + string.Join(",", command.Parameters.Cast<DbParameter>()
                 .Where(p => p.Value is Guid or DateTime or DBNull).Select(p => p.ParameterName + "=" + p.Value)));
