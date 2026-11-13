@@ -39,4 +39,19 @@ Check the command exit code, archive size, readable table-of-contents, and backu
 
 Do not start the scheduler against a restored copy until its generation boundary and catch-up window have been reviewed; otherwise due historical plans may generate new tasks in the test database. Keep restored test data isolated and access-controlled.
 
-Inspection image/file storage is **not implemented** in current Web v1. When added later, backup and restore must coordinate database metadata with external file bytes and retention.
+Web v1 has no photo workflow; [R32-06](22_R3206_PROTECTED_PHOTOS.md) adds separate protected
+server bytes. A DB dump alone cannot restore photos. Back up DB metadata/immutable
+acceptances, all registered staging/final objects, and configuration mapping the same
+opaque keys to the private volume as one reviewed recovery set. No production schedule,
+backup agent or restore drill is provided by this implementation.
+
+During restore keep API ingress closed and the scheduler disabled outside the application.
+Restore to an isolated DB/volume; reconcile accepted and pending files by actual size/hash,
+not by timestamps or a historical Ready row. Missing/corrupt accepted files fail closed;
+this foundation never overwrites/automatically repairs an accepted object. Pending recovery
+requires current authorized B plus eligible source proof; restoring bytes alone grants
+no acceptance. A restored DB snapshot must not silently undo later account/source-security
+revocations: reconcile those authoritative security facts before reopening ingress. Never
+invent retention deletion, reference counts or inspection facts to explain missing bytes.
+Keep production retention disabled. A coordinated power-loss/restore rehearsal and security
+revocation reconciliation remain deployment prerequisites, not tests claimed by this PR.

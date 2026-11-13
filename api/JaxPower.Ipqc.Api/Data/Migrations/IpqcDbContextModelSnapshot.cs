@@ -115,6 +115,173 @@ namespace JaxPower.Ipqc.Api.Data.Migrations
                     b.ToTable("ApplicationUsers");
                 });
 
+            modelBuilder.Entity("JaxPower.Ipqc.Api.Domain.AttachmentAcceptance", b =>
+                {
+                    b.Property<Guid>("AttachmentId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("ByteCount")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("ContentType")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("Height")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("ReadyAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Sha256")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("StoredAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("StoredEncoding")
+                        .IsRequired()
+                        .HasMaxLength(10)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("UploadId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("UploadedByUserId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("UploadedPersonalSessionId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("Width")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("AttachmentId");
+
+                    b.HasIndex("UploadedByUserId");
+
+                    b.HasIndex("UploadId", "AttachmentId");
+
+                    b.ToTable("AttachmentAcceptances", t =>
+                        {
+                            t.HasCheckConstraint("CK_AttachmentAcceptance_Ready", "\"ByteCount\" BETWEEN 1 AND 5242880 AND length(\"Sha256\") = 64 AND \"Width\" BETWEEN 1 AND 6000 AND \"Height\" BETWEEN 1 AND 6000 AND CAST(\"Width\" AS bigint) * \"Height\" <= 12000000 AND \"ReadyAtUtc\" >= \"StoredAtUtc\" AND ((\"ContentType\" = 'image/jpeg' AND \"StoredEncoding\" = 'JPEG') OR (\"ContentType\" = 'image/png' AND \"StoredEncoding\" = 'PNG'))");
+                        });
+                });
+
+            modelBuilder.Entity("JaxPower.Ipqc.Api.Domain.AttachmentAvailability", b =>
+                {
+                    b.Property<Guid>("AttachmentId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("AcceptedAttachmentId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("ActiveUploadId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("LeaseToken")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("LeaseUntilUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("State")
+                        .IsRequired()
+                        .HasMaxLength(30)
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("AttachmentId");
+
+                    b.HasIndex("AcceptedAttachmentId");
+
+                    b.HasIndex("ActiveUploadId", "AttachmentId");
+
+                    b.ToTable("AttachmentAvailabilities", t =>
+                        {
+                            t.HasCheckConstraint("CK_AttachmentAvailability_State", "\"Version\" >= 0 AND \"State\" IN ('AwaitingBytes','Receiving','Stored','Ready','Failed','MissingUnexpected','Corrupt') AND (\"State\" <> 'Ready' OR \"AcceptedAttachmentId\" IS NOT NULL) AND (\"AcceptedAttachmentId\" IS NULL OR \"AcceptedAttachmentId\" = \"AttachmentId\") AND ((\"LeaseToken\" IS NULL AND \"LeaseUntilUtc\" IS NULL) OR (\"LeaseToken\" IS NOT NULL AND \"LeaseUntilUtc\" IS NOT NULL AND \"ActiveUploadId\" IS NOT NULL))");
+                        });
+                });
+
+            modelBuilder.Entity("JaxPower.Ipqc.Api.Domain.AttachmentEvent", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("ActorUserId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("AttachmentId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("OccurredAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("PersonalSessionId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("State")
+                        .IsRequired()
+                        .HasMaxLength(30)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ActorUserId");
+
+                    b.HasIndex("AttachmentId");
+
+                    b.ToTable("AttachmentEvents");
+                });
+
+            modelBuilder.Entity("JaxPower.Ipqc.Api.Domain.AttachmentUpload", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("AttachmentId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("StageKey")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("StartedAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("StartedByUserId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("StartedPersonalSessionId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("StoredAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AttachmentId");
+
+                    b.HasIndex("StageKey")
+                        .IsUnique();
+
+                    b.HasIndex("StartedByUserId");
+
+                    b.ToTable("AttachmentUploads", t =>
+                        {
+                            t.HasCheckConstraint("CK_AttachmentUpload_Stored", "length(\"StageKey\") = 32 AND (\"StoredAtUtc\" IS NULL OR \"StoredAtUtc\" >= \"StartedAtUtc\")");
+                        });
+                });
+
             modelBuilder.Entity("JaxPower.Ipqc.Api.Domain.ContributionDependency", b =>
                 {
                     b.Property<Guid>("TaskId")
@@ -475,6 +642,93 @@ namespace JaxPower.Ipqc.Api.Data.Migrations
                     b.ToTable("EnrollmentChallenges", t =>
                         {
                             t.HasCheckConstraint("CK_Challenge_State", "\"Purpose\" IN (1,2) AND \"Revision\" >= 1 AND length(\"NonceHash\") = 64 AND length(\"PayloadHash\") = 64");
+                        });
+                });
+
+            modelBuilder.Entity("JaxPower.Ipqc.Api.Domain.InspectionAttachment", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("CaptureSource")
+                        .IsRequired()
+                        .HasMaxLength(10)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("ClientPhotoId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("ContributorUserId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("DeclaredContentType")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("EnvironmentId")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("ExpectedBytes")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("ExpectedSha256")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("InspectionAttemptId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("LineId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("SourceWorkContextId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("StorageKey")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("TaskId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("TaskItemId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("WorkflowVersion")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ContributorUserId");
+
+                    b.HasIndex("LineId");
+
+                    b.HasIndex("SourceWorkContextId");
+
+                    b.HasIndex("StorageKey")
+                        .IsUnique();
+
+                    b.HasIndex("TaskId");
+
+                    b.HasIndex("TaskItemId");
+
+                    b.HasIndex("EnvironmentId", "ClientPhotoId")
+                        .IsUnique();
+
+                    b.HasIndex("InspectionAttemptId", "TaskItemId");
+
+                    b.ToTable("InspectionAttachments", t =>
+                        {
+                            t.HasCheckConstraint("CK_Attachment_Identity", "\"WorkflowVersion\" = 2 AND \"ExpectedBytes\" BETWEEN 1 AND 5242880 AND length(\"ExpectedSha256\") = 64 AND length(\"StorageKey\") = 32 AND length(\"EnvironmentId\") BETWEEN 1 AND 200 AND \"DeclaredContentType\" IN ('image/jpeg','image/png') AND \"CaptureSource\" IN ('Camera','Album') AND \"ClientPhotoId\" <> '00000000-0000-0000-0000-000000000000'");
                         });
                 });
 
@@ -2014,6 +2268,81 @@ namespace JaxPower.Ipqc.Api.Data.Migrations
                         .IsRequired();
                 });
 
+            modelBuilder.Entity("JaxPower.Ipqc.Api.Domain.AttachmentAcceptance", b =>
+                {
+                    b.HasOne("JaxPower.Ipqc.Api.Domain.InspectionAttachment", null)
+                        .WithMany()
+                        .HasForeignKey("AttachmentId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("JaxPower.Ipqc.Api.Domain.ApplicationUser", null)
+                        .WithMany()
+                        .HasForeignKey("UploadedByUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("JaxPower.Ipqc.Api.Domain.AttachmentUpload", null)
+                        .WithMany()
+                        .HasForeignKey("UploadId", "AttachmentId")
+                        .HasConstraintName("FK_PhotoAcceptance_UploadScope")
+                        .HasPrincipalKey("Id", "AttachmentId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("JaxPower.Ipqc.Api.Domain.AttachmentAvailability", b =>
+                {
+                    b.HasOne("JaxPower.Ipqc.Api.Domain.AttachmentAcceptance", null)
+                        .WithMany()
+                        .HasForeignKey("AcceptedAttachmentId")
+                        .HasConstraintName("FK_PhotoAvailability_Acceptance")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("JaxPower.Ipqc.Api.Domain.InspectionAttachment", null)
+                        .WithOne()
+                        .HasForeignKey("JaxPower.Ipqc.Api.Domain.AttachmentAvailability", "AttachmentId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("JaxPower.Ipqc.Api.Domain.AttachmentUpload", null)
+                        .WithMany()
+                        .HasForeignKey("ActiveUploadId", "AttachmentId")
+                        .HasConstraintName("FK_PhotoAvailability_UploadScope")
+                        .HasPrincipalKey("Id", "AttachmentId")
+                        .OnDelete(DeleteBehavior.Restrict);
+                });
+
+            modelBuilder.Entity("JaxPower.Ipqc.Api.Domain.AttachmentEvent", b =>
+                {
+                    b.HasOne("JaxPower.Ipqc.Api.Domain.ApplicationUser", null)
+                        .WithMany()
+                        .HasForeignKey("ActorUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("JaxPower.Ipqc.Api.Domain.InspectionAttachment", null)
+                        .WithMany()
+                        .HasForeignKey("AttachmentId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("JaxPower.Ipqc.Api.Domain.AttachmentUpload", b =>
+                {
+                    b.HasOne("JaxPower.Ipqc.Api.Domain.InspectionAttachment", null)
+                        .WithMany()
+                        .HasForeignKey("AttachmentId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("JaxPower.Ipqc.Api.Domain.ApplicationUser", null)
+                        .WithMany()
+                        .HasForeignKey("StartedByUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("JaxPower.Ipqc.Api.Domain.ContributionDependency", b =>
                 {
                     b.HasOne("JaxPower.Ipqc.Api.Domain.ContributionOperation", null)
@@ -2128,6 +2457,47 @@ namespace JaxPower.Ipqc.Api.Data.Migrations
                     b.HasOne("JaxPower.Ipqc.Api.Domain.DeviceEnrollment", null)
                         .WithMany()
                         .HasForeignKey("EnrollmentId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("JaxPower.Ipqc.Api.Domain.InspectionAttachment", b =>
+                {
+                    b.HasOne("JaxPower.Ipqc.Api.Domain.ApplicationUser", null)
+                        .WithMany()
+                        .HasForeignKey("ContributorUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("JaxPower.Ipqc.Api.Domain.ProductionLine", null)
+                        .WithMany()
+                        .HasForeignKey("LineId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("JaxPower.Ipqc.Api.Domain.WorkContext", null)
+                        .WithMany()
+                        .HasForeignKey("SourceWorkContextId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("JaxPower.Ipqc.Api.Domain.PatrolTask", null)
+                        .WithMany()
+                        .HasForeignKey("TaskId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("JaxPower.Ipqc.Api.Domain.PatrolTaskItem", null)
+                        .WithMany()
+                        .HasForeignKey("TaskItemId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("JaxPower.Ipqc.Api.Domain.InspectionAttempt", null)
+                        .WithMany()
+                        .HasForeignKey("InspectionAttemptId", "TaskItemId")
+                        .HasConstraintName("FK_Photo_AttemptScope")
+                        .HasPrincipalKey("Id", "PatrolTaskItemId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
                 });

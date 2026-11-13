@@ -27,6 +27,10 @@ builder.Services.AddScoped<WorkContextSecurity>();
 builder.Services.AddScoped<WorkContextService>();
 builder.Services.AddScoped<InspectionAttemptService>();
 builder.Services.AddScoped<SharedDraftService>();
+builder.Services.AddScoped<InspectionAttachmentService>();
+builder.Services.AddSingleton<IProtectedPhotoStore,ProtectedPhotoStore>();
+builder.Services.AddSingleton<PhotoVerifier>();
+builder.Services.AddSingleton<PhotoLimits>();
 builder.Services.AddSingleton<SharedDraftLimits>();
 builder.Services.AddSingleton<WorkContextLimits>();
 builder.Services.AddScoped<LinePatrolReadService>();
@@ -220,7 +224,9 @@ app.Use(async (context, next) =>
 
 app.Use(WorkContextEndpoints.Limits);
 app.Use(SharedDraftEndpoints.Limits);
+app.Use(InspectionAttachmentEndpoints.Limits);
 app.MapSharedDrafts();
+app.MapInspectionAttachments();
 app.MapWorkContexts();
 app.MapInspectionAttempts();
 app.MapAuth();

@@ -1,5 +1,14 @@
 # 09 — Inspection Image / File Storage
 
+## Current precedence — R32-06
+
+Approved Rev3.2 supersedes the historical FTP proposal below. The implemented
+[protected photo foundation](22_R3206_PROTECTED_PHOTOS.md) uses a private local server
+volume outside the application/web root, authenticated API access, opaque storage
+keys and explicit DB/filesystem recovery. It introduces no FTP, SMB or public static
+media access. The older example routes/multipart flow below are historical proposals,
+not the current API contract. Production paths, activation and retention remain external gates.
+
 ## Recommendation
 Do **not** save inspection images as large BLOBs in the main relational database.
 

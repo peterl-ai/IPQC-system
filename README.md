@@ -24,7 +24,7 @@ The first R32-04 backend foundation adds task-scoped WorkContext source proofs,
 read-only preflight and atomic source-security revocation/audit. See
 [contracts and verification boundaries](docs/18_R3204_WORK_CONTEXT.md).
 Shared tasks remain `canExecute=false`; no formal shared inspection completion, Submit,
-photos or Android is activated. PR review is separate from production authorization.
+formal evidence photos or Android is activated. PR review is separate from production authorization.
 
 The scoped R32-05 identity foundation creates real empty initial InspectionAttempts
 atomically with new shared tasks and supports explicit audited Admin preparation of
@@ -38,6 +38,13 @@ Draft acceptance does not complete or submit an inspection; no execution UI is a
 The scoped [per-item Removed disposition](docs/21_R3205_ITEM_REMOVED.md) records explicit
 Production/Equipment-confirmed absence/non-applicability while retaining definitions,
 attempts and sampled history. An all-Removed draft is not a formal NotPerformed submission.
+
+The scoped [R32-06 protected photo foundation](docs/22_R3206_PROTECTED_PHOTOS.md) receives
+real JPEG/PNG bytes, verifies them, and records recoverable physical availability and
+immutable first-Ready A/B provenance. It requires a separately configured private local
+photo volume. An upload creates no draft/formal evidence reference, grants no Submit
+permission, and leaves shared `canExecute=false`. No retention deletion or production
+activation is included.
 
 The product has two major clients:
 
