@@ -237,6 +237,12 @@ Final corrected-HEAD results are recorded in PR delivery, separately from these 
 
 ## Deferred work and external gates
 
+2026-11-13 scoped follow-up: [read-only evidence assessment](25_R3205_EVIDENCE_ASSESSMENT.md)
+observes normal draft results/history and current references, retaining this dedicated
+Unable contract. Peter chose explicit Unsupported for unproven per-transition evidence
+and unresolved unconfirmed policy text. This does not implement formal Submit or the
+other workflows listed below; the original delivery evidence remains historical.
+
 No formal Submit/status transitions, ordinary NG/NG-to-OK completeness, PQE approval/
 rejection/special confirmation, NotPerformed, new targeted reinspection producer, full
 F2 sealed intent/takeover, F3 retention/cleanup/deletion, reference-image administration,

@@ -46,11 +46,14 @@ internal sealed record DraftSetup(PersonalSessionFixture F,Guid TaskId,Guid Item
 
 internal static class SharedDraftFixture
 {
-    public static async Task<DraftSetup> Setup(PersonalSessionFixture f,bool quantitative=false,string? sampleCount=null) {
+    public static async Task<DraftSetup> Setup(PersonalSessionFixture f,bool quantitative=false,string? sampleCount=null,string? photoRequirement=null) {
         f.Clock.Now=new(2026,11,11,11,59,0,TimeSpan.Zero);
         var standard=await LineSharedPlanningFixture.Standard(f);
         if(sampleCount is not null) await f.Edit(async db=> {
             foreach(var i in await db.PatrolStandardItems.Where(x=>x.PatrolStandardId==standard).ToListAsync()) i.SampleCount=sampleCount;
+        });
+        if(photoRequirement is not null) await f.Edit(async db=> {
+            foreach(var i in await db.PatrolStandardItems.Where(x=>x.PatrolStandardId==standard).ToListAsync()) i.PhotoRequirement=photoRequirement;
         });
         if(quantitative) await f.Edit(async db=> {
             foreach(var i in await db.PatrolStandardItems.Where(x=>x.PatrolStandardId==standard).ToListAsync()) {

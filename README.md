@@ -45,6 +45,11 @@ correction/withdrawal retains immutable history and frozen minimums; shared CAS,
 provenance and original receipts remain authoritative. This creates no fake sample,
 formal result or Submit permission, and shared tasks remain `canExecute=false`.
 
+The scoped [read-only evidence assessment](docs/25_R3205_EVIDENCE_ASSESSMENT.md)
+reports real sample history, accepted current-attempt references and verified physical
+availability. Unproven transition-specific evidence and unconfirmed free-text photo
+policies remain explicitly unresolved; assessment creates no accepted facts or Submit.
+
 The scoped [atomic draft attachment references](docs/23_R3206_DRAFT_ATTACHMENT_REFERENCES.md)
 adds explicit Ready-object association/detachment, shared DraftVersion CAS and immutable
 receipts/history. Storage Ready alone accepts no business reference. No formal Submit,
