@@ -18,7 +18,7 @@ public sealed record DraftEvidenceItem(Guid TaskItemId, Guid? InspectionAttemptI
     string EvidenceStatus, List<string> Reasons, List<string> UnprovenFacts, bool SampleHistoryComplete,
     List<DraftEvidenceSample> Samples, List<DraftEvidenceTransition> Transitions, List<DraftEvidencePhoto> Photos,
     UnableToMeasureReceipt? UnableOperation = null, List<SampleEvidenceOutput>? AcceptedBindings = null,
-    bool BindingFactsComplete = true);
+    bool BindingFactsComplete = false);
 public sealed record DraftEvidenceAssessmentOutput(Guid TaskId, Guid LineId, int WorkflowVersion, long DraftVersion,
     int Page, int PageSize, int TotalItems, List<DraftEvidenceItem> Items, int AssessmentVersion = 2,
     bool CanExecute = false, bool AcceptsFormalInspection = false,

@@ -178,6 +178,12 @@ complete association. A photo's BindsSampleTransition=true means a real active a
 association to that exact currently eligible reference, not coverage/newness. Existing
 sample-history/minimum limits and raw policy remain unchanged.
 
+P3 self-review correction: unavailable/unsupported current attempt scope had returned
+BindingFactsComplete=true without observing bindings. A genuine accepted binding then
+missing-current-pointer regression failed before correction. Completeness now starts
+false and becomes true only after the supported current-scope bounded query succeeds;
+the immutable prior history remains readable. SQLite and PostgreSQL run this negative.
+
 When all relevant draft corrections have eligible accepted associations, the reason
 can become NewEvidenceOrCoverageSemanticsUnresolved. EvidenceStatus still remains
 UnsupportedUntilFutureWorkflow; NewEvidenceForEachRelevantTransition and
@@ -206,7 +212,7 @@ exact final-HEAD PR delivery. Backend opt-in PostgreSQL SKIPs are not executions
 | 01 accepted sample operation | Lifecycle, Scope, Unsupported |
 | 02 exact dependency/classification | Transition NG/OK, NG/NG, OK/NG; WithinBatch; native Integrity |
 | 03 genuine current photo reference | Photo, Lifecycle |
-| 04 wrong task/item/attempt/sample operation | Scope, Amendments, native Integrity |
+| 04 wrong task/item/attempt/sample operation | Scope, Amendments, Unavailable completeness, native Integrity |
 | 05 Ready unassociated/invalid/detached | Photo pending/unassociated/unaccepted/missing/corrupt/unavailable/detached/superseded |
 | 06 independent A/B/binding actor | Lifecycle, Source |
 | 07 source security both orders | Security explicit/reset/role/deactivate, both serialization orders |

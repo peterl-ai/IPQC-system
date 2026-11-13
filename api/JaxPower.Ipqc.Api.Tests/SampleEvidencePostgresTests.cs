@@ -12,6 +12,7 @@ public sealed class SampleEvidencePostgresTests
     [DisposablePostgresFact] public Task WithinBatch() => Run(p => SampleEvidenceTests.WithinBatch(p));
     [DisposablePostgresFact] public Task Authority() => Run(p => SampleEvidenceTests.Authority(p));
     [DisposablePostgresFact] public Task Paging() => Run(p => SampleEvidenceTests.Paging(p));
+    [DisposablePostgresFact] public Task Unavailable() => Run(p => SampleEvidenceTests.Unavailable(p));
     [DisposablePostgresFact] public Task Scope_0() => Run(p => SampleEvidenceTests.Scope(p, "unaccepted"));
     [DisposablePostgresFact] public Task Scope_1() => Run(p => SampleEvidenceTests.Scope(p, "hash"));
     [DisposablePostgresFact] public Task Scope_2() => Run(p => SampleEvidenceTests.Scope(p, "item"));

@@ -31,7 +31,7 @@ public sealed partial class SharedDraftService
         var policy = new DraftEvidencePolicy(item.PhotoRequirement, item.PhotoRequirement is "Required" or "Optional" ? item.PhotoRequirement : "Unknown", "PolicyConfigurationUnresolved");
         var samples = new List<DraftEvidenceSample>(); var transitions = new List<DraftEvidenceTransition>(); var photos = new List<DraftEvidencePhoto>();
         var reasons = new List<string>(); var unproven = new List<string>(); var categories = new List<string>();
-        var bindings = new List<SampleEvidenceOutput>(); var bindingsComplete = true;
+        var bindings = new List<SampleEvidenceOutput>(); var bindingsComplete = false;
         var disposition = "Applicable"; var result = "NotEstablished"; var status = "UnsupportedUntilFutureWorkflow"; var complete = true;
         UnableToMeasureReceipt? unable = null;
         DraftEvidenceItem Output() => new(item.Id, attempt, disposition, item.InspectionType, minimum,

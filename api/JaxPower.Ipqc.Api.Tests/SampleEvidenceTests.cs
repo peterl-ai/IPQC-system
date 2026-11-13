@@ -280,4 +280,13 @@ public sealed class SampleEvidenceTests
         Assert.All((await Read(u, "?pageSize=100")).Bindings, b => Assert.False(b.IsCurrentPhotoEligible));
         Assert.DoesNotContain((await DraftEvidenceAssessmentTests.Item(u.S)).Photos, photo => photo.IsEligibleEvidence);
     }
+    [Fact] public async Task Unavailable_attempt_cannot_claim_complete_binding_observation() { await using var p = await PhotoFixture.Create(); await Unavailable(p); }
+    internal static async Task Unavailable(PhotoFixture p) {
+        var u = await Setup(p); await Accept(u, Input(u));
+        await p.F.Edit(db => db.InspectionAttemptApplicabilities.Where(x => x.PatrolTaskItemId == u.S.ItemId).ExecuteDeleteAsync());
+        var before = await Facts(p); var i = await DraftEvidenceAssessmentTests.Item(u.S);
+        Assert.Equal("Unavailable", i.Disposition); Assert.Equal("UnsupportedUntilFutureWorkflow", i.EvidenceStatus);
+        Assert.False(i.SampleHistoryComplete); Assert.False(i.BindingFactsComplete); Assert.Empty(i.AcceptedBindings!);
+        Assert.Single((await Read(u)).History); Assert.False(Assert.Single((await Read(u)).Bindings).IsCurrentAttempt); Assert.Equal(before, await Facts(p));
+    }
 }
