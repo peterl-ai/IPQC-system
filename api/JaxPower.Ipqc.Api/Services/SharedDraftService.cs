@@ -242,8 +242,10 @@ public sealed partial class SharedDraftService(IpqcDbContext db, WorkContextStor
             if(removal is not null) return Decode<ItemRemovalReceipt>(removal.ReceiptJson);
             var attachment=await db.DraftAttachmentOperations.AsNoTracking().SingleOrDefaultAsync(x=>x.TaskId==taskId && x.OperationId==operationId,ct);
             if(attachment is not null) return Decode<DraftAttachmentReceipt>(attachment.ReceiptJson);
-            var unable=await db.UnableToMeasureOperations.AsNoTracking().SingleOrDefaultAsync(x=>x.TaskId==taskId && x.OperationId==operationId,ct) ?? throw Error("NotFound",404);
-            return Decode<UnableToMeasureReceipt>(unable.ReceiptJson);
+            var unable=await db.UnableToMeasureOperations.AsNoTracking().SingleOrDefaultAsync(x=>x.TaskId==taskId && x.OperationId==operationId,ct);
+            if(unable is not null) return Decode<UnableToMeasureReceipt>(unable.ReceiptJson);
+            var binding=await db.SampleEvidenceOperations.AsNoTracking().SingleOrDefaultAsync(x=>x.TaskId==taskId && x.OperationId==operationId,ct) ?? throw Error("NotFound",404);
+            return Decode<SampleEvidenceReceipt>(binding.ReceiptJson);
         },ct);
     public Task<SharedDraftOutput> ReadAsync(Guid taskId,ClaimsPrincipal actor,CancellationToken ct)=>
         store.RunAsync(actor,false,taskId,[],async _=> {

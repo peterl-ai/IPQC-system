@@ -2134,6 +2134,173 @@ namespace JaxPower.Ipqc.Api.Data.Migrations
                         });
                 });
 
+            modelBuilder.Entity("JaxPower.Ipqc.Api.Domain.SampleEvidenceOperation", b =>
+                {
+                    b.Property<Guid>("TaskId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("OperationId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("AcceptedAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("ActorPersonalSessionId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("ActorUserId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("AttachmentId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("BatchId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("BindingId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("CanonicalPayload")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("CanonicalizationVersion")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("ContentHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("ContributorUserId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("DraftVersion")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("EnvironmentId")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("InspectionAttemptId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("LineId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("PhotoReferenceHash")
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("PhotoReferenceOperationId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("PredecessorHash")
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("PredecessorOperationId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ReceiptJson")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SampleHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("SampleId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("SampleOperationId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("SourceWorkContextId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("TaskItemId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("TransitionKind")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("WorkflowVersion")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("TaskId", "OperationId");
+
+                    b.HasAlternateKey("TaskId", "OperationId", "BindingId")
+                        .HasName("AK_SampleEvidence_Projection");
+
+                    b.HasAlternateKey("TaskId", "OperationId", "BindingId", "SampleOperationId", "ContentHash")
+                        .HasName("AK_SampleEvidence_Predecessor");
+
+                    b.HasIndex("ActorUserId");
+
+                    b.HasIndex("ContributorUserId");
+
+                    b.HasIndex("SourceWorkContextId");
+
+                    b.HasIndex("TaskId", "BatchId")
+                        .IsUnique()
+                        .HasDatabaseName("IX_SampleEvidence_Batch");
+
+                    b.HasIndex("TaskId", "BindingId");
+
+                    b.HasIndex("TaskId", "DraftVersion", "OperationId")
+                        .HasDatabaseName("IX_SampleEvidence_History");
+
+                    b.HasIndex("TaskId", "SampleOperationId", "SampleHash");
+
+                    b.HasIndex("TaskId", "TaskItemId", "InspectionAttemptId")
+                        .HasDatabaseName("IX_SampleEvidence_Item");
+
+                    b.HasIndex("SampleId", "TaskId", "TaskItemId", "InspectionAttemptId").HasDatabaseName("IX_SampleEvidence_Sample");
+
+                    b.HasIndex("TaskId", "PhotoReferenceOperationId", "AttachmentId", "PhotoReferenceHash")
+                        .HasDatabaseName("IX_SampleEvidence_Photo");
+
+                    b.HasIndex("TaskId", "PredecessorOperationId", "BindingId", "SampleOperationId", "PredecessorHash")
+                        .HasDatabaseName("IX_SampleEvidence_Predecessor");
+
+                    b.ToTable("SampleEvidenceOperations", t =>
+                        {
+                            t.HasCheckConstraint("CK_SampleEvidence_Contract", "\"OperationId\" <> '00000000-0000-0000-0000-000000000000' AND \"WorkflowVersion\"=2 AND \"CanonicalizationVersion\"=1 AND \"DraftVersion\">0 AND length(\"ContentHash\")=64 AND length(\"SampleHash\")=64 AND length(\"CanonicalPayload\")>0 AND length(\"ReceiptJson\")>0 AND \"TransitionKind\" IN ('InitialNGCapture','NGToOKCorrection','NGToNGCorrection','OKToNGCorrection') AND ((\"Kind\"='BindSampleEvidence' AND \"OperationId\"=\"BindingId\" AND \"PredecessorOperationId\" IS NULL AND \"PredecessorHash\" IS NULL) OR (\"Kind\" IN ('CorrectSampleEvidence','WithdrawSampleEvidence') AND \"OperationId\"<>\"BindingId\" AND \"PredecessorOperationId\" IS NOT NULL AND \"PredecessorHash\" IS NOT NULL AND length(\"PredecessorHash\")=64)) AND ((\"Kind\"='WithdrawSampleEvidence' AND \"PhotoReferenceOperationId\" IS NULL AND \"AttachmentId\" IS NULL AND \"PhotoReferenceHash\" IS NULL) OR (\"Kind\"<>'WithdrawSampleEvidence' AND \"PhotoReferenceOperationId\" IS NOT NULL AND \"AttachmentId\" IS NOT NULL AND \"PhotoReferenceHash\" IS NOT NULL AND length(\"PhotoReferenceHash\")=64))");
+                        });
+                });
+
+            modelBuilder.Entity("JaxPower.Ipqc.Api.Domain.SampleEvidenceProjection", b =>
+                {
+                    b.Property<Guid>("TaskId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("BindingId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<Guid>("LastOperationId")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("TaskId", "BindingId");
+
+                    b.HasIndex("TaskId", "LastOperationId", "BindingId")
+                        .HasDatabaseName("IX_SampleEvidenceProjection_Last");
+
+                    b.ToTable("SampleEvidenceProjections");
+                });
+
             modelBuilder.Entity("JaxPower.Ipqc.Api.Domain.SharedAcceptanceAudit", b =>
                 {
                     b.Property<Guid>("Id")
@@ -3233,6 +3400,85 @@ namespace JaxPower.Ipqc.Api.Data.Migrations
                         .HasForeignKey("UpdatedByUserId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
+                });
+
+            modelBuilder.Entity("JaxPower.Ipqc.Api.Domain.SampleEvidenceOperation", b =>
+                {
+                    b.HasOne("JaxPower.Ipqc.Api.Domain.ApplicationUser", null)
+                        .WithMany()
+                        .HasForeignKey("ActorUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_SampleEvidence_Actor");
+
+                    b.HasOne("JaxPower.Ipqc.Api.Domain.ApplicationUser", null)
+                        .WithMany()
+                        .HasForeignKey("ContributorUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_SampleEvidence_Contributor");
+
+                    b.HasOne("JaxPower.Ipqc.Api.Domain.WorkContext", null)
+                        .WithMany()
+                        .HasForeignKey("SourceWorkContextId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_SampleEvidence_Source");
+
+                    b.HasOne("JaxPower.Ipqc.Api.Domain.AcceptedBatchReceipt", null)
+                        .WithMany()
+                        .HasForeignKey("TaskId", "BatchId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_SampleEvidence_Batch");
+
+                    b.HasOne("JaxPower.Ipqc.Api.Domain.SampleEvidenceOperation", null)
+                        .WithMany()
+                        .HasForeignKey("TaskId", "BindingId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_SampleEvidence_Root");
+
+                    b.HasOne("JaxPower.Ipqc.Api.Domain.ContributionOperation", null)
+                        .WithMany()
+                        .HasForeignKey("TaskId", "SampleOperationId", "SampleHash")
+                        .HasPrincipalKey("TaskId", "OperationId", "ContentHash")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_SampleEvidence_Target");
+
+                    b.HasOne("JaxPower.Ipqc.Api.Domain.SharedSample", null)
+                        .WithMany()
+                        .HasForeignKey("SampleId", "TaskId", "TaskItemId", "InspectionAttemptId")
+                        .HasPrincipalKey("Id", "TaskId", "TaskItemId", "InspectionAttemptId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_SampleEvidence_Sample");
+
+                    b.HasOne("JaxPower.Ipqc.Api.Domain.DraftAttachmentOperation", null)
+                        .WithMany()
+                        .HasForeignKey("TaskId", "PhotoReferenceOperationId", "AttachmentId", "PhotoReferenceHash")
+                        .HasPrincipalKey("TaskId", "OperationId", "AttachmentId", "ContentHash")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("FK_SampleEvidence_Photo");
+
+                    b.HasOne("JaxPower.Ipqc.Api.Domain.SampleEvidenceOperation", null)
+                        .WithMany()
+                        .HasForeignKey("TaskId", "PredecessorOperationId", "BindingId", "SampleOperationId", "PredecessorHash")
+                        .HasPrincipalKey("TaskId", "OperationId", "BindingId", "SampleOperationId", "ContentHash")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("FK_SampleEvidence_Predecessor");
+                });
+
+            modelBuilder.Entity("JaxPower.Ipqc.Api.Domain.SampleEvidenceProjection", b =>
+                {
+                    b.HasOne("JaxPower.Ipqc.Api.Domain.SampleEvidenceOperation", null)
+                        .WithMany()
+                        .HasForeignKey("TaskId", "LastOperationId", "BindingId")
+                        .HasPrincipalKey("TaskId", "OperationId", "BindingId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_SampleEvidenceProjection_Last");
                 });
 
             modelBuilder.Entity("JaxPower.Ipqc.Api.Domain.SharedAcceptanceAudit", b =>

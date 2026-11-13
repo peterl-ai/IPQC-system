@@ -31,11 +31,12 @@ public sealed partial class SharedDraftService
         var policy = new DraftEvidencePolicy(item.PhotoRequirement, item.PhotoRequirement is "Required" or "Optional" ? item.PhotoRequirement : "Unknown", "PolicyConfigurationUnresolved");
         var samples = new List<DraftEvidenceSample>(); var transitions = new List<DraftEvidenceTransition>(); var photos = new List<DraftEvidencePhoto>();
         var reasons = new List<string>(); var unproven = new List<string>(); var categories = new List<string>();
+        var bindings = new List<SampleEvidenceOutput>(); var bindingsComplete = true;
         var disposition = "Applicable"; var result = "NotEstablished"; var status = "UnsupportedUntilFutureWorkflow"; var complete = true;
         UnableToMeasureReceipt? unable = null;
         DraftEvidenceItem Output() => new(item.Id, attempt, disposition, item.InspectionType, minimum,
             complete ? samples.Count(x => !x.IsRemoved) : null, complete && minimum is { } count ? samples.Count(x => !x.IsRemoved) >= count : null,
-            policy, result, categories, status, reasons, unproven, complete, samples, transitions, photos, unable);
+            policy, result, categories, status, reasons, unproven, complete, samples, transitions, photos, unable, bindings, bindingsComplete);
         if (!supported || attempt is null) { disposition = "Unavailable"; complete = false; reasons.Add("UnsupportedSnapshotAttemptOrFormalWorkflow"); unproven.Add("CurrentInitialDraftScope"); return Output(); }
         var aid = attempt.Value;
         var removed = await db.ItemRemovalOperations.AsNoTracking().AnyAsync(x => x.TaskId == task.Id && x.InspectionAttemptId == aid, ct);
@@ -56,11 +57,19 @@ public sealed partial class SharedDraftService
             catch (JsonException) { complete = false; }
             if (complete) complete = BuildEvidenceHistory(task, item, aid, identities, rows, deps, projections, receipts, samples, transitions);
         }
-        photos = await EvidencePhotos(task, item.Id, aid, environment, rows, removed, ct);
+        var observations = new Dictionary<Guid, string>();
+        photos = await EvidencePhotos(task, item.Id, aid, environment, rows, removed, ct, observations);
+        var bindingRows = await (from p in db.SampleEvidenceProjections.AsNoTracking()
+            join o in db.SampleEvidenceOperations.AsNoTracking() on new { p.TaskId, OperationId = p.LastOperationId } equals new { o.TaskId, o.OperationId }
+            where p.TaskId == task.Id && o.TaskItemId == item.Id && o.InspectionAttemptId == aid && p.IsActive
+            orderby p.BindingId select o).Take(EvidenceHistoryLimit + 1).ToListAsync(ct);
+        bindingsComplete = bindingRows.Count <= EvidenceHistoryLimit;
+        foreach (var row in bindingRows.Take(EvidenceHistoryLimit)) bindings.Add(await BindingObservation(task, row, true, ct, observations));
+        photos = photos.Select(p => p with { BindsSampleTransition = bindings.Any(b => b.IsCurrentPhotoEligible && b.LastOperation.PhotoReference?.OperationId == p.LastReference?.OperationId) }).ToList();
         if (removed) { disposition = "Removed"; result = "Removed"; categories.Add("NoneForRemoved"); status = "Satisfied"; return Output(); }
         if (up is { IsActive: true }) {
             disposition = "UnableToMeasureNG"; result = "UnableToMeasureNG"; categories.Add("UnableReasonAndCurrentAttemptPhoto");
-            var observed = unable?.Evidence is { } e ? await UnableEvidence(task, item.Id, aid, e, ct) : null;
+            var observed = unable?.Evidence is { } e ? await UnableEvidence(task, item.Id, aid, e, ct, observations) : null;
             if (string.IsNullOrWhiteSpace(unable?.NgReason)) { status = "InvalidEvidence"; reasons.Add("UnableReasonMissing"); }
             else if (observed is null) { status = "MissingEvidence"; reasons.Add("UnableAcceptedEvidenceMissing"); }
             else { status = observed.IsValid ? "Satisfied" : "InvalidEvidence"; if (!observed.IsValid) reasons.Add("UnableEvidence" + observed.State); }
@@ -81,7 +90,10 @@ public sealed partial class SharedDraftService
         if (removedNg || !ng && priorNg && corrections.Count == 0) categories.Add("HistoricalNGResolution");
         if (up is not null) categories.Add("WithdrawnUnableResolution");
         if (corrections.Count > 0 || removedNg || !ng && priorNg || up is not null) {
-            reasons.Add("PhotoToInspectionTransitionAssociationNotRecorded"); unproven.Add("NewEvidenceForEachRelevantTransition");
+            var associated = bindingsComplete && corrections.Count > 0 && corrections.All(t => bindings.Any(b => b.IsCurrentPhotoEligible && b.LastOperation.Transition.Operation.OperationId == t.OperationId));
+            reasons.Add(associated ? "NewEvidenceOrCoverageSemanticsUnresolved" : "PhotoToInspectionTransitionAssociationNotRecorded");
+            if (!bindingsComplete) reasons.Add("BindingAssessmentLimitExceeded");
+            unproven.Add("NewEvidenceForEachRelevantTransition");
             unproven.Add("PhysicalReinspectionOrImprovementEvent"); return Output();
         }
         if (ng) {
@@ -139,7 +151,7 @@ public sealed partial class SharedDraftService
     }
 
     private async Task<List<DraftEvidencePhoto>> EvidencePhotos(PatrolTask task, Guid item, Guid attempt, string environment,
-        List<ContributionOperation> sampleOperations, bool removed, CancellationToken ct)
+        List<ContributionOperation> sampleOperations, bool removed, CancellationToken ct, Dictionary<Guid, string> observations)
     {
         var objects = await db.InspectionAttachments.AsNoTracking().Where(x => x.TaskId == task.Id && x.TaskItemId == item && x.InspectionAttemptId == attempt)
             .OrderBy(x => x.Id).Take(6).ToListAsync(ct);
@@ -153,7 +165,7 @@ public sealed partial class SharedDraftService
             var scope = a.LineId == task.LineId && a.EnvironmentId == environment && a.WorkflowVersion == 2 && Current(task, item, attempt) &&
                 receipt is not null && receipt.TaskId == task.Id && receipt.TaskItemId == item && receipt.InspectionAttemptId == attempt && receipt.AttachmentId == a.Id &&
                 receipt.EnvironmentId == environment && receipt.LineId == task.LineId && receipt.WorkflowVersion == 2 && receipt.Sha256 == a.ExpectedSha256;
-            var availability = p is null ? (await db.AttachmentAvailabilities.AsNoTracking().SingleAsync(x => x.AttachmentId == a.Id, ct)).State : scope ? await ReferenceAvailability(a, ct) : "ScopeMismatch";
+            var availability = p is null ? (await db.AttachmentAvailabilities.AsNoTracking().SingleAsync(x => x.AttachmentId == a.Id, ct)).State : scope ? await BindingAvailability(a, ct, observations) : "ScopeMismatch";
             var eligible = scope && !removed && p is { IsAttached: true } && receipt!.Kind == "AssociateAttachment" && availability == "Ready";
             result.Add(new(a.Id, item, attempt, a.SourceWorkContextId, a.ContributorUserId, first?.UploadedByUserId, first?.UploadedPersonalSessionId,
                 first is null ? null : DateTime.SpecifyKind(first.ReadyAtUtc, DateTimeKind.Utc), availability,

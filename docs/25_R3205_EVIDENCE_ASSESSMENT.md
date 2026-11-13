@@ -192,6 +192,14 @@ are reviewed independently of this document's claims.
 
 ## Scope and deferred phases
 
+2026-11-13 follow-up: [explicit sample-transition bindings](26_R3205_SAMPLE_EVIDENCE_BINDINGS.md)
+adds a separate accepted-association API and AssessmentVersion2 factual observations.
+The Version1 implementation and evidence above remain historical. Peter approved
+fact-only photo reuse and immutable correction/withdrawal, preserving the five-photo
+cap. Even complete associations do not establish newness/coverage or formal events;
+corrections remain UnsupportedUntilFutureWorkflow and raw photo policy remains unresolved.
+Confirmed policy, formal Submit and other deferred workflows below remain unimplemented.
+
 No schema/model/migration or accepted-write contract change. Existing sample, Removed,
 Unable and reference APIs remain writable with original guards/CAS/receipts. D01(A),
 Admin-only controlled initialization and all established minima/history remain unchanged.
