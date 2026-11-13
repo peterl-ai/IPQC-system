@@ -1,3 +1,7 @@
+using System.Net.Http.Json;
+using JaxPower.Ipqc.Api.Contracts;
+using Xunit;
+
 namespace JaxPower.Ipqc.Api.Tests;
 
 public sealed class PhotoPostgresTests
@@ -51,5 +55,14 @@ public sealed class PhotoPostgresTests
     [DisposablePostgresFact] public async Task Table_upgrade_rollback() {await using var p=await PhotoFixture.Create(true,PhotoMigrationTests.Previous);await PhotoMigrationTests.Rollback(p,"CREATE TABLE \"AttachmentUploads\"");}
     [DisposablePostgresFact] public async Task Trigger_upgrade_rollback() {await using var p=await PhotoFixture.Create(true,PhotoMigrationTests.Previous);await PhotoMigrationTests.Rollback(p,"CREATE TRIGGER \"TR_PhotoScope\"");}
     [DisposablePostgresFact] public async Task History_upgrade_rollback() {await using var p=await PhotoFixture.Create(true,PhotoMigrationTests.Previous);await PhotoMigrationTests.Rollback(p,"INSERT INTO \"__EFMigrationsHistory\"");}
-    [DisposablePostgresFact] public async Task Full_environment_width() {await using var p=await PhotoFixture.Create(true,environment:new string('e',200));await PhotoTests.Lifecycle(p);}
+    [DisposablePostgresFact] public async Task Full_environment_width() {
+        await using var p=await PhotoFixture.Create(true,environment:new string('e',200));var f=p.F;
+        var task=await WorkContextFixture.Task(f);var a=await f.Login();var b=await f.Login("dev-ipqa-2");
+        var scope=(await f.Client(b.AccessToken).GetFromJsonAsync<InspectionIdentityOutput>(InspectionIdentityTests.Root(task)))!;
+        var issued=await f.Client(a.AccessToken).PostAsJsonAsync(WorkContextFixture.Root(task),new WorkContextIssueInput(f.Line1,2,f.Options.EnvironmentId!));issued.EnsureSuccessStatusCode();
+        var source=(await issued.Content.ReadFromJsonAsync<WorkContextIssued>())!;var item=scope.Items[0];
+        var s=new DraftSetup(f,task,item.TaskItemId,item.InspectionAttemptId,a,b,source);var bytes=PhotoFixture.Image();var reserved=await PhotoFixture.Reserve(s,PhotoFixture.Input(s,bytes));
+        var ready=await PhotoFixture.Ready(s,reserved.AttachmentId,bytes);Assert.Equal(f.Options.EnvironmentId,ready.EnvironmentId);
+        Assert.Equal(bytes,await s.Client().GetByteArrayAsync(PhotoFixture.Root(s)+$"/{ready.AttachmentId}/content"));
+    }
 }

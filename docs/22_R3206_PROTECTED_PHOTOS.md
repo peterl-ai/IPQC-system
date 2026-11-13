@@ -106,7 +106,8 @@ by a background service can bypass the required B/A checks.
 
 Configure an existing dedicated private **local** root via `InspectionPhotos:Root` /
 `InspectionPhotos__Root`. No default, production path or server URL is shipped. Reject
-relative/UNC/device/root-drive paths, roots inside or containing ContentRoot, unsupported
+relative/UNC/device/root-drive paths, roots inside or containing ContentRoot, application
+binaries or a separately configured WebRoot, unsupported
 OS and symlink/reparse-point ancestors. Linux requires owner-only rwx (no group/other
 permissions) on the root. Windows rejects applicable allow-ACEs for broad principals or
 identities other than the current service, SYSTEM, Administrators and explicitly configured

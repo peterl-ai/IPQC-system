@@ -94,11 +94,14 @@ public sealed class PhotoConcurrencyTests
         var bytes=PhotoFixture.Image();var one=PhotoFixture.Input(first,bytes);var two=PhotoFixture.Input(second,bytes) with{ClientPhotoId=one.ClientPhotoId};
         var holder=0;var waiter=new TaskCompletionSource<int>(TaskCreationOptions.RunContinuationsAsynchronously);
         f.Fault.ObserveAsync=(command,_)=> {
-            if(command.Connection is NpgsqlConnection c && command.CommandText.Contains("INSERT INTO \"InspectionAttachments\"",StringComparison.Ordinal)) {
-                if(Interlocked.CompareExchange(ref holder,c.ProcessID,0)!=0 && holder!=c.ProcessID) waiter.TrySetResult(c.ProcessID);
+            if(command.Connection is NpgsqlConnection c) {
+                if(command.CommandText.Contains("INSERT INTO \"AttachmentAvailabilities\"",StringComparison.Ordinal)) Interlocked.CompareExchange(ref holder,c.ProcessID,0);
+                else if(holder!=0 && c.ProcessID!=holder && command.CommandText.Contains("INSERT INTO \"InspectionAttachments\"",StringComparison.Ordinal)) waiter.TrySetResult(c.ProcessID);
             }return Task.CompletedTask;
         };
-        f.Fault.Arm("INSERT INTO \"InspectionAttachments\"");var winning=first.Client().PostAsJsonAsync(PhotoFixture.Root(first),one);Task<HttpResponseMessage>? losing=null;
+        // Pause only AFTER the identity INSERT acquired its real unique-index lock,
+        // before its second SaveChanges/commit. A pre-INSERT barrier holds no unique key.
+        f.Fault.Arm("INSERT INTO \"AttachmentAvailabilities\"");var winning=first.Client().PostAsJsonAsync(PhotoFixture.Root(first),one);Task<HttpResponseMessage>? losing=null;
         try {
             await f.Fault.Entered.Task.WaitAsync(TimeSpan.FromSeconds(15));losing=second.Client().PostAsJsonAsync(PhotoFixture.Root(second),two);
             if(f.PostgresRoot is not null) {

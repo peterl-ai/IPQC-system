@@ -38,8 +38,9 @@ public sealed class ProtectedPhotoStore(IConfiguration config, IHostEnvironment 
             if(string.IsNullOrWhiteSpace(raw) || !System.IO.Path.IsPathFullyQualified(raw) || raw.StartsWith("\\\\") || raw.Contains('\0') || (!OperatingSystem.IsWindows() && !OperatingSystem.IsLinux())) throw new IOException();
             var path=System.IO.Path.TrimEndingDirectorySeparator(System.IO.Path.GetFullPath(raw));
             var drive=System.IO.Path.GetPathRoot(path)!;
-            var app=System.IO.Path.TrimEndingDirectorySeparator(System.IO.Path.GetFullPath(environment.ContentRootPath));
-            if(path==System.IO.Path.TrimEndingDirectorySeparator(drive) || ContainsPath(app,path) || ContainsPath(path,app) || !Directory.Exists(path)) throw new IOException();
+            var applicationRoots=new[]{environment.ContentRootPath,AppContext.BaseDirectory,(environment as Microsoft.AspNetCore.Hosting.IWebHostEnvironment)?.WebRootPath}
+                .Where(x=>!string.IsNullOrWhiteSpace(x)).Select(x=>System.IO.Path.TrimEndingDirectorySeparator(System.IO.Path.GetFullPath(x!)));
+            if(path==System.IO.Path.TrimEndingDirectorySeparator(drive) || applicationRoots.Any(app=>ContainsPath(app,path) || ContainsPath(path,app)) || !Directory.Exists(path)) throw new IOException();
             root=new Root {Path=path};
             if(OperatingSystem.IsLinux()) {
                 root.Pins.Add(LinuxHandle(open("/",0x10000|0x80000|0x20000)));

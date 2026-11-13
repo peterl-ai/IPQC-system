@@ -43,14 +43,19 @@ public sealed class PhotoMigrationTests
     [Fact] public async Task Native_immutable_and_scope_guards() {await using var p=await PhotoFixture.Create();await Integrity(p);}
     internal static async Task Integrity(PhotoFixture p) {
         var s=await SharedDraftFixture.Setup(p.F);var bytes=PhotoFixture.Image();var a=await PhotoFixture.Reserve(s,PhotoFixture.Input(s,bytes));await PhotoFixture.Ready(s,a.AttachmentId,bytes);
+        async Task Reject(Func<Task> command) {
+            var error=await Record.ExceptionAsync(command);Assert.NotNull(error);
+            if(p.F.PostgresRoot is not null) Assert.Equal("23514",Assert.IsType<Npgsql.PostgresException>(error).SqlState);
+            else Assert.Contains(Assert.IsType<Microsoft.Data.Sqlite.SqliteException>(error).SqliteExtendedErrorCode,new[]{1811,275});
+        }
         foreach(var sql in new[]{"UPDATE \"InspectionAttachments\" SET \"ExpectedBytes\"=1","DELETE FROM \"InspectionAttachments\"","UPDATE \"AttachmentAcceptances\" SET \"ByteCount\"=1","DELETE FROM \"AttachmentAcceptances\"","UPDATE \"AttachmentEvents\" SET \"State\"='Ready'","DELETE FROM \"AttachmentEvents\"","UPDATE \"AttachmentUploads\" SET \"StageKey\"='bad'","DELETE FROM \"AttachmentUploads\"","UPDATE \"AttachmentUploads\" SET \"StoredAtUtc\"=NULL","UPDATE \"AttachmentAvailabilities\" SET \"AcceptedAttachmentId\"=NULL"})
-            await Assert.ThrowsAnyAsync<Exception>(()=>p.F.Edit(db=>db.Database.ExecuteSqlRawAsync(sql)));
+            await Reject(()=>p.F.Edit(db=>db.Database.ExecuteSqlRawAsync(sql)));
         Assert.Equal(1,await p.F.Read(db=>db.AttachmentAcceptances.CountAsync()));
         // Fresh reservation exists but SQL cannot turn it Ready without a matching accepted FK.
         var pending=await PhotoFixture.Reserve(s,PhotoFixture.Input(s,bytes));
-        await Assert.ThrowsAnyAsync<Exception>(()=>p.F.Edit(db=>db.Database.ExecuteSqlInterpolatedAsync($"UPDATE \"AttachmentAvailabilities\" SET \"State\"='Ready' WHERE \"AttachmentId\"={pending.AttachmentId}")));
+        await Reject(()=>p.F.Edit(db=>db.Database.ExecuteSqlInterpolatedAsync($"UPDATE \"AttachmentAvailabilities\" SET \"State\"='Ready' WHERE \"AttachmentId\"={pending.AttachmentId}")));
         // These are valid existing FK targets; the native source/task scope trigger rejects their combination.
         var other=await p.F.Task();var clone=Guid.NewGuid();var client=Guid.NewGuid();
-        await Assert.ThrowsAnyAsync<Exception>(()=>p.F.Edit(db=>db.Database.ExecuteSqlInterpolatedAsync($"INSERT INTO \"InspectionAttachments\" SELECT {clone},{client},{other},\"TaskItemId\",\"InspectionAttemptId\",\"LineId\",\"WorkflowVersion\",\"EnvironmentId\",\"SourceWorkContextId\",\"ContributorUserId\",\"ExpectedBytes\",\"ExpectedSha256\",\"DeclaredContentType\",\"CaptureSource\",{Guid.NewGuid().ToString("N")},\"CreatedAtUtc\" FROM \"InspectionAttachments\" WHERE \"Id\"={a.AttachmentId}")));
+        await Reject(()=>p.F.Edit(db=>db.Database.ExecuteSqlInterpolatedAsync($"INSERT INTO \"InspectionAttachments\" SELECT {clone},{client},{other},\"TaskItemId\",\"InspectionAttemptId\",\"LineId\",\"WorkflowVersion\",\"EnvironmentId\",\"SourceWorkContextId\",\"ContributorUserId\",\"ExpectedBytes\",\"ExpectedSha256\",\"DeclaredContentType\",\"CaptureSource\",{Guid.NewGuid().ToString("N")},\"CreatedAtUtc\" FROM \"InspectionAttachments\" WHERE \"Id\"={a.AttachmentId}")));
     }
 }

@@ -91,10 +91,11 @@ public sealed class PhotoTests
         Assert.Equal(HttpStatusCode.RequestEntityTooLarge,(await PhotoFixture.Upload(s,a.AttachmentId,new byte[ProtectedPhotoStore.MaximumBytes+1])).StatusCode);
         HttpResponseMessage? r=null;for(var n=0;n<22;n++) r=await s.Client().GetAsync(PhotoFixture.Root(s)+$"/{a.AttachmentId}");Assert.Equal(HttpStatusCode.TooManyRequests,r!.StatusCode);Assert.Empty(Directory.GetFiles(p.DirectoryPath));
     }
-    [Theory][InlineData("missing")][InlineData("app")][InlineData("relative")]
+    [Theory][InlineData("missing")][InlineData("app")][InlineData("relative")][InlineData("binary")][InlineData("external-webroot")]
     public async Task Unsafe_configuration_is_closed(string kind) {
         await using var p=await PhotoFixture.Create();var s=await SharedDraftFixture.Setup(p.F);var config=p.F.Factory.Services.GetRequiredService<IConfiguration>();
-        config["InspectionPhotos:Root"]=kind switch{"missing"=>null,"app"=>p.F.Factory.Services.GetRequiredService<Microsoft.Extensions.Hosting.IHostEnvironment>().ContentRootPath,_=>"../photos"};
+        if(kind=="external-webroot") p.F.Factory.Services.GetRequiredService<Microsoft.AspNetCore.Hosting.IWebHostEnvironment>().WebRootPath=p.DirectoryPath;
+        config["InspectionPhotos:Root"]=kind switch{"missing"=>null,"app"=>p.F.Factory.Services.GetRequiredService<Microsoft.Extensions.Hosting.IHostEnvironment>().ContentRootPath,"binary"=>AppContext.BaseDirectory,"external-webroot"=>p.DirectoryPath,_=>"../photos"};
         Assert.Equal(HttpStatusCode.ServiceUnavailable,(await s.Client().PostAsJsonAsync(PhotoFixture.Root(s),PhotoFixture.Input(s,PhotoFixture.Image()))).StatusCode);Assert.Equal(0,await p.F.Read(db=>db.InspectionAttachments.CountAsync()));
     }
     [Fact] public async Task Actual_item_attempt_pair_and_removed_state_are_rechecked() {await using var p=await PhotoFixture.Create();await Scope(p);}
