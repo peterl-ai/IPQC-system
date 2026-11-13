@@ -167,4 +167,25 @@ public sealed class DraftAttachmentTests
         Assert.Equal(0, await p.F.Read(db => db.SharedSamples.CountAsync())); Assert.Equal(0, await p.F.Read(db => db.ContributionOperations.CountAsync()));
         Assert.All((await s.Read())!.Items!, x => Assert.Equal(1, x.MinimumSampleCount)); Assert.False((await s.Read())!.CanExecute);
     }
+    [Fact] public async Task Accepted_A_frontier_and_new_B_work_resolve_before_quarantine() { await using var p = await PhotoFixture.Create(); await Mixed(p); }
+    internal static async Task Mixed(PhotoFixture p) {
+        var (s, a, bytes) = await Setup(p); var firstBatch = Input(s, a); var original = Assert.Single((await Accept(s, firstBatch)).Operations);
+        var sourceB = await WorkContextFixture.Issue(p.F, s.TaskId, s.B); var sb = s with { Source = sourceB };
+        var second = await PhotoFixture.Reserve(sb, PhotoFixture.Input(sb, bytes)); second = await PhotoFixture.Ready(sb, second.AttachmentId, bytes);
+        var unacceptedA = await PhotoFixture.Reserve(s, PhotoFixture.Input(s, bytes)); unacceptedA = await PhotoFixture.Ready(s, unacceptedA.AttachmentId, bytes);
+        var json = await p.F.Read(db => db.AcceptedBatchReceipts.Where(x => x.BatchId == firstBatch.BatchId).Select(x => x.ReceiptJson).SingleAsync());
+        await SharedDraftFixture.Revoke(s);
+        var freshB = Input(s, second, 1, sourceB); var mixed = freshB with { Operations = [firstBatch.Operations[0], freshB.Operations[0]], SourceProofs = [new(sourceB.Context.Id, sourceB.ProofSecret)] };
+        var accepted = await Accept(s, mixed); Assert.Equal(2, accepted.Operations.Count); Assert.Contains(original, accepted.Operations);
+        Assert.Equal(json, await s.Client().GetStringAsync(s.Root + $"/operation-batches/{firstBatch.BatchId}/receipt"));
+        var currentB = Assert.Single(accepted.Operations, x => x.AttachmentId == second.AttachmentId);
+        var detachB = Input(s, second, 2, sourceB, currentB, "DetachAttachment"); var freshA = Input(s, unacceptedA, 2, sourceB);
+        var bad = detachB with { Operations = [detachB.Operations[0], freshA.Operations[0]], SourceProofs = freshA.SourceProofs };
+        var rejected = await s.Client().PostAsJsonAsync(Url(s), bad); Assert.Equal(HttpStatusCode.Conflict, rejected.StatusCode);
+        var problem = JsonDocument.Parse(await rejected.Content.ReadAsStringAsync()).RootElement;
+        Assert.Equal("SourceSecurityRevoked", problem.GetProperty("code").GetString()); Assert.Equal(freshA.Operations[0].OperationId, Assert.Single(problem.GetProperty("operationIds").EnumerateArray()).GetGuid());
+        await Counts(s, 2, 2, 2, 2); Assert.True(await p.F.Read(db => db.DraftAttachmentProjections.Where(x => x.AttachmentId == second.AttachmentId).Select(x => x.IsAttached).SingleAsync()));
+        Assert.False(await p.F.Read(db => db.DraftAttachmentOperations.AnyAsync(x => x.OperationId == detachB.Operations[0].OperationId)));
+        Assert.Equal(3, await p.F.Read(db => db.AttachmentAcceptances.CountAsync()));
+    }
 }

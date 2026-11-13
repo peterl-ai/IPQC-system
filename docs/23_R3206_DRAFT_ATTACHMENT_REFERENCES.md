@@ -240,7 +240,7 @@ Initial development model-name mismatch was corrected before migration/use; both
 model equality and native DDL regressions guard it. Cross-task negatives use another
 actually generated/initialized readable task. Security barriers exclude Admin login and
 observe real PostgreSQL blocking; no failing race is rerun merely to obtain green.
-The first full regression run exposed that the additive ID trigger preempted the old
+P3 compatibility finding: the first full regression run exposed that the additive ID trigger preempted the old
 SharedOperationIdentities PK error for sample/item duplicates. Registration now defers
 to that original PK when an old-domain identity already exists; only reference-only
 collisions use the new guard. The original integrity regression is retained unchanged.

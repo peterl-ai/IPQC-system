@@ -32,6 +32,7 @@ public sealed class DraftAttachmentPostgresTests
     [DisposablePostgresFact] public Task AuthorityAndShape() => Run(DraftAttachmentTests.Authority);
     [DisposablePostgresFact] public Task ChangedIdentity() => Run(DraftAttachmentTests.Conflicts);
     [DisposablePostgresFact] public Task Limits() => Run(DraftAttachmentTests.Limits);
+    [DisposablePostgresFact] public Task AcceptedFrontierAndMixedQuarantine() => Run(DraftAttachmentTests.Mixed);
     [DisposablePostgresFact] public Task RevokeFirst() => Run(p => DraftAttachmentConcurrencyTests.Security(p, true, "explicit"));
     [DisposablePostgresFact] public Task AcceptBeforeRevoke() => Run(p => DraftAttachmentConcurrencyTests.Security(p, false, "explicit"));
     [DisposablePostgresFact] public Task ResetFirst() => Run(p => DraftAttachmentConcurrencyTests.Security(p, true, "reset"));
