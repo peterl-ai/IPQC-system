@@ -48,10 +48,24 @@ public sealed class PhotoStorageTests
             try {File.SetUnixFileMode(p.DirectoryPath,saved|UnixFileMode.OtherRead|UnixFileMode.OtherExecute);Assert.Throws<PhotoStorageException>(()=>p.Fault.Inner.CheckConfigured());}
             finally {File.SetUnixFileMode(p.DirectoryPath,saved);}
         } else if(OperatingSystem.IsWindows()) {
-            var directory=new DirectoryInfo(p.DirectoryPath);var saved=System.IO.FileSystemAclExtensions.GetAccessControl(directory);var changed=System.IO.FileSystemAclExtensions.GetAccessControl(directory);
-            changed.AddAccessRule(new(new System.Security.Principal.SecurityIdentifier("S-1-1-0"),System.Security.AccessControl.FileSystemRights.ReadAndExecute,System.Security.AccessControl.AccessControlType.Allow));
-            try {System.IO.FileSystemAclExtensions.SetAccessControl(directory,changed);Assert.Throws<PhotoStorageException>(()=>p.Fault.Inner.CheckConfigured());}
-            finally {System.IO.FileSystemAclExtensions.SetAccessControl(directory,saved);}
+            var directory=new DirectoryInfo(p.DirectoryPath);var saved=System.IO.FileSystemAclExtensions.GetAccessControl(directory).GetSecurityDescriptorBinaryForm();
+            foreach(var inheritOnly in new[]{false,true}) {
+                var changed=new System.Security.AccessControl.DirectorySecurity();changed.SetSecurityDescriptorBinaryForm(saved,System.Security.AccessControl.AccessControlSections.Access);
+                changed.AddAccessRule(new(new System.Security.Principal.SecurityIdentifier("S-1-1-0"),System.Security.AccessControl.FileSystemRights.ReadAndExecute,
+                    System.Security.AccessControl.InheritanceFlags.ObjectInherit|System.Security.AccessControl.InheritanceFlags.ContainerInherit,
+                    inheritOnly?System.Security.AccessControl.PropagationFlags.InheritOnly:System.Security.AccessControl.PropagationFlags.None,System.Security.AccessControl.AccessControlType.Allow));
+                try {
+                    System.IO.FileSystemAclExtensions.SetAccessControl(directory,changed);
+                    if(inheritOnly) Assert.Contains(System.IO.FileSystemAclExtensions.GetAccessControl(directory).GetAccessRules(true,true,typeof(System.Security.Principal.SecurityIdentifier)).Cast<System.Security.AccessControl.FileSystemAccessRule>(),
+                        r=>OperatingSystem.IsWindows() && r.IdentityReference.Value=="S-1-1-0" && (r.PropagationFlags&System.Security.AccessControl.PropagationFlags.InheritOnly)!=0);
+                    Assert.Throws<PhotoStorageException>(()=>p.Fault.Inner.CheckConfigured());
+                }
+                finally {
+                    var restored=new System.Security.AccessControl.DirectorySecurity();restored.SetSecurityDescriptorBinaryForm(saved,System.Security.AccessControl.AccessControlSections.Access);
+                    System.IO.FileSystemAclExtensions.SetAccessControl(directory,restored);
+                }
+                p.Fault.Inner.CheckConfigured();
+            }
         }
     }
     [LinuxPhotoFact] public async Task Application_root_alias_is_rejected() {

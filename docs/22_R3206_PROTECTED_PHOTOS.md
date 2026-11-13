@@ -60,7 +60,9 @@ Technical resource bounds are five reserved photo identities per item/current at
 per minute/current user, four concurrent photo requests per process, two concurrent
 decoders and a two-minute request deadline. A durable lease lasts ten minutes, covering
 worker death; lease expiry alone never grants acceptance. Failed staging files remain
-registered and count toward bounds. There is no automatic slot release or cleanup worker.
+registered and count toward bounds. Cancellation is cooperative: synchronous native
+decoder/OS flush calls may not be interruptible; the deadline is not a hardware I/O timeout.
+There is no automatic slot release or cleanup worker.
 Monitor disk space and failed staging backlog before any production activation.
 
 Safe failures include 401/403 current authority, resource 404, immutable identity/source/
@@ -115,7 +117,8 @@ directories resolve through their existing parent. Windows rejects applicable al
 for broad principals or
 identities other than the current service, SYSTEM, Administrators and explicitly configured
 `InspectionPhotos:AllowedStoragePrincipals` SID entries (e.g. an approved backup identity).
-Broad Everyone/Users/AuthenticatedUsers/Guest/Anonymous grants are always rejected.
+Broad Everyone/Users/AuthenticatedUsers/Guest/Anonymous grants are always rejected,
+including inherit-only grants that would apply to newly stored files.
 Restrict volume and all ancestors using OS ACLs;
 API service and approved backup identities only. Host administrators with physical/DB
 control are outside the application's authorization boundary. This is not an object-store,
@@ -182,4 +185,4 @@ delivery evidence. Full backend Release and Web lint/tests/typecheck/build are r
 Deferred: draft attachment references/source dependency manifests, NG/NG→OK completeness,
 UnableToMeasureNG/current-attempt evidence, PQE reference purpose/permissions, F2 Submit,
 formal revision freezing, five-year retention, F3 reference-aware deletion/recovery,
-Android/offline/photo UI and production rollout. Shared `canExecute=false` remains true.
+Android/offline/photo UI and production rollout. Shared tasks remain `canExecute=false`.

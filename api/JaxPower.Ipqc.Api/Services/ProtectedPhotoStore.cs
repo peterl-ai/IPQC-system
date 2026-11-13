@@ -94,7 +94,9 @@ public sealed class ProtectedPhotoStore(IConfiguration config, Microsoft.AspNetC
         foreach(var sid in config.GetSection("InspectionPhotos:AllowedStoragePrincipals").Get<string[]>() ?? []) allowed.Add(new SecurityIdentifier(sid).Value);
         var broad=new HashSet<string>(StringComparer.OrdinalIgnoreCase){"S-1-1-0","S-1-5-11","S-1-5-32-545","S-1-5-32-546","S-1-5-7"};
         foreach(FileSystemAccessRule rule in new DirectoryInfo(path).GetAccessControl(AccessControlSections.Access).GetAccessRules(true,true,typeof(SecurityIdentifier))) {
-            if(rule.AccessControlType!=AccessControlType.Allow || (rule.PropagationFlags&PropagationFlags.InheritOnly)!=0) continue;
+            // Inherit-only grants still authorize the files we create underneath this
+            // directory. They must pass the same private-principal check as root grants.
+            if(rule.AccessControlType!=AccessControlType.Allow) continue;
             var sid=rule.IdentityReference.Value;
             if(broad.Contains(sid) || !allowed.Contains(sid)) throw new IOException();
         }
