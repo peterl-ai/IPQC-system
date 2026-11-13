@@ -22,10 +22,10 @@ Other proposed technical choices in that reference are not globally approved by 
 | Removed | Explicit per-item absence/non-applicability assertion after Production or Equipment confirmation; retained definition, attempts and sample history; not OK/NG/N/A |
 | UnableToMeasureNG | Future reason/current-attempt-photo disposition; unsupported here, never synthesized as NG or a zero sample |
 
-The server records the authenticated IPQA's explicit assertion of Production/Equipment
-confirmation; it does not independently authenticate those departments or claim proof
-of a physical conversation. A WorkContext establishes scoped provenance, not physical
-authorship/confirmation or exact offline capture time. A/B remain distinct.
+The operation carries an IPQA confirmation assertion under source A's scoped provenance;
+current authenticated B transports it. The server does not independently authenticate
+Production/Equipment or claim proof of a physical conversation. A WorkContext establishes
+scoped provenance, not physical authorship/confirmation or exact offline capture time.
 
 One fresh removal targets one actual TaskItem/current InspectionAttempt. No array/bulk
 removal API. Existing sampled items may be explicitly Removed without changing any
@@ -131,8 +131,10 @@ alter protections; these are application guards, not a DB-administrator trust sy
 
 Fresh/populated provider tests retain real generation/issuance identities and a synthetic
 prior-version accepted capture/correction/dependency/receipt/audit fixture. Every old
-row/column/FK/index and original trigger is fingerprinted; the one newly added INSERT
-trigger is checked separately. Derived identity registration is checked one-for-one.
+row/column/FK/index is fingerprinted on both providers; original trigger DDL fingerprints
+are SQLite-specific. PostgreSQL native guards are functionally tested and their migration
+definitions reviewed. The newly added INSERT trigger is checked separately. Derived
+identity registration is checked one-for-one.
 DDL/backfill/history-write failures must roll back this additive step and safely retry.
 The earlier R32-03 SQLite rebuild caveat remains historical and unchanged.
 
@@ -175,6 +177,8 @@ exclude Admin login bookkeeping and observe pg_blocking_pids before release. An 
 fixture originally violated batch and attempt uniqueness together; it now isolates the
 intended attempt constraint. These test corrections are not application exploit claims.
 Final complete-diff self-review and exact-HEAD execution counts/CI are recorded in PR delivery.
+P3 evidence wording correction: distinguish SQLite trigger-DDL fingerprints from
+PostgreSQL functional native-guard evidence; do not claim identical instrumentation.
 
 Stop after this one PR for independent ChatGPT Final Review and Peter's explicit merge
 decision. No merge, deployment, production migration or subsequent PR is authorized here.
