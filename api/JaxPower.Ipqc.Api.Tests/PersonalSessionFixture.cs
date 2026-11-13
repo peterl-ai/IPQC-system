@@ -113,7 +113,7 @@ internal sealed class PersonalSessionFixture : IAsyncDisposable
     public const string Environment = "synthetic-r3202-test";
 
     public static async Task<PersonalSessionFixture> CreateAsync(bool postgres = false, string? environment = Environment,
-        string? migration = null)
+        string? migration = null, Action<IServiceCollection>? configure = null)
     {
         var clock = new PersonalClock(); var fault = new SessionFault(); var commitFault = new SessionCommitFault();
         var options = new PersonalAccessOptions { EnvironmentId = environment,
@@ -151,6 +151,7 @@ internal sealed class PersonalSessionFixture : IAsyncDisposable
                     if (postgres) o.UseNpgsql(connection); else o.UseSqlite(connection);
                     o.AddInterceptors(fault, commitFault);
                 });
+                configure?.Invoke(services);
             });
         });
         var fixture = new PersonalSessionFixture { Factory = factory, Anonymous = factory.CreateClient(),

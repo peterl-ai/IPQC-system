@@ -70,13 +70,14 @@ public sealed class InspectionIdentityMigrationTests
     }
 
     // Fingerprint every preexisting row, column, FK and index, including session/context history.
-    internal static Task<string> OldFacts(PersonalSessionFixture f, bool includeIdentities = false, bool includeDrafts = false) => f.Read(async db => {
+    internal static Task<string> OldFacts(PersonalSessionFixture f, bool includeIdentities = false, bool includeDrafts = false, bool includeRemoved = false) => f.Read(async db => {
         await db.Database.OpenConnectionAsync(); var connection = db.Database.GetDbConnection();
         async Task<List<string>> Query(string sql) {
             await using var c = connection.CreateCommand(); c.CommandText = sql; await using var r = await c.ExecuteReaderAsync(); var rows = new List<string>();
             while (await r.ReadAsync()) rows.Add(JsonSerializer.Serialize(Enumerable.Range(0, r.FieldCount).Select(i => r.IsDBNull(i) ? null : r.GetValue(i)).ToArray())); return rows;
         }
-        var excluded = "'__EFMigrationsHistory','__EFMigrationsLock','ItemRemovalOperations','SharedOperationIdentities'" +
+        var excluded = "'__EFMigrationsHistory','__EFMigrationsLock','InspectionAttachments','AttachmentAvailabilities','AttachmentUploads','AttachmentAcceptances','AttachmentEvents'" +
+            (includeRemoved ? "" : ",'ItemRemovalOperations','SharedOperationIdentities'") +
             (includeDrafts ? "" : ",'SharedDrafts','SharedSamples','SharedSampleProjections','ContributionOperations','ContributionDependencies','AcceptedBatchReceipts','SharedAcceptanceAudits'") +
             (includeIdentities ? "" : ",'InspectionAttempts','InspectionAttemptApplicabilities'");
         var tables = new List<string>(); await using (var c = connection.CreateCommand()) {

@@ -43,7 +43,17 @@ If TLS terminates at a reverse proxy, verify trusted forwarded headers, scheme, 
 - Monitoring, application log destination/rotation/retention, and incident ownership.
 - Whether final report Excel must match legacy GQMS layout exactly.
 
-Inspection image storage is not implemented in Web v1; its future storage and retention decisions remain open.
+Web v1 has no photo workflow. The separately scoped [R32-06 server foundation](22_R3206_PROTECTED_PHOTOS.md)
+requires an existing private local photo volume and explicit `InspectionPhotos__Root`.
+No production path is supplied. Absent/unsafe configuration returns photo-only 503;
+legacy APIs remain usable. Do not expose the volume through a web server, FTP or SMB.
+Restrict all ancestors and bytes to the service/approved backup identities; the API must
+be the only writer. Qualify the chosen Windows/Linux filesystem, flush/rename behavior,
+disk capacity, power-loss recovery, image native runtime and coordinated DB/files backup
+before activation. Pin one API instance initially; do not scale storage writers without
+operational review. No cleanup/retention worker is enabled. Host OS, proxy upload limits
+(5 MiB binary plus narrowly bounded metadata), timeout/rate policy, monitoring and restore
+owner remain IT decisions. This PR runs no production migration or deployment.
 
 ## R32-03 shared planning
 
