@@ -174,7 +174,7 @@ Production migration/inventory/restore/power-cut qualification remain external g
 
 Paths below are under `api/JaxPower.Ipqc.Api.Tests/`. Names refer to executable test
 cases, not claims that deferred workflows ran. UnableToMeasurePostgresTests explicitly
-executes72 real-provider cases in CI; all existing PostgreSQL security/sample/item/photo/
+selects73 real-provider cases in CI; all existing PostgreSQL security/sample/item/photo/
 reference classes remain selected. PostgreSQL opt-in SKIPs never count as live evidence.
 
 | Requested case | Executable evidence |
@@ -216,6 +216,24 @@ proof instead of testing a malformed envelope. Windows restricted-identity photo
 failures are environmental and kept separate from actual-user execution results.
 Review covers actual endpoint/service/model/native migration/tests/CI and complete diff,
 including generated model delta; this document is not proof of correctness.
+
+P2 test-oracle defect exposed by the initial feature CI: multi-writer CAS tests selected
+one waiter but required the held transaction to appear among its **direct** blockers.
+PostgreSQL row-lock waiters can queue behind another waiter, so a genuine indirect lock
+path falsely timed out before reaching the acceptance assertions. Historical initial
+[Push43492084933](https://github.com/peterl-ai/IPQC-system/actions/runs/43492084933)
+recorded347 PASS/2 FAIL/0 SKIP (existing reference SampleCas and new CAS_unable);
+[PR43492127528](https://github.com/peterl-ai/IPQC-system/actions/runs/43492127528)
+recorded348 PASS/1 FAIL/0 SKIP (CAS_sample). These failing runs remain evidence.
+The shared test observer now requires a bounded, cycle-safe **actual pg_blocking_pids
+path to the exact held transaction**. It does not accept merely unfinished requests,
+sleep instead of observing locks, increase application timeouts or retry to seek green.
+A dedicated three-connection live regression asserts the second waiter blocks via
+the first, the former direct-only predicate is false, the real path reaches the holder,
+and an unrelated holder is rejected. Existing final one-winner/version/receipt/audit
+assertions remain unchanged. Production locking, CAS and migration code did not change.
+See [PostgreSQL17 blocking semantics](https://www.postgresql.org/docs/17/functions-info.html).
+Final corrected-HEAD results are recorded in PR delivery, separately from these failures.
 
 ## Deferred work and external gates
 

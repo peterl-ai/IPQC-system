@@ -13,12 +13,8 @@ public sealed class DraftAttachmentConcurrencyTests
 {
     private static async Task Blocked(PersonalSessionFixture f, int holder, Task<int> waiter) {
         if (f.PostgresRoot is null) return;
-        var pid = await waiter.WaitAsync(TimeSpan.FromSeconds(10)); await using var monitor = new NpgsqlConnection(f.Connection); await monitor.OpenAsync();
-        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-        while (true) {
-            await using var query = new NpgsqlCommand("SELECT @h = ANY(pg_blocking_pids(@w))", monitor); query.Parameters.AddWithValue("h", holder); query.Parameters.AddWithValue("w", pid);
-            if ((bool)(await query.ExecuteScalarAsync(deadline.Token))!) return; await Task.Delay(20, deadline.Token);
-        }
+        var pid = await waiter.WaitAsync(TimeSpan.FromSeconds(10));
+        await PostgresBlocking.Wait(f.Connection, holder, pid);
     }
     [Theory][InlineData(true, "explicit")][InlineData(false, "explicit")][InlineData(true, "reset")][InlineData(false, "reset")]
     [InlineData(true, "role")][InlineData(false, "role")][InlineData(true, "deactivate")][InlineData(false, "deactivate")]

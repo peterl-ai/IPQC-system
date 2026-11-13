@@ -19,9 +19,7 @@ public sealed class UnableToMeasureConcurrencyTests
     }
     private static async Task Blocked(PersonalSessionFixture f, int holder, Task<int> waiter) {
         if (f.PostgresRoot is null) return; var pid = await waiter.WaitAsync(TimeSpan.FromSeconds(10));
-        await using var monitor = new NpgsqlConnection(f.Connection); await monitor.OpenAsync(); using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-        while (true) { await using var q = new NpgsqlCommand("SELECT @h=ANY(pg_blocking_pids(@w))", monitor); q.Parameters.AddWithValue("h", holder); q.Parameters.AddWithValue("w", pid);
-            if ((bool)(await q.ExecuteScalarAsync(deadline.Token))!) return; await Task.Delay(20, deadline.Token); }
+        await PostgresBlocking.Wait(f.Connection, holder, pid);
     }
     [Theory][InlineData(true, "explicit")][InlineData(false, "explicit")][InlineData(true, "reset")][InlineData(false, "reset")]
     [InlineData(true, "role")][InlineData(false, "role")][InlineData(true, "deactivate")][InlineData(false, "deactivate")]
@@ -101,5 +99,51 @@ public sealed class UnableToMeasureConcurrencyTests
         try { await p.F.Fault.Entered.Task.WaitAsync(TimeSpan.FromSeconds(15)); if (corrupt) await File.WriteAllBytesAsync(await p.FinalPath(u.Photo.AttachmentId), [1]); else File.Delete(await p.FinalPath(u.Photo.AttachmentId)); }
         finally { p.F.Fault.Release.TrySetResult(); }
         Assert.Equal(HttpStatusCode.Conflict, (await accepting).StatusCode); await UnableToMeasureTests.Counts(u, 1, 0, false);
+    }
+}
+
+internal static class PostgresBlocking
+{
+    // Several row-lock waiters can queue behind each other: a genuine blocker may be indirect.
+    // Require a real lock-manager path to this exact holder, not merely an unfinished request.
+    internal static async Task<int[]?> Path(NpgsqlConnection monitor, int holder, int waiter, CancellationToken ct) {
+        await using var q = new NpgsqlCommand("""
+            WITH RECURSIVE chain(pid,path) AS (
+              SELECT @w,ARRAY[@w]::integer[]
+              UNION ALL
+              SELECT b.pid,c.path || b.pid FROM chain c
+              CROSS JOIN LATERAL unnest(pg_blocking_pids(c.pid)) b(pid)
+              WHERE NOT b.pid=ANY(c.path) AND cardinality(c.path)<16
+            ) SELECT path FROM chain WHERE pid=@h AND cardinality(path)>1 LIMIT 1
+            """, monitor);
+        q.Parameters.AddWithValue("h", holder); q.Parameters.AddWithValue("w", waiter);
+        return await q.ExecuteScalarAsync(ct) as int[];
+    }
+    internal static async Task<int[]> Wait(string connection, int holder, int waiter) {
+        await using var monitor = new NpgsqlConnection(connection); await monitor.OpenAsync();
+        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        while (true) { if (await Path(monitor, holder, waiter, deadline.Token) is { } path) return path; await Task.Delay(20, deadline.Token); }
+    }
+    internal static async Task QueuedWaiterRegression(PhotoFixture fixture) {
+        await using var h = new NpgsqlConnection(fixture.F.Connection); await h.OpenAsync();
+        await using var a = new NpgsqlConnection(fixture.F.Connection); await a.OpenAsync();
+        await using var b = new NpgsqlConnection(fixture.F.Connection); await b.OpenAsync();
+        await using var monitor = new NpgsqlConnection(fixture.F.Connection); await monitor.OpenAsync();
+        await using var ht = await h.BeginTransactionAsync(); await using var at = await a.BeginTransactionAsync(); await using var bt = await b.BeginTransactionAsync();
+        async Task Lock(NpgsqlConnection c) { await using var q = new NpgsqlCommand("SELECT \"Id\" FROM \"ApplicationUsers\" WHERE \"Id\"=@id FOR NO KEY UPDATE", c);
+            q.Parameters.AddWithValue("id", TestAccounts.Ipqa1Id); await q.ExecuteScalarAsync(); }
+        Task? first = null, second = null;
+        try {
+            await Lock(h); first = Lock(a); await Wait(fixture.F.Connection, h.ProcessID, a.ProcessID);
+            second = Lock(b); var path = await Wait(fixture.F.Connection, h.ProcessID, b.ProcessID);
+            Assert.Equal(new[] { b.ProcessID, a.ProcessID, h.ProcessID }, path);
+            await using var direct = new NpgsqlCommand("SELECT pg_blocking_pids(@w)", monitor); direct.Parameters.AddWithValue("w", b.ProcessID);
+            var blockers = (int[])(await direct.ExecuteScalarAsync())!;
+            Assert.Contains(a.ProcessID, blockers); Assert.DoesNotContain(h.ProcessID, blockers); // The former oracle falsely times out here.
+            Assert.Null(await Path(monitor, 0, b.ProcessID, default)); Assert.False(first.IsCompleted); Assert.False(second.IsCompleted);
+        } finally {
+            await ht.RollbackAsync(); if (first is not null) await first.WaitAsync(TimeSpan.FromSeconds(10));
+            await at.RollbackAsync(); if (second is not null) await second.WaitAsync(TimeSpan.FromSeconds(10)); await bt.RollbackAsync();
+        }
     }
 }

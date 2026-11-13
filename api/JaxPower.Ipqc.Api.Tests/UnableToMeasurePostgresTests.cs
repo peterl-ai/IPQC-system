@@ -73,6 +73,7 @@ public sealed class UnableToMeasurePostgresTests
     [DisposablePostgresFact] public Task Identity_photo() => Run(p => UnableToMeasureMigrationTests.Identities(p, "photo"));
     [DisposablePostgresFact] public Task FrozenMinimum() => Run(p => UnableToMeasureReadTests.Minimum(p));
     [DisposablePostgresFact] public Task BoundedHistory() => Run(p => UnableToMeasureReadTests.Paging(p));
+    [DisposablePostgresFact] public Task Queued_waiter_has_an_indirect_real_blocking_path() => Run(PostgresBlocking.QueuedWaiterRegression);
     [DisposablePostgresFact] public async Task PopulatedUpgrade() { await using var p = await PhotoFixture.Create(true, UnableToMeasureMigrationTests.Previous); await UnableToMeasureMigrationTests.Upgrade(p); }
     [DisposablePostgresFact] public async Task MigrationRollback_0() { await using var p = await PhotoFixture.Create(true, UnableToMeasureMigrationTests.Previous); await UnableToMeasureMigrationTests.Rollback(p, "CREATE TABLE \"UnableToMeasureProjections\""); }
     [DisposablePostgresFact] public async Task MigrationRollback_1() { await using var p = await PhotoFixture.Create(true, UnableToMeasureMigrationTests.Previous); await UnableToMeasureMigrationTests.Rollback(p, "INSERT INTO \"AcceptedOperationIdentities\""); }
