@@ -39,6 +39,11 @@ The scoped [per-item Removed disposition](docs/21_R3205_ITEM_REMOVED.md) records
 Production/Equipment-confirmed absence/non-applicability while retaining definitions,
 attempts and sampled history. An all-Removed draft is not a formal NotPerformed submission.
 
+The scoped [atomic draft attachment references](docs/23_R3206_DRAFT_ATTACHMENT_REFERENCES.md)
+adds explicit Ready-object association/detachment, shared DraftVersion CAS and immutable
+receipts/history. Storage Ready alone accepts no business reference. No formal Submit,
+retention deletion or shared execution UI is activated; `canExecute=false` remains.
+
 The scoped [R32-06 protected photo foundation](docs/22_R3206_PROTECTED_PHOTOS.md) receives
 real JPEG/PNG bytes, verifies them, and records recoverable physical availability and
 immutable first-Ready A/B provenance. It requires a separately configured private local

@@ -11,7 +11,7 @@ public sealed partial class SharedDraftService
     {
         // Records contain no mutable collections. Discovery and validation share this exact input.
         var sources = b.Operation is { } op ? new[] { op.SourceWorkContextId } : [];
-        return store.RunAsync(actor, false, taskId, sources, async authority => {
+        return IdentityBoundary(() => store.RunAsync(actor, false, taskId, sources, async authority => {
             if (b.BatchId == Guid.Empty || b.ExpectedTaskLineId == Guid.Empty || b.ExpectedDraftVersion < 0 ||
                 b.ExpectedEnvironmentId is not { Length: > 0 and <= 200 } || b.Operation is not { } o ||
                 o.OperationId == Guid.Empty || o.TaskItemId == Guid.Empty || o.InspectionAttemptId == Guid.Empty ||
@@ -83,6 +83,6 @@ public sealed partial class SharedDraftService
                 PersonalSessionId = authority.PersonalSessionId, OccurredAtUtc = now, BeforeVersion = b.ExpectedDraftVersion,
                 AfterVersion = next, NewOperationCount = 1 });
             return new ItemRemovalBatchResult(outcome, receipt, false);
-        }, ct);
+        }, ct));
     }
 }

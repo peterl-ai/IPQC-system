@@ -29,6 +29,7 @@ public sealed partial class IpqcDbContext(DbContextOptions<IpqcDbContext> option
         GuardSharedDrafts();
         GuardItemRemovals();
         GuardAttachments();
+        GuardDraftAttachments();
         if (ChangeTracker.Entries<ProvisioningAuditEvent>().Any(x => x.State is EntityState.Modified or EntityState.Deleted))
             throw new InvalidOperationException("Provisioning audit events are append-only.");
     }
@@ -47,6 +48,7 @@ public sealed partial class IpqcDbContext(DbContextOptions<IpqcDbContext> option
         ConfigureSharedDrafts(modelBuilder);
         ConfigureItemRemovals(modelBuilder);
         ConfigureAttachments(modelBuilder);
+        ConfigureDraftAttachments(modelBuilder);
         var line = modelBuilder.Entity<ProductionLine>();
         line.HasKey(x => x.Id);
         line.Property(x => x.Revision).HasDefaultValue(1L).HasSentinel(1L).IsConcurrencyToken();

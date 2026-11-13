@@ -14,7 +14,8 @@ public sealed class DraftQuarantineException(string code, Guid[] operations, Gui
     public Guid[] SourceContextIds { get; } = contexts;
 }
 
-public sealed partial class SharedDraftService(IpqcDbContext db, WorkContextStore store, InspectionAttemptService identity, TimeProvider clock)
+public sealed partial class SharedDraftService(IpqcDbContext db, WorkContextStore store, InspectionAttemptService identity, TimeProvider clock,
+    IProtectedPhotoStore files, PhotoVerifier verifier)
 {
     private static PersonalAccessException Error(string code,int status=409)=>new(code,status);
     private static T Decode<T>(string json)=>JsonSerializer.Deserialize<T>(json,DraftCanonical.Json) ?? throw new InvalidOperationException("Missing accepted receipt.");
@@ -33,7 +34,7 @@ public sealed partial class SharedDraftService(IpqcDbContext db, WorkContextStor
             AcceptedReferences=input.AcceptedReferences?.ToList()!,SourceProofs=input.SourceProofs?.ToList()!
         };
         var sources=SourceIds(b);
-        return store.RunAsync(actor,false,taskId,sources,async authority=> {
+        return IdentityBoundary(() => store.RunAsync(actor,false,taskId,sources,async authority=> {
             Shape(b);
             var task=await identity.Target(taskId,b.ExpectedTaskLineId,ct);
             if(b.ExpectedWorkflowVersion!=(int)task.WorkflowVersion || b.ExpectedEnvironmentId!=authority.EnvironmentId)
@@ -146,7 +147,7 @@ public sealed partial class SharedDraftService(IpqcDbContext db, WorkContextStor
             db.SharedAcceptanceAudits.Add(new() { Id=Guid.NewGuid(),TaskId=taskId,BatchId=b.BatchId,ActorUserId=authority.UserId,
                 PersonalSessionId=authority.PersonalSessionId,OccurredAtUtc=now,BeforeVersion=b.ExpectedDraftVersion,AfterVersion=next,NewOperationCount=fresh.Count });
             return new DraftBatchResult(outcome,all,false);
-        },ct);
+        },ct));
     }
 
     private static Guid[] SourceIds(DraftBatchInput b)=>b.Operations?.Take(51).Where(x=>x is not null)
@@ -237,8 +238,10 @@ public sealed partial class SharedDraftService(IpqcDbContext db, WorkContextStor
         store.RunAsync<object>(actor,false,taskId,[],async _=> { await identity.Target(taskId,null,ct);
             var o=await db.ContributionOperations.AsNoTracking().SingleOrDefaultAsync(x=>x.TaskId==taskId && x.OperationId==operationId,ct);
             if(o is not null) return Receipt(o);
-            var removal=await db.ItemRemovalOperations.AsNoTracking().SingleOrDefaultAsync(x=>x.TaskId==taskId && x.OperationId==operationId,ct) ?? throw Error("NotFound",404);
-            return Decode<ItemRemovalReceipt>(removal.ReceiptJson);
+            var removal=await db.ItemRemovalOperations.AsNoTracking().SingleOrDefaultAsync(x=>x.TaskId==taskId && x.OperationId==operationId,ct);
+            if(removal is not null) return Decode<ItemRemovalReceipt>(removal.ReceiptJson);
+            var attachment=await db.DraftAttachmentOperations.AsNoTracking().SingleOrDefaultAsync(x=>x.TaskId==taskId && x.OperationId==operationId,ct) ?? throw Error("NotFound",404);
+            return Decode<DraftAttachmentReceipt>(attachment.ReceiptJson);
         },ct);
     public Task<SharedDraftOutput> ReadAsync(Guid taskId,ClaimsPrincipal actor,CancellationToken ct)=>
         store.RunAsync(actor,false,taskId,[],async _=> {
