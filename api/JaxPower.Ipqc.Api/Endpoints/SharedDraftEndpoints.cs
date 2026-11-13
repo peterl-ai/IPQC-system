@@ -36,6 +36,8 @@ public static class SharedDraftEndpoints
             .RequireAuthorization(IpqcPermissions.LinePatrolContributeDraft).WithMetadata(new SharedDraftMutation(),new PhotoRequest(false));
         PersonalAccess.RequireCurrent(g.MapGet("/shared-draft/item-dispositions",async(Guid taskId,long? beforeDraftVersion,SharedDraftService s,HttpContext h,CancellationToken ct)=>
             Results.Ok(await s.ReadDispositionsAsync(taskId,h.User,ct,beforeDraftVersion))),true).WithMetadata(new PhotoRequest(false));
+        PersonalAccess.RequireCurrent(g.MapGet("/shared-draft/evidence-assessment",async(Guid taskId,int? page,int? pageSize,long? expectedDraftVersion,SharedDraftService s,HttpContext h,CancellationToken ct)=>
+            Results.Ok(await s.AssessEvidenceAsync(taskId,h.User,ct,page??1,pageSize??20,expectedDraftVersion))),true).WithMetadata(new PhotoRequest(false));
         PersonalAccess.RequireCurrent(g.MapGet("/shared-draft/attachments",async(Guid taskId,long? beforeDraftVersion,SharedDraftService s,HttpContext h,CancellationToken ct)=>
             Results.Ok(await s.ReadAttachmentsAsync(taskId,h.User,ct,beforeDraftVersion))),true).WithMetadata(new PhotoRequest(false));
         PersonalAccess.RequireCurrent(g.MapGet("/operation-batches/{batchId:guid}/receipt",async(Guid taskId,Guid batchId,SharedDraftService s,HttpContext h,CancellationToken ct)=>
