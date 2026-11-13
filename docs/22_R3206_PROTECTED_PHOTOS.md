@@ -1,5 +1,13 @@
 # R32-06 — Protected photo upload and Ready foundation
 
+Follow-up, 2026-11-13: [atomic draft attachment references](23_R3206_DRAFT_ATTACHMENT_REFERENCES.md)
+adds a separate explicit business-reference operation after PR #21 merged as
+`c571c40a02e4975db9d5d07f1f9c11fb461b90f0`. Earlier statements below that references
+are deferred describe this storage foundation's original delivery. Ready still accepts
+no business work by itself; first incorporation revalidates original source A, so
+Ready-before-security-revoke cannot bypass quarantine. Formal Submit, new-evidence
+completeness, retention/F3 deletion, UI and production activation remain deferred.
+
 Status: implementation for independent PR review under Peter's scoped authorization;
 not production activation or permission to merge. Approved [Rev3.2](architecture/IPQC_ANDROID_ARCHITECTURE_V1_REV3_2_2026-11-10.md)
 and [Supersession](architecture/IPQC_ANDROID_ARCHITECTURE_V1_REV3_2_IMPLEMENTATION_HANDOFF_SUPERSESSION_2026-11-10.md)

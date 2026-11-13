@@ -599,6 +599,170 @@ namespace JaxPower.Ipqc.Api.Data.Migrations
                         });
                 });
 
+            modelBuilder.Entity("JaxPower.Ipqc.Api.Domain.DraftAttachmentOperation", b =>
+                {
+                    b.Property<Guid>("TaskId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("OperationId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("AcceptedAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("ActorPersonalSessionId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("ActorUserId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("AttachmentId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("BatchId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("CanonicalPayload")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("CanonicalizationVersion")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<Guid>("ClientPhotoId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ContentHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("ContributorUserId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("DraftVersion")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("EnvironmentId")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("InspectionAttemptId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("LineId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("PhotoContributorUserId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("PhotoSourceWorkContextId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("PhotoUploadPersonalSessionId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("PhotoUploadedByUserId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("PredecessorHash")
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("PredecessorOperationId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ReceiptJson")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Sha256")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("SourceWorkContextId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("TaskItemId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("WorkflowVersion")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("TaskId", "OperationId");
+                    b.HasAlternateKey("TaskId", "OperationId", "AttachmentId").HasName("AK_DraftPhoto_OperationAttachment");
+                    b.HasAlternateKey("TaskId", "OperationId", "AttachmentId", "ContentHash").HasName("AK_DraftPhoto_PredecessorScope");
+
+                    b.HasIndex("ActorUserId");
+
+                    b.HasIndex("AttachmentId");
+
+                    b.HasIndex("ContributorUserId");
+
+                    b.HasIndex("SourceWorkContextId");
+
+                    b.HasIndex("InspectionAttemptId", "TaskItemId");
+
+                    b.HasIndex("TaskId", "BatchId");
+
+                    b.HasIndex("TaskId", "PredecessorOperationId", "AttachmentId", "PredecessorHash").HasDatabaseName("IX_DraftPhoto_Predecessor");
+                    b.HasIndex("TaskId", "DraftVersion", "OperationId").HasDatabaseName("IX_DraftPhoto_History");
+
+                    b.ToTable("DraftAttachmentOperations", t =>
+                        {
+                            t.HasCheckConstraint("CK_DraftPhoto_Contract", "\"OperationId\" <> '00000000-0000-0000-0000-000000000000' AND \"WorkflowVersion\" = 2 AND \"CanonicalizationVersion\" = 1 AND \"Kind\" IN ('AssociateAttachment','DetachAttachment') AND \"DraftVersion\" > 0 AND length(\"ContentHash\") = 64 AND length(\"Sha256\") = 64 AND length(\"CanonicalPayload\") > 0 AND length(\"ReceiptJson\") > 0 AND ((\"PredecessorOperationId\" IS NULL AND \"PredecessorHash\" IS NULL AND \"Kind\" = 'AssociateAttachment') OR (\"PredecessorOperationId\" IS NOT NULL AND length(\"PredecessorHash\") = 64))");
+                        });
+                });
+
+            modelBuilder.Entity("JaxPower.Ipqc.Api.Domain.DraftAttachmentProjection", b =>
+                {
+                    b.Property<Guid>("TaskId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("AttachmentId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("IsAttached")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<Guid>("LastOperationId")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("TaskId", "AttachmentId");
+
+                    b.HasIndex("TaskId", "LastOperationId", "AttachmentId").HasDatabaseName("IX_DraftPhotoProjection_Last");
+
+                    b.ToTable("DraftAttachmentProjections");
+                });
+
+            modelBuilder.Entity("JaxPower.Ipqc.Api.Domain.DraftOperationKey", b =>
+                {
+                    b.Property<Guid>("TaskId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("OperationId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Domain")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("TaskId", "OperationId");
+
+                    b.ToTable("DraftOperationKeys", t =>
+                        {
+                            t.HasCheckConstraint("CK_DraftOperationKeys_Domain", "\"Domain\" IN ('Sample','ItemRemoval','AttachmentReference')");
+                        });
+                });
+
             modelBuilder.Entity("JaxPower.Ipqc.Api.Domain.EnrollmentChallenge", b =>
                 {
                     b.Property<Guid>("Id")
@@ -2285,10 +2449,10 @@ namespace JaxPower.Ipqc.Api.Data.Migrations
                     b.HasOne("JaxPower.Ipqc.Api.Domain.AttachmentUpload", null)
                         .WithMany()
                         .HasForeignKey("UploadId", "AttachmentId")
-                        .HasConstraintName("FK_PhotoAcceptance_UploadScope")
                         .HasPrincipalKey("Id", "AttachmentId")
                         .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
+                        .IsRequired()
+                        .HasConstraintName("FK_PhotoAcceptance_UploadScope");
                 });
 
             modelBuilder.Entity("JaxPower.Ipqc.Api.Domain.AttachmentAvailability", b =>
@@ -2296,8 +2460,8 @@ namespace JaxPower.Ipqc.Api.Data.Migrations
                     b.HasOne("JaxPower.Ipqc.Api.Domain.AttachmentAcceptance", null)
                         .WithMany()
                         .HasForeignKey("AcceptedAttachmentId")
-                        .HasConstraintName("FK_PhotoAvailability_Acceptance")
-                        .OnDelete(DeleteBehavior.Restrict);
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("FK_PhotoAvailability_Acceptance");
 
                     b.HasOne("JaxPower.Ipqc.Api.Domain.InspectionAttachment", null)
                         .WithOne()
@@ -2308,9 +2472,9 @@ namespace JaxPower.Ipqc.Api.Data.Migrations
                     b.HasOne("JaxPower.Ipqc.Api.Domain.AttachmentUpload", null)
                         .WithMany()
                         .HasForeignKey("ActiveUploadId", "AttachmentId")
-                        .HasConstraintName("FK_PhotoAvailability_UploadScope")
                         .HasPrincipalKey("Id", "AttachmentId")
-                        .OnDelete(DeleteBehavior.Restrict);
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("FK_PhotoAvailability_UploadScope");
                 });
 
             modelBuilder.Entity("JaxPower.Ipqc.Api.Domain.AttachmentEvent", b =>
@@ -2452,6 +2616,79 @@ namespace JaxPower.Ipqc.Api.Data.Migrations
                         .IsRequired();
                 });
 
+            modelBuilder.Entity("JaxPower.Ipqc.Api.Domain.DraftAttachmentOperation", b =>
+                {
+                    b.HasOne("JaxPower.Ipqc.Api.Domain.ApplicationUser", null)
+                        .WithMany()
+                        .HasForeignKey("ActorUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_DraftPhoto_Actor");
+
+                    b.HasOne("JaxPower.Ipqc.Api.Domain.AttachmentAcceptance", null)
+                        .WithMany()
+                        .HasForeignKey("AttachmentId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_DraftPhoto_StorageAcceptance");
+
+                    b.HasOne("JaxPower.Ipqc.Api.Domain.ApplicationUser", null)
+                        .WithMany()
+                        .HasForeignKey("ContributorUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_DraftPhoto_Contributor");
+
+                    b.HasOne("JaxPower.Ipqc.Api.Domain.WorkContext", null)
+                        .WithMany()
+                        .HasForeignKey("SourceWorkContextId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_DraftPhoto_Source");
+
+                    b.HasOne("JaxPower.Ipqc.Api.Domain.InspectionAttempt", null)
+                        .WithMany()
+                        .HasForeignKey("InspectionAttemptId", "TaskItemId")
+                        .HasPrincipalKey("Id", "PatrolTaskItemId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_DraftPhoto_Attempt");
+
+                    b.HasOne("JaxPower.Ipqc.Api.Domain.AcceptedBatchReceipt", null)
+                        .WithMany()
+                        .HasForeignKey("TaskId", "BatchId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_DraftPhoto_Batch");
+
+                    b.HasOne("JaxPower.Ipqc.Api.Domain.DraftAttachmentOperation", null)
+                        .WithMany()
+                        .HasForeignKey("TaskId", "PredecessorOperationId", "AttachmentId", "PredecessorHash")
+                        .HasPrincipalKey("TaskId", "OperationId", "AttachmentId", "ContentHash")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("FK_DraftPhoto_Predecessor");
+                });
+
+            modelBuilder.Entity("JaxPower.Ipqc.Api.Domain.DraftAttachmentProjection", b =>
+                {
+                    b.HasOne("JaxPower.Ipqc.Api.Domain.DraftAttachmentOperation", null)
+                        .WithMany()
+                        .HasForeignKey("TaskId", "LastOperationId", "AttachmentId")
+                        .HasPrincipalKey("TaskId", "OperationId", "AttachmentId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_DraftPhotoProjection_Operation");
+                });
+
+            modelBuilder.Entity("JaxPower.Ipqc.Api.Domain.DraftOperationKey", b =>
+                {
+                    b.HasOne("JaxPower.Ipqc.Api.Domain.SharedDraft", null)
+                        .WithMany()
+                        .HasForeignKey("TaskId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("JaxPower.Ipqc.Api.Domain.EnrollmentChallenge", b =>
                 {
                     b.HasOne("JaxPower.Ipqc.Api.Domain.DeviceEnrollment", null)
@@ -2496,10 +2733,10 @@ namespace JaxPower.Ipqc.Api.Data.Migrations
                     b.HasOne("JaxPower.Ipqc.Api.Domain.InspectionAttempt", null)
                         .WithMany()
                         .HasForeignKey("InspectionAttemptId", "TaskItemId")
-                        .HasConstraintName("FK_Photo_AttemptScope")
                         .HasPrincipalKey("Id", "PatrolTaskItemId")
                         .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
+                        .IsRequired()
+                        .HasConstraintName("FK_Photo_AttemptScope");
                 });
 
             modelBuilder.Entity("JaxPower.Ipqc.Api.Domain.InspectionAttempt", b =>
