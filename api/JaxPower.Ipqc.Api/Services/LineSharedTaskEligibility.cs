@@ -18,6 +18,6 @@ public static class LineSharedTaskEligibility
             task.Items.Select(x => x.SourcePatrolStandardItemId).Distinct().Count() != task.Items.Count) return "UnsupportedSnapshot";
         if (task.Items.Any(x => x.InspectionAttempts.Count != 0 || x.CurrentInspectionAttempt is not null) &&
             InitialInspectionIdentity.State(task) != "Initialized") return "UnsupportedState";
-        return "FoundationOnly";
+        return task.SharedDraft is {DraftVersion:>0} ? "DraftFoundation" : "FoundationOnly";
     }
 }

@@ -17,6 +17,7 @@ public sealed class LinePatrolReadService(IpqcDbContext db, ConfiguredLineDirect
     public Task<List<PersonalLine>> LinesAsync(CancellationToken ct) => directory.LinesAsync(ct);
 
     private IQueryable<PatrolTask> Tasks() => db.PatrolTasks.AsNoTracking()
+        .Include(x=>x.SharedDraft)
         .Where(x => x.WorkflowVersion == WorkflowVersion.LineSharedV1)
         .Include(x => x.Items).ThenInclude(x => x.Samples)
         .Include(x => x.Items).ThenInclude(x => x.InspectionAttempts)
@@ -43,7 +44,7 @@ public sealed class LinePatrolReadService(IpqcDbContext db, ConfiguredLineDirect
         if (task?.LineId is not { } line || lines.All(x => x.Id != line)) throw new PersonalAccessException("NotFound", 404);
         if (expectedLine is { } expected && expected != line) throw new PersonalAccessException("TaskLineMismatch", 409);
         var availability = LineSharedTaskEligibility.Availability(task);
-        if (availability != "FoundationOnly") throw new PersonalAccessException(
+        if (availability is not ("FoundationOnly" or "DraftFoundation")) throw new PersonalAccessException(
             availability == "UnsupportedSnapshot" ? "TaskSnapshotUnavailable" : "TaskReadContractUnavailable", 409);
         return new(Summary(task, authority), task.PatrolPlanId, task.PatrolStandardId,
             task.FactoryCodeSnapshot, task.FactoryNameSnapshot, task.WorkshopCodeSnapshot,

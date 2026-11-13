@@ -108,6 +108,9 @@ public sealed class InspectionJudgmentService
 
     public static string Overall(PatrolTask task) => task.Items.Any(x => x.JudgmentResult == "NG") ? "Unqualified" : "Qualified";
 
+    internal static string? QuantitativeSampleJudgment(PatrolTaskItem item, decimal value) =>
+        TryLimits(item,out var lower,out var upper,out _) ? Matches(value,lower) && Matches(value,upper) ? "OK" : "NG" : null;
+
     private static bool TryLimits(PatrolTaskItem item, out (string Op, decimal Value)? lower,
         out (string Op, decimal Value)? upper, out string? error) =>
         TryLimits(item.LowerLimitOperator, item.LowerLimitValue, item.UpperLimitOperator,
