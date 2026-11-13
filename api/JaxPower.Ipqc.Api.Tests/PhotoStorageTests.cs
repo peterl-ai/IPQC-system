@@ -54,6 +54,15 @@ public sealed class PhotoStorageTests
             finally {System.IO.FileSystemAclExtensions.SetAccessControl(directory,saved);}
         }
     }
+    [LinuxPhotoFact] public async Task Application_root_alias_is_rejected() {
+        if(!OperatingSystem.IsLinux()) throw new InvalidOperationException("Linux-only test must be skipped.");
+        await using var p=await PhotoFixture.Create();var alias=Path.Combine(Path.GetTempPath(),"ipqc-photo-webroot-alias-"+Guid.NewGuid().ToString("N"));
+        try {
+            Directory.CreateSymbolicLink(alias,p.DirectoryPath);
+            p.F.Factory.Services.GetRequiredService<Microsoft.AspNetCore.Hosting.IWebHostEnvironment>().WebRootPath=alias;
+            Assert.Throws<PhotoStorageException>(()=>p.Fault.Inner.CheckConfigured());
+        } finally {Directory.Delete(alias);}
+    }
 }
 public sealed class LinuxPhotoFactAttribute : FactAttribute {
     public LinuxPhotoFactAttribute() {if(!OperatingSystem.IsLinux()) Skip="Linux no-follow/openat symlink test; executed by Ubuntu backend CI.";}

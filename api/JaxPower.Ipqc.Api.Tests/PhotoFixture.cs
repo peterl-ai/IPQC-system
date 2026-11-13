@@ -40,7 +40,7 @@ internal sealed class PhotoFixture : IAsyncDisposable
         }
         PhotoFault? fault=null;
         var f=await PersonalSessionFixture.CreateAsync(postgres,environment:environment,migration:migration,configure:services=>
-            services.AddSingleton<IProtectedPhotoStore>(sp=>fault=new PhotoFault {Inner=new ProtectedPhotoStore(sp.GetRequiredService<IConfiguration>(),sp.GetRequiredService<Microsoft.Extensions.Hosting.IHostEnvironment>())}));
+            services.AddSingleton<IProtectedPhotoStore>(sp=>fault=new PhotoFault {Inner=new ProtectedPhotoStore(sp.GetRequiredService<IConfiguration>(),sp.GetRequiredService<Microsoft.AspNetCore.Hosting.IWebHostEnvironment>())}));
         f.Factory.Services.GetRequiredService<IConfiguration>()["InspectionPhotos:Root"]=path;
         _=f.Factory.Services.GetRequiredService<IProtectedPhotoStore>();
         return new(){F=f,DirectoryPath=path,Fault=fault!};

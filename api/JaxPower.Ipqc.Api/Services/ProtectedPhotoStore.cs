@@ -18,7 +18,7 @@ public interface IPhotoDurability { void FlushExisting(string key,bool final); }
 
 // No client paths, no delete/overwrite API. A dedicated local private volume is required.
 // Pinned directory handles prevent directory replacement; Linux also uses openat/NOFOLLOW.
-public sealed class ProtectedPhotoStore(IConfiguration config, IHostEnvironment environment) : IProtectedPhotoStore, IPhotoDurability
+public sealed class ProtectedPhotoStore(IConfiguration config, Microsoft.AspNetCore.Hosting.IWebHostEnvironment environment) : IProtectedPhotoStore, IPhotoDurability
 {
     public const int MaximumBytes=5*1024*1024;
     private sealed class Root : IDisposable
@@ -38,8 +38,8 @@ public sealed class ProtectedPhotoStore(IConfiguration config, IHostEnvironment 
             if(string.IsNullOrWhiteSpace(raw) || !System.IO.Path.IsPathFullyQualified(raw) || raw.StartsWith("\\\\") || raw.Contains('\0') || (!OperatingSystem.IsWindows() && !OperatingSystem.IsLinux())) throw new IOException();
             var path=System.IO.Path.TrimEndingDirectorySeparator(System.IO.Path.GetFullPath(raw));
             var drive=System.IO.Path.GetPathRoot(path)!;
-            var applicationRoots=new[]{environment.ContentRootPath,AppContext.BaseDirectory,(environment as Microsoft.AspNetCore.Hosting.IWebHostEnvironment)?.WebRootPath}
-                .Where(x=>!string.IsNullOrWhiteSpace(x)).Select(x=>System.IO.Path.TrimEndingDirectorySeparator(System.IO.Path.GetFullPath(x!)));
+            var applicationRoots=new[]{environment.ContentRootPath,AppContext.BaseDirectory,environment.WebRootPath}
+                .Where(x=>!string.IsNullOrWhiteSpace(x)).Select(x=>System.IO.Path.TrimEndingDirectorySeparator(System.IO.Path.GetFullPath(x!))).ToArray();
             if(path==System.IO.Path.TrimEndingDirectorySeparator(drive) || applicationRoots.Any(app=>ContainsPath(app,path) || ContainsPath(path,app)) || !Directory.Exists(path)) throw new IOException();
             root=new Root {Path=path};
             if(OperatingSystem.IsLinux()) {
@@ -57,10 +57,34 @@ public sealed class ProtectedPhotoStore(IConfiguration config, IHostEnvironment 
                 }
                 ValidateWindowsAcl(path);
             } else throw new IOException();
+            // Compare physical directories as well: a separately configured WebRoot or
+            // application symlink/short-name alias must not point into the private volume.
+            var physical=CanonicalDirectory(path);
+            if(applicationRoots.Select(CanonicalDirectory).Any(app=>ContainsPath(app,physical) || ContainsPath(physical,app))) throw new IOException();
             return root;
         } catch(Exception ex) when(ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException) {
             root?.Dispose();throw new PhotoStorageException("PhotoStorageUnavailable");
         }
+    }
+    private static string CanonicalDirectory(string path)
+    {
+        var existing=path;var suffix=new Stack<string>();
+        while(!Directory.Exists(existing)) {
+            suffix.Push(System.IO.Path.GetFileName(existing));existing=System.IO.Path.GetDirectoryName(existing) ?? throw new IOException();
+        }
+        string resolved;
+        if(OperatingSystem.IsLinux()) {
+            var pointer=realpath(existing,IntPtr.Zero);if(pointer==IntPtr.Zero) throw new IOException();
+            try {resolved=Marshal.PtrToStringUTF8(pointer) ?? throw new IOException();} finally {free(pointer);}
+        } else if(OperatingSystem.IsWindows()) {
+            using var h=CreateFileW(existing,0x80,7,IntPtr.Zero,3,0x02000000,IntPtr.Zero);if(h.IsInvalid) throw new IOException();
+            var name=new System.Text.StringBuilder(32768);var length=GetFinalPathNameByHandleW(h,name,(uint)name.Capacity,0);
+            if(length==0 || length>=name.Capacity) throw new IOException();resolved=name.ToString();
+            if(resolved.StartsWith(@"\\?\UNC\",StringComparison.OrdinalIgnoreCase)) throw new IOException();
+            if(resolved.StartsWith(@"\\?\",StringComparison.Ordinal)) resolved=resolved[4..];
+        } else throw new IOException();
+        foreach(var piece in suffix) resolved=System.IO.Path.Combine(resolved,piece);
+        return System.IO.Path.TrimEndingDirectorySeparator(resolved);
     }
     [System.Runtime.Versioning.SupportedOSPlatform("windows")]
     private void ValidateWindowsAcl(string path)
@@ -174,8 +198,11 @@ public sealed class ProtectedPhotoStore(IConfiguration config, IHostEnvironment 
     [DllImport("libc",SetLastError=true)] private static extern int renameat2(int olddir,string oldname,int newdir,string newname,uint flags);
     [DllImport("libc",SetLastError=true)] private static extern int fsync(int fd);
     [DllImport("libc",SetLastError=true)] private static extern int flock(int fd,int operation);
+    [DllImport("libc",SetLastError=true)] private static extern IntPtr realpath(string path,IntPtr resolved);
+    [DllImport("libc")] private static extern void free(IntPtr pointer);
     [DllImport("kernel32.dll",CharSet=CharSet.Unicode,SetLastError=true)] private static extern SafeFileHandle CreateFileW(string path,uint access,uint share,IntPtr security,uint disposition,uint flags,IntPtr template);
     [DllImport("kernel32.dll",SetLastError=true)] private static extern uint GetFileType(SafeFileHandle handle);
     [DllImport("kernel32.dll",SetLastError=true)] private static extern bool FlushFileBuffers(SafeFileHandle handle);
     [DllImport("kernel32.dll",SetLastError=true)] private static extern bool SetFileInformationByHandle(SafeFileHandle handle,int info,IntPtr buffer,uint size);
+    [DllImport("kernel32.dll",CharSet=CharSet.Unicode,SetLastError=true)] private static extern uint GetFinalPathNameByHandleW(SafeFileHandle handle,System.Text.StringBuilder path,uint length,uint flags);
 }

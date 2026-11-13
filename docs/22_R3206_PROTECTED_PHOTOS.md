@@ -109,7 +109,10 @@ Configure an existing dedicated private **local** root via `InspectionPhotos:Roo
 relative/UNC/device/root-drive paths, roots inside or containing ContentRoot, application
 binaries or a separately configured WebRoot, unsupported
 OS and symlink/reparse-point ancestors. Linux requires owner-only rwx (no group/other
-permissions) on the root. Windows rejects applicable allow-ACEs for broad principals or
+permissions) on the root. Application boundaries also compare OS-resolved physical paths,
+including WebRoot symlink aliases and Windows short-name aliases. Missing configured
+directories resolve through their existing parent. Windows rejects applicable allow-ACEs
+for broad principals or
 identities other than the current service, SYSTEM, Administrators and explicitly configured
 `InspectionPhotos:AllowedStoragePrincipals` SID entries (e.g. an approved backup identity).
 Broad Everyone/Users/AuthenticatedUsers/Guest/Anonymous grants are always rejected.
