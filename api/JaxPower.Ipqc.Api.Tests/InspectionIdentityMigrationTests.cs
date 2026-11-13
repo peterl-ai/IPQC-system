@@ -76,7 +76,7 @@ public sealed class InspectionIdentityMigrationTests
             await using var c = connection.CreateCommand(); c.CommandText = sql; await using var r = await c.ExecuteReaderAsync(); var rows = new List<string>();
             while (await r.ReadAsync()) rows.Add(JsonSerializer.Serialize(Enumerable.Range(0, r.FieldCount).Select(i => r.IsDBNull(i) ? null : r.GetValue(i)).ToArray())); return rows;
         }
-        var excluded = "'__EFMigrationsHistory','__EFMigrationsLock','AcceptedOperationIdentities','UnableToMeasureOperations','UnableToMeasureProjections'" +
+        var excluded = "'__EFMigrationsHistory','__EFMigrationsLock','AcceptedOperationIdentities','UnableToMeasureOperations','UnableToMeasureProjections','SampleEvidenceOperations','SampleEvidenceProjections'" +
             (includeReferences ? "" : ",'DraftOperationKeys','DraftAttachmentOperations','DraftAttachmentProjections'") +
             (includePhotos ? "" : ",'InspectionAttachments','AttachmentAvailabilities','AttachmentUploads','AttachmentAcceptances','AttachmentEvents'") +
             (includeRemoved ? "" : ",'ItemRemovalOperations','SharedOperationIdentities'") +

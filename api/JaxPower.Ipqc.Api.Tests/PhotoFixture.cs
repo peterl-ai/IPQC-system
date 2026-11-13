@@ -17,9 +17,10 @@ internal sealed class PhotoFault : IProtectedPhotoStore,IPhotoDurability
     public required ProtectedPhotoStore Inner;
     public Func<Task>? AfterStage;
     public Action? BeforeStage,BeforePromote,AfterPromote;
+    public int ReadCount;
     public void CheckConfigured()=>Inner.CheckConfigured();
     public async Task Stage(string key,Stream body,long length,CancellationToken ct) {BeforeStage?.Invoke();await Inner.Stage(key,body,length,ct);if(AfterStage is {} hook) await hook();}
-    public Task<byte[]?> Read(string key,bool final,CancellationToken ct)=>Inner.Read(key,final,ct);
+    public Task<byte[]?> Read(string key,bool final,CancellationToken ct) { Interlocked.Increment(ref ReadCount); return Inner.Read(key,final,ct); }
     public void Promote(string stage,string final) {BeforePromote?.Invoke();Inner.Promote(stage,final);AfterPromote?.Invoke();}
     public void FlushExisting(string key,bool final)=>Inner.FlushExisting(key,final);
 }

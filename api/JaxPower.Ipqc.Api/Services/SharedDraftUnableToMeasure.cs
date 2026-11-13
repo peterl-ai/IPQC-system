@@ -101,11 +101,11 @@ public sealed partial class SharedDraftService
             o.ContributorUserIdAssertion == Guid.Empty || o.BaseDraftVersion < 0 || o.OriginLocalEditVersion < 0 || !RefValid(o.Evidence) || !RefValid(o.Predecessor) ||
             b.SourceProof is { } proof && proof.WorkContextId != o.SourceWorkContextId) throw Error("InvalidUnableBatch", 400);
     }
-    private async Task<UnableToMeasureEvidence> UnableEvidence(PatrolTask task, Guid item, Guid attempt, DraftAttachmentReceipt evidence, CancellationToken ct)
+    private async Task<UnableToMeasureEvidence> UnableEvidence(PatrolTask task, Guid item, Guid attempt, DraftAttachmentReceipt evidence, CancellationToken ct, Dictionary<Guid, string>? observations = null)
     {
         var p = await db.DraftAttachmentProjections.AsNoTracking().SingleOrDefaultAsync(x => x.TaskId == task.Id && x.AttachmentId == evidence.AttachmentId, ct);
         var a = await db.InspectionAttachments.AsNoTracking().SingleAsync(x => x.Id == evidence.AttachmentId, ct);
-        var availability = await ReferenceAvailability(a, ct);
+        var availability = observations is null ? await ReferenceAvailability(a, ct) : await BindingAvailability(a, ct, observations);
         var state = a.TaskId != task.Id || a.TaskItemId != item || a.InspectionAttemptId != attempt || a.LineId != task.LineId ||
             a.EnvironmentId != evidence.EnvironmentId || a.WorkflowVersion != 2 ? "ScopeMismatch" : !Current(task, item, attempt) ? "AttemptNotCurrent" : p is not { IsAttached: true } ? "Detached" :
             p.LastOperationId != evidence.OperationId ? "ReferenceSuperseded" : availability != "Ready" ? availability : "Valid";

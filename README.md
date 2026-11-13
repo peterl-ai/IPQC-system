@@ -50,6 +50,12 @@ reports real sample history, accepted current-attempt references and verified ph
 availability. Unproven transition-specific evidence and unconfirmed free-text photo
 policies remain explicitly unresolved; assessment creates no accepted facts or Submit.
 
+The scoped [explicit sample-transition photo bindings](docs/26_R3205_SAMPLE_EVIDENCE_BINDINGS.md)
+accepts immutable associations to genuine accepted sample operations and current Ready
+photo references, with shared CAS and explicit correction/withdrawal. Photo reuse records
+facts only; newness/coverage and unconfirmed policy remain unresolved. No formal Submit
+or shared execution is activated.
+
 The scoped [atomic draft attachment references](docs/23_R3206_DRAFT_ATTACHMENT_REFERENCES.md)
 adds explicit Ready-object association/detachment, shared DraftVersion CAS and immutable
 receipts/history. Storage Ready alone accepts no business reference. No formal Submit,
