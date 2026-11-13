@@ -248,6 +248,12 @@ No self-written summary substitutes for reviewing the final complete diff.
 
 ## Deferred requirements and external gates
 
+2026-11-13 scoped follow-up: [UnableToMeasureNG draft disposition](24_R3205_UNABLE_TO_MEASURE_NG.md)
+now builds on these accepted references with reason, exact current-attempt evidence,
+immutable correction/withdrawal and shared CAS. The original deferral below records this
+reference PR's scope; formal Submit, general completeness and all other listed work
+remain deferred. No original acceptance or historical verification evidence is rewritten.
+
 No Android camera/gallery/offline coordination, Web shared execution, formal Submit,
 PQE Approve/Reject/special confirmation, new reinspection producer, NG/NG→OK/photo
 completeness, UnableToMeasureNG, F2 sealed intent/takeover, reference-image administration,

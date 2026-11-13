@@ -240,13 +240,18 @@ public sealed partial class SharedDraftService(IpqcDbContext db, WorkContextStor
             if(o is not null) return Receipt(o);
             var removal=await db.ItemRemovalOperations.AsNoTracking().SingleOrDefaultAsync(x=>x.TaskId==taskId && x.OperationId==operationId,ct);
             if(removal is not null) return Decode<ItemRemovalReceipt>(removal.ReceiptJson);
-            var attachment=await db.DraftAttachmentOperations.AsNoTracking().SingleOrDefaultAsync(x=>x.TaskId==taskId && x.OperationId==operationId,ct) ?? throw Error("NotFound",404);
-            return Decode<DraftAttachmentReceipt>(attachment.ReceiptJson);
+            var attachment=await db.DraftAttachmentOperations.AsNoTracking().SingleOrDefaultAsync(x=>x.TaskId==taskId && x.OperationId==operationId,ct);
+            if(attachment is not null) return Decode<DraftAttachmentReceipt>(attachment.ReceiptJson);
+            var unable=await db.UnableToMeasureOperations.AsNoTracking().SingleOrDefaultAsync(x=>x.TaskId==taskId && x.OperationId==operationId,ct) ?? throw Error("NotFound",404);
+            return Decode<UnableToMeasureReceipt>(unable.ReceiptJson);
         },ct);
     public Task<SharedDraftOutput> ReadAsync(Guid taskId,ClaimsPrincipal actor,CancellationToken ct)=>
         store.RunAsync(actor,false,taskId,[],async _=> {
             var t=await identity.Target(taskId,null,ct);
             var removals=await db.ItemRemovalOperations.AsNoTracking().Where(x=>x.TaskId==taskId).ToDictionaryAsync(x=>x.InspectionAttemptId,ct);
+            var unable=await db.UnableToMeasureProjections.AsNoTracking().Where(x=>x.TaskId==taskId && x.IsActive).ToDictionaryAsync(x=>x.InspectionAttemptId,ct);
+            var unableIds=unable.Values.Select(x=>x.LastOperationId).ToArray();
+            var unableRows=await db.UnableToMeasureOperations.AsNoTracking().Where(x=>x.TaskId==taskId && unableIds.Contains(x.OperationId)).ToDictionaryAsync(x=>x.OperationId,ct);
             var samples=await db.SharedSamples.AsNoTracking().Where(x=>x.TaskId==taskId).OrderBy(x=>x.TaskItemId).ThenBy(x=>x.SequenceNo).ToListAsync(ct);
             var p=await db.SharedSampleProjections.AsNoTracking().Where(x=>x.TaskId==taskId).ToDictionaryAsync(x=>x.SampleId,ct);
             var opIds=p.Values.Select(x=>x.ValueOperationId).Distinct().ToArray();
@@ -257,10 +262,11 @@ public sealed partial class SharedDraftService(IpqcDbContext db, WorkContextStor
                 var projection=p[s.Id];var source=values[projection.ValueOperationId];
                 return new DraftSampleOutput(s.Id,s.TaskItemId,s.InspectionAttemptId,s.ClientSampleId,s.SequenceNo,
                     new(projection.InspectionType,projection.InspectionValue,projection.Judgment,projection.Barcode),projection.IsRemoved,
-                    projection.ValueOperationId,source.ContributorUserId,projection.LastOperationId,Current(t,s.TaskItemId,s.InspectionAttemptId) && !removals.ContainsKey(s.InspectionAttemptId));
+                    projection.ValueOperationId,source.ContributorUserId,projection.LastOperationId,Current(t,s.TaskItemId,s.InspectionAttemptId) && !removals.ContainsKey(s.InspectionAttemptId) && !unable.ContainsKey(s.InspectionAttemptId));
             }).ToList(),Items:attempts.Select(a=>new DraftItemOutput(a.TaskItemId,a.InspectionAttemptId,
-                removals.ContainsKey(a.InspectionAttemptId)?"Removed":"Applicable",a.MinimumSampleCount,
-                removals.TryGetValue(a.InspectionAttemptId,out var r)?Decode<ItemRemovalReceipt>(r.ReceiptJson):null)).ToList(),
+                removals.ContainsKey(a.InspectionAttemptId)?"Removed":unable.ContainsKey(a.InspectionAttemptId)?"UnableToMeasureNG":"Applicable",a.MinimumSampleCount,
+                removals.TryGetValue(a.InspectionAttemptId,out var r)?Decode<ItemRemovalReceipt>(r.ReceiptJson):null,
+                unable.TryGetValue(a.InspectionAttemptId,out var u)?Decode<UnableToMeasureReceipt>(unableRows[u.LastOperationId].ReceiptJson):null)).ToList(),
                 AllItemsRemoved:t.Items.Count>0 && attempts.Count==t.Items.Count && attempts.All(a=>removals.ContainsKey(a.InspectionAttemptId)));
         },ct);
 }

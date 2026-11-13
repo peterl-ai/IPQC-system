@@ -30,7 +30,10 @@ public sealed class DraftAttachmentMigrationTests
     internal static async Task<(DraftSetup S, DraftBatchInput Old, AttachmentOutput Photo)> Prior(PhotoFixture p) {
         var (s, old) = await ItemRemovalMigrationTests.PriorAccepted(p.F);
         var bytes = PhotoFixture.Image(); var a = await PhotoFixture.Reserve(s, PhotoFixture.Input(s, bytes)); a = await PhotoFixture.Ready(s, a.AttachmentId, bytes);
-        var other = (await s.Read())!.CurrentAttempts.Single(x => x.TaskItemId != s.ItemId);
+        // Use the identity surface supported by this old schema, not the latest draft reader.
+        var scopes = (await s.Client().GetFromJsonAsync<InspectionIdentityOutput>(InspectionIdentityTests.Root(s.TaskId)))!;
+        var scope = scopes.Items.Single(x => x.TaskItemId != s.ItemId);
+        var other = new DraftAttemptScope(scope.TaskItemId, scope.InspectionAttemptId, scope.MinimumSampleCount);
         await ItemRemovalTests.Accept(s, ItemRemovalTests.Input(s, 1, other)); return (s, old, a);
     }
     [Fact] public async Task Populated_upgrade_preserves_all_rows_and_exact_receipts() { await using var p = await PhotoFixture.Create(migration: Previous); await Upgrade(p); }

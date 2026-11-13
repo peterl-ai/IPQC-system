@@ -27,4 +27,5 @@ public sealed record ItemRemovalBatchResult(DraftBatchReceipt? BatchReceipt, Ite
     bool ReplayOnly, bool CanExecute = false, bool AcceptsFormalInspection = false);
 
 public sealed record DraftItemOutput(Guid TaskItemId, Guid InspectionAttemptId, string Disposition,
-    int MinimumSampleCount, ItemRemovalReceipt? Removal);
+    int MinimumSampleCount, ItemRemovalReceipt? Removal,
+    [property:JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] UnableToMeasureReceipt? Unable = null);

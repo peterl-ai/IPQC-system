@@ -39,6 +39,12 @@ The scoped [per-item Removed disposition](docs/21_R3205_ITEM_REMOVED.md) records
 Production/Equipment-confirmed absence/non-applicability while retaining definitions,
 attempts and sampled history. An all-Removed draft is not a formal NotPerformed submission.
 
+The scoped [UnableToMeasureNG draft disposition](docs/24_R3205_UNABLE_TO_MEASURE_NG.md)
+requires an NG Reason and a genuine attached current-attempt photo reference. Explicit
+correction/withdrawal retains immutable history and frozen minimums; shared CAS, source
+provenance and original receipts remain authoritative. This creates no fake sample,
+formal result or Submit permission, and shared tasks remain `canExecute=false`.
+
 The scoped [atomic draft attachment references](docs/23_R3206_DRAFT_ATTACHMENT_REFERENCES.md)
 adds explicit Ready-object association/detachment, shared DraftVersion CAS and immutable
 receipts/history. Storage Ready alone accepts no business reference. No formal Submit,
