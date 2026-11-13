@@ -14,7 +14,7 @@ public sealed class DraftQuarantineException(string code, Guid[] operations, Gui
     public Guid[] SourceContextIds { get; } = contexts;
 }
 
-public sealed class SharedDraftService(IpqcDbContext db, WorkContextStore store, InspectionAttemptService identity, TimeProvider clock)
+public sealed partial class SharedDraftService(IpqcDbContext db, WorkContextStore store, InspectionAttemptService identity, TimeProvider clock)
 {
     private static PersonalAccessException Error(string code,int status=409)=>new(code,status);
     private static T Decode<T>(string json)=>JsonSerializer.Deserialize<T>(json,DraftCanonical.Json) ?? throw new InvalidOperationException("Missing accepted receipt.");
@@ -54,6 +54,8 @@ public sealed class SharedDraftService(IpqcDbContext db, WorkContextStore store,
                 return new DraftBatchResult(original,original.Operations,true);
             }
             var requested=b.Operations.Select(x=>x.OperationId).Concat(b.AcceptedReferences.Select(x=>x.OperationId)).ToArray();
+            if(await db.SharedOperationIdentities.AnyAsync(x=>x.TaskId==taskId && requested.Contains(x.OperationId) && x.Domain!="Sample",ct))
+                throw Error("OperationIdentityConflict");
             var known=await db.ContributionOperations.AsNoTracking().Where(x=>x.TaskId==taskId && requested.Contains(x.OperationId)).ToDictionaryAsync(x=>x.OperationId,ct);
             foreach(var o in b.Operations)
                 if(known.TryGetValue(o.OperationId,out var old) && old.ContentHash!=hashes[o.OperationId]) throw Error("OperationIdentityConflict");
@@ -64,6 +66,8 @@ public sealed class SharedDraftService(IpqcDbContext db, WorkContextStore store,
             if(PlanningSnapshot.Status(task)!="ValidV1" || InitialInspectionIdentity.State(task)!="Initialized" ||
                 LineSharedTaskEligibility.Availability(task) is not ("FoundationOnly" or "DraftFoundation")) throw Error("DraftAcceptanceUnavailable");
             if(fresh.Values.Any(o=>o.BaseDraftVersion!=b.ExpectedDraftVersion || !Current(task,o.TaskItemId,o.InspectionAttemptId))) throw Error("DraftAttemptConflict");
+            var freshAttempts=fresh.Values.Select(x=>x.InspectionAttemptId).ToArray();
+            if(await db.ItemRemovalOperations.AnyAsync(x=>x.TaskId==taskId && freshAttempts.Contains(x.InspectionAttemptId),ct)) throw Error("DraftItemRemoved");
             var ordered=Manifest(b,fresh,known,hashes);
             // Accepted facts are resolved before source checks; no proof/current-A test is applied to them.
             foreach(var k in known.Values)
@@ -183,17 +187,21 @@ public sealed class SharedDraftService(IpqcDbContext db, WorkContextStore store,
         return ordered;
     }
 
-    private async Task<Dictionary<Guid,WorkContext>> Sources(PatrolTask t,DraftBatchInput b,List<DraftOperationInput> fresh,PersonalAuthority authority,CancellationToken ct)
+    private sealed record SourceClaim(Guid OperationId, Guid SourceWorkContextId, Guid ContributorUserIdAssertion, List<Guid> Dependencies);
+    private Task<Dictionary<Guid,WorkContext>> Sources(PatrolTask t,DraftBatchInput b,List<DraftOperationInput> fresh,PersonalAuthority authority,CancellationToken ct)=>
+        Sources(t,b.SourceProofs,fresh.Select(x=>new SourceClaim(x.OperationId,x.SourceWorkContextId,x.ContributorUserIdAssertion,x.Dependencies.Select(d=>d.OperationId).ToList())).ToList(),authority,ct);
+
+    private async Task<Dictionary<Guid,WorkContext>> Sources(PatrolTask t,List<DraftSourceProof> proofs,List<SourceClaim> fresh,PersonalAuthority authority,CancellationToken ct)
     {
         var ids=fresh.Select(x=>x.SourceWorkContextId).ToHashSet();
-        if(b.SourceProofs.Any(x=>!ids.Contains(x.WorkContextId))) throw Error("SourceManifestConflict",400);
+        if(proofs.Any(x=>!ids.Contains(x.WorkContextId))) throw Error("SourceManifestConflict",400);
         var contexts=await db.WorkContexts.AsNoTracking().Where(x=>ids.Contains(x.Id)).ToDictionaryAsync(x=>x.Id,ct);
         var userIds=contexts.Values.Select(x=>x.UserId).Distinct().ToArray();
         var users=await db.ApplicationUsers.AsNoTracking().Where(x=>userIds.Contains(x.Id)).ToDictionaryAsync(x=>x.Id,ct);
         var invalid=new HashSet<Guid>();var revoked=new HashSet<Guid>();
         foreach(var op in fresh) {
             var id=op.SourceWorkContextId;
-            if(!contexts.TryGetValue(id,out var c) || !WorkContextService.ValidProof(b.SourceProofs.SingleOrDefault(x=>x.WorkContextId==id)?.ProofSecret,c.ProofSecretHash) ||
+            if(!contexts.TryGetValue(id,out var c) || !WorkContextService.ValidProof(proofs.SingleOrDefault(x=>x.WorkContextId==id)?.ProofSecret,c.ProofSecretHash) ||
                 c.ContractVersion!=1 || c.WorkflowVersion!=2 || c.TaskId!=t.Id || c.LineId!=t.LineId || c.EnvironmentId!=authority.EnvironmentId ||
                 c.UserId!=op.ContributorUserIdAssertion || c.IssuedPersonalSessionId==Guid.Empty || c.IssuedAtUtc>=c.CaptureUntilUtc ||
                 c.CaptureUntilUtc>c.PersonalSessionExpiresAtUtc || c.CaptureUntilUtc-c.IssuedAtUtc>TimeSpan.FromHours(72))
@@ -203,7 +211,7 @@ public sealed class SharedDraftService(IpqcDbContext db, WorkContextStore store,
         var bad=invalid.Concat(revoked).ToHashSet();
         if(bad.Count>0) {
             var affected=fresh.Where(x=>bad.Contains(x.SourceWorkContextId)).Select(x=>x.OperationId).ToHashSet();bool changed;
-            do {changed=false;foreach(var op in fresh) if(op.Dependencies.Any(x=>affected.Contains(x.OperationId))) changed|=affected.Add(op.OperationId);} while(changed);
+            do {changed=false;foreach(var op in fresh) if(op.Dependencies.Any(affected.Contains)) changed|=affected.Add(op.OperationId);} while(changed);
             throw new DraftQuarantineException(invalid.Count>0 ? "SourceProvenanceConflict" : "SourceSecurityRevoked",
                 affected.Order().ToArray(),bad.Order().ToArray());
         }
@@ -225,14 +233,17 @@ public sealed class SharedDraftService(IpqcDbContext db, WorkContextStore store,
             var b=await db.AcceptedBatchReceipts.AsNoTracking().SingleOrDefaultAsync(x=>x.TaskId==taskId && x.BatchId==batchId,ct) ?? throw Error("NotFound",404);
             return Decode<DraftBatchReceipt>(b.ReceiptJson);
         },ct);
-    public Task<DraftOperationReceipt> OperationReceiptAsync(Guid taskId,Guid operationId,ClaimsPrincipal actor,CancellationToken ct)=>
-        store.RunAsync(actor,false,taskId,[],async _=> { await identity.Target(taskId,null,ct);
-            var o=await db.ContributionOperations.AsNoTracking().SingleOrDefaultAsync(x=>x.TaskId==taskId && x.OperationId==operationId,ct) ?? throw Error("NotFound",404);
-            return Receipt(o);
+    public Task<object> OperationReceiptAsync(Guid taskId,Guid operationId,ClaimsPrincipal actor,CancellationToken ct)=>
+        store.RunAsync<object>(actor,false,taskId,[],async _=> { await identity.Target(taskId,null,ct);
+            var o=await db.ContributionOperations.AsNoTracking().SingleOrDefaultAsync(x=>x.TaskId==taskId && x.OperationId==operationId,ct);
+            if(o is not null) return Receipt(o);
+            var removal=await db.ItemRemovalOperations.AsNoTracking().SingleOrDefaultAsync(x=>x.TaskId==taskId && x.OperationId==operationId,ct) ?? throw Error("NotFound",404);
+            return Decode<ItemRemovalReceipt>(removal.ReceiptJson);
         },ct);
     public Task<SharedDraftOutput> ReadAsync(Guid taskId,ClaimsPrincipal actor,CancellationToken ct)=>
         store.RunAsync(actor,false,taskId,[],async _=> {
             var t=await identity.Target(taskId,null,ct);
+            var removals=await db.ItemRemovalOperations.AsNoTracking().Where(x=>x.TaskId==taskId).ToDictionaryAsync(x=>x.InspectionAttemptId,ct);
             var samples=await db.SharedSamples.AsNoTracking().Where(x=>x.TaskId==taskId).OrderBy(x=>x.TaskItemId).ThenBy(x=>x.SequenceNo).ToListAsync(ct);
             var p=await db.SharedSampleProjections.AsNoTracking().Where(x=>x.TaskId==taskId).ToDictionaryAsync(x=>x.SampleId,ct);
             var opIds=p.Values.Select(x=>x.ValueOperationId).Distinct().ToArray();
@@ -243,7 +254,10 @@ public sealed class SharedDraftService(IpqcDbContext db, WorkContextStore store,
                 var projection=p[s.Id];var source=values[projection.ValueOperationId];
                 return new DraftSampleOutput(s.Id,s.TaskItemId,s.InspectionAttemptId,s.ClientSampleId,s.SequenceNo,
                     new(projection.InspectionType,projection.InspectionValue,projection.Judgment,projection.Barcode),projection.IsRemoved,
-                    projection.ValueOperationId,source.ContributorUserId,projection.LastOperationId,Current(t,s.TaskItemId,s.InspectionAttemptId));
-            }).ToList());
+                    projection.ValueOperationId,source.ContributorUserId,projection.LastOperationId,Current(t,s.TaskItemId,s.InspectionAttemptId) && !removals.ContainsKey(s.InspectionAttemptId));
+            }).ToList(),Items:attempts.Select(a=>new DraftItemOutput(a.TaskItemId,a.InspectionAttemptId,
+                removals.ContainsKey(a.InspectionAttemptId)?"Removed":"Applicable",a.MinimumSampleCount,
+                removals.TryGetValue(a.InspectionAttemptId,out var r)?Decode<ItemRemovalReceipt>(r.ReceiptJson):null)).ToList(),
+                AllItemsRemoved:t.Items.Count>0 && attempts.Count==t.Items.Count && attempts.All(a=>removals.ContainsKey(a.InspectionAttemptId)));
         },ct);
 }

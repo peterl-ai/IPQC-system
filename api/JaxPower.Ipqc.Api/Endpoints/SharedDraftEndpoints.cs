@@ -25,6 +25,9 @@ public static class SharedDraftEndpoints
         PersonalAccess.RequireCurrent(g.MapPost("/operation-batches",async(Guid taskId,DraftBatchInput input,SharedDraftService s,HttpContext h,CancellationToken ct)=>
             Results.Ok(await s.AcceptAsync(taskId,input,h.User,ct))),true)
             .RequireAuthorization(IpqcPermissions.LinePatrolContributeDraft).WithMetadata(new SharedDraftMutation());
+        PersonalAccess.RequireCurrent(g.MapPost("/item-removal-batches",async(Guid taskId,ItemRemovalBatchInput input,SharedDraftService s,HttpContext h,CancellationToken ct)=>
+            Results.Ok(await s.RemoveItemAsync(taskId,input,h.User,ct))),true)
+            .RequireAuthorization(IpqcPermissions.LinePatrolContributeDraft).WithMetadata(new SharedDraftMutation());
         PersonalAccess.RequireCurrent(g.MapGet("/operation-batches/{batchId:guid}/receipt",async(Guid taskId,Guid batchId,SharedDraftService s,HttpContext h,CancellationToken ct)=>
             Results.Ok(await s.BatchReceiptAsync(taskId,batchId,h.User,ct))),true);
         PersonalAccess.RequireCurrent(g.MapGet("/operations/{operationId:guid}/receipt",async(Guid taskId,Guid operationId,SharedDraftService s,HttpContext h,CancellationToken ct)=>

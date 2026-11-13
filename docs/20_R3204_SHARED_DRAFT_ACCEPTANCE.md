@@ -1,5 +1,13 @@
 # Typed shared draft operation acceptance foundation
 
+Post-merge follow-up, 2026-11-13: PR #19 merged as
+`02bf667215e2a1d04cb9ec87c7907ddd5e050a6b` from reviewed HEAD
+`dd246b6595e7c0a90d7701d88c010ca5ad2b25a0`; merged-main CI43442235559 succeeded.
+The [per-item Removed slice](21_R3205_ITEM_REMOVED.md) adds a typed sample-free
+disposition ledger and receipt extension. The earlier item-disposition exclusions below
+describe the original delivery; formal Submit/PQE, reinspection producers, F2/F3 and UI
+remain deferred. Sample removal still differs from whole-item Removed.
+
 Date: 2026-11-12. Scoped backend implementation for independent review, not deployment.
 Base: `a3bab9b9a779bb36466277b32ea95392a0f59bba`, actual PR #18 merge, containing
 reviewed feature HEAD `d3ae4ce61ef0f7d301ee7048e63b0fbed650e5fa`. Merged-main

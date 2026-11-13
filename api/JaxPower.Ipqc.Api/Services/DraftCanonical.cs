@@ -45,4 +45,25 @@ public static class DraftCanonical
         w.WritePropertyName("operations"); References(w,operationHashes.Select(x=>new DraftOperationReference(x.Key,x.Value)));
         w.WritePropertyName("references"); References(w,b.AcceptedReferences); w.WriteEndObject();
     }));
+
+    // Separate typed domain: the frozen sample V1 byte format remains unchanged.
+    public static string ItemRemoval(Guid taskId, ItemRemovalBatchInput b) => Encode(w => {
+        var o = b.Operation;
+        w.WriteStartObject(); w.WriteString("domain", "item-removal"); w.WriteNumber("v", o.CanonicalizationVersion);
+        w.WriteString("environment", b.ExpectedEnvironmentId); w.WriteString("task", Key(taskId));
+        w.WriteString("line", Key(b.ExpectedTaskLineId)); w.WriteNumber("workflow", b.ExpectedWorkflowVersion);
+        w.WriteString("operation", Key(o.OperationId)); w.WriteString("kind", o.Kind);
+        w.WriteString("item", Key(o.TaskItemId)); w.WriteString("attempt", Key(o.InspectionAttemptId));
+        w.WriteString("source", Key(o.SourceWorkContextId)); w.WriteString("contributorAssertion", Key(o.ContributorUserIdAssertion));
+        w.WriteNumber("base", o.BaseDraftVersion); w.WriteNumber("local", o.OriginLocalEditVersion);
+        w.WriteBoolean("confirmedAbsentOrNotApplicable", o.ConfirmedAbsentOrNotApplicable);
+        w.WriteString("confirmationSource", o.ConfirmationSource); w.WriteString("reason", o.Reason); w.WriteEndObject();
+    });
+    public static string ItemRemovalBatch(Guid taskId, ItemRemovalBatchInput b, string hash) => Hash(Encode(w => {
+        w.WriteStartObject(); w.WriteString("domain", "item-removal-batch"); w.WriteNumber("v", b.CanonicalizationVersion);
+        w.WriteString("task", Key(taskId)); w.WriteString("batch", Key(b.BatchId));
+        w.WriteString("environment", b.ExpectedEnvironmentId); w.WriteString("line", Key(b.ExpectedTaskLineId));
+        w.WriteNumber("workflow", b.ExpectedWorkflowVersion); w.WriteNumber("expected", b.ExpectedDraftVersion);
+        w.WriteString("operationHash", hash); w.WriteEndObject();
+    }));
 }
