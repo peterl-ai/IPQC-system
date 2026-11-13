@@ -13,10 +13,14 @@ public sealed partial class SharedDraftService
     {
         try { return await action(); }
         catch (DbUpdateException ex) when (
-            ex.InnerException is Npgsql.PostgresException { SqlState: "23505", ConstraintName: "PK_DraftOperationKeys" } or
+            ex.InnerException is Npgsql.PostgresException { SqlState: "23505", ConstraintName: "PK_DraftOperationKeys" or "PK_AcceptedOperationIdentities" } or
                 Npgsql.PostgresException { SqlState: "23514", MessageText: "OperationIdentityConflict" } ||
             ex.InnerException is Microsoft.Data.Sqlite.SqliteException { SqliteExtendedErrorCode: 1811 } sql && sql.Message.Contains("OperationIdentityConflict", StringComparison.Ordinal)) {
             throw Error("OperationIdentityConflict");
+        }
+        catch (DbUpdateException ex) when (ex.InnerException is Npgsql.PostgresException { SqlState: "23514", MessageText: "DraftItemUnableToMeasureNG" } ||
+            ex.InnerException is Microsoft.Data.Sqlite.SqliteException { SqliteExtendedErrorCode: 1811 } sql && sql.Message.Contains("DraftItemUnableToMeasureNG", StringComparison.Ordinal)) {
+            throw Error("DraftItemUnableToMeasureNG");
         }
     }
 

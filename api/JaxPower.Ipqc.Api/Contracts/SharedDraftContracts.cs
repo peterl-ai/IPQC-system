@@ -32,7 +32,8 @@ public sealed record DraftBatchReceipt(Guid TaskId, Guid BatchId, string Request
     long PreviousDraftVersion, long DraftVersion, List<DraftOperationReceipt> Operations,
     [property:JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] List<ItemRemovalReceipt>? ItemOperations = null,
     [property:JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] int? ReceiptVersion = null,
-    [property:JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] List<DraftAttachmentReceipt>? AttachmentOperations = null);
+    [property:JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] List<DraftAttachmentReceipt>? AttachmentOperations = null,
+    [property:JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] List<UnableToMeasureReceipt>? UnableOperations = null);
 public sealed record DraftBatchResult(DraftBatchReceipt? BatchReceipt, List<DraftOperationReceipt> Operations,
     bool ReplayOnly, bool CanExecute = false, bool AcceptsFormalInspection = false);
 public sealed record DraftSampleOutput(Guid SampleId, Guid TaskItemId, Guid InspectionAttemptId, Guid ClientSampleId,

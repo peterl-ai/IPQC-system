@@ -45,6 +45,27 @@ namespace JaxPower.Ipqc.Api.Data.Migrations
                         });
                 });
 
+            modelBuilder.Entity("JaxPower.Ipqc.Api.Domain.AcceptedOperationIdentity", b =>
+                {
+                    b.Property<Guid>("TaskId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("OperationId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Domain")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("TaskId", "OperationId");
+
+                    b.ToTable("AcceptedOperationIdentities", t =>
+                        {
+                            t.HasCheckConstraint("CK_AcceptedOperationIdentity_Domain", "length(\"Domain\") BETWEEN 1 AND 64");
+                        });
+                });
+
             modelBuilder.Entity("JaxPower.Ipqc.Api.Domain.ApplicationUser", b =>
                 {
                     b.Property<Guid>("Id")
@@ -697,8 +718,12 @@ namespace JaxPower.Ipqc.Api.Data.Migrations
                         .HasColumnType("INTEGER");
 
                     b.HasKey("TaskId", "OperationId");
-                    b.HasAlternateKey("TaskId", "OperationId", "AttachmentId").HasName("AK_DraftPhoto_OperationAttachment");
-                    b.HasAlternateKey("TaskId", "OperationId", "AttachmentId", "ContentHash").HasName("AK_DraftPhoto_PredecessorScope");
+
+                    b.HasAlternateKey("TaskId", "OperationId", "AttachmentId")
+                        .HasName("AK_DraftPhoto_OperationAttachment");
+
+                    b.HasAlternateKey("TaskId", "OperationId", "AttachmentId", "ContentHash")
+                        .HasName("AK_DraftPhoto_PredecessorScope");
 
                     b.HasIndex("ActorUserId");
 
@@ -712,8 +737,11 @@ namespace JaxPower.Ipqc.Api.Data.Migrations
 
                     b.HasIndex("TaskId", "BatchId");
 
-                    b.HasIndex("TaskId", "PredecessorOperationId", "AttachmentId", "PredecessorHash").HasDatabaseName("IX_DraftPhoto_Predecessor");
-                    b.HasIndex("TaskId", "DraftVersion", "OperationId").HasDatabaseName("IX_DraftPhoto_History");
+                    b.HasIndex("TaskId", "DraftVersion", "OperationId")
+                        .HasDatabaseName("IX_DraftPhoto_History");
+
+                    b.HasIndex("TaskId", "PredecessorOperationId", "AttachmentId", "PredecessorHash")
+                        .HasDatabaseName("IX_DraftPhoto_Predecessor");
 
                     b.ToTable("DraftAttachmentOperations", t =>
                         {
@@ -737,7 +765,8 @@ namespace JaxPower.Ipqc.Api.Data.Migrations
 
                     b.HasKey("TaskId", "AttachmentId");
 
-                    b.HasIndex("TaskId", "LastOperationId", "AttachmentId").HasDatabaseName("IX_DraftPhotoProjection_Last");
+                    b.HasIndex("TaskId", "LastOperationId", "AttachmentId")
+                        .HasDatabaseName("IX_DraftPhotoProjection_Last");
 
                     b.ToTable("DraftAttachmentProjections");
                 });
@@ -2272,6 +2301,154 @@ namespace JaxPower.Ipqc.Api.Data.Migrations
                         });
                 });
 
+            modelBuilder.Entity("JaxPower.Ipqc.Api.Domain.UnableToMeasureOperation", b =>
+                {
+                    b.Property<Guid>("TaskId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("OperationId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("AcceptedAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("ActorPersonalSessionId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("ActorUserId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("AttachmentId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("BatchId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("CanonicalPayload")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("CanonicalizationVersion")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("ContentHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("ContributorUserId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("DraftVersion")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("EnvironmentId")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("EvidenceHash")
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("EvidenceOperationId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("InspectionAttemptId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("LineId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("NgReason")
+                        .HasMaxLength(2000)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("PredecessorHash")
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("PredecessorOperationId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ReceiptJson")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("SourceWorkContextId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("TaskItemId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("WorkflowVersion")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("TaskId", "OperationId");
+
+                    b.HasAlternateKey("TaskId", "OperationId", "InspectionAttemptId", "ContentHash")
+                        .HasName("AK_Unable_PredecessorScope");
+
+                    b.HasAlternateKey("TaskId", "OperationId", "InspectionAttemptId", "TaskItemId")
+                        .HasName("AK_Unable_ProjectionScope");
+
+                    b.HasIndex("ActorUserId");
+
+                    b.HasIndex("ContributorUserId");
+
+                    b.HasIndex("SourceWorkContextId");
+
+                    b.HasIndex("InspectionAttemptId", "TaskItemId");
+
+                    b.HasIndex("TaskId", "BatchId")
+                        .IsUnique()
+                        .HasDatabaseName("IX_Unable_Batch");
+
+                    b.HasIndex("TaskId", "DraftVersion", "OperationId")
+                        .HasDatabaseName("IX_Unable_History");
+
+                    b.HasIndex("TaskId", "EvidenceOperationId", "AttachmentId", "EvidenceHash")
+                        .HasDatabaseName("IX_Unable_Evidence");
+
+                    b.HasIndex("TaskId", "PredecessorOperationId", "InspectionAttemptId", "PredecessorHash")
+                        .HasDatabaseName("IX_Unable_Predecessor");
+
+                    b.ToTable("UnableToMeasureOperations", t =>
+                        {
+                            t.HasCheckConstraint("CK_Unable_Contract", "\"OperationId\" <> '00000000-0000-0000-0000-000000000000' AND \"WorkflowVersion\" = 2 AND \"CanonicalizationVersion\" = 1 AND \"DraftVersion\" > 0 AND length(\"ContentHash\") = 64 AND length(\"CanonicalPayload\") > 0 AND length(\"ReceiptJson\") > 0 AND \"Kind\" IN ('SetUnableToMeasureNG','CorrectUnableToMeasureNG','ClearUnableToMeasureNG') AND ((\"PredecessorOperationId\" IS NULL AND \"PredecessorHash\" IS NULL AND \"Kind\"='SetUnableToMeasureNG') OR (\"PredecessorOperationId\" IS NOT NULL AND \"PredecessorHash\" IS NOT NULL AND length(\"PredecessorHash\")=64)) AND ((\"Kind\"='ClearUnableToMeasureNG' AND \"NgReason\" IS NULL AND \"EvidenceOperationId\" IS NULL AND \"AttachmentId\" IS NULL AND \"EvidenceHash\" IS NULL) OR (\"Kind\"<>'ClearUnableToMeasureNG' AND \"NgReason\" IS NOT NULL AND length(trim(\"NgReason\")) BETWEEN 1 AND 2000 AND \"EvidenceOperationId\" IS NOT NULL AND \"AttachmentId\" IS NOT NULL AND \"EvidenceHash\" IS NOT NULL AND length(\"EvidenceHash\")=64))");
+                        });
+                });
+
+            modelBuilder.Entity("JaxPower.Ipqc.Api.Domain.UnableToMeasureProjection", b =>
+                {
+                    b.Property<Guid>("TaskId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("InspectionAttemptId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<Guid>("LastOperationId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("TaskItemId")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("TaskId", "InspectionAttemptId");
+
+                    b.HasIndex("TaskId", "LastOperationId", "InspectionAttemptId", "TaskItemId")
+                        .HasDatabaseName("IX_UnableProjection_Operation");
+
+                    b.ToTable("UnableToMeasureProjections");
+                });
+
             modelBuilder.Entity("JaxPower.Ipqc.Api.Domain.WorkContext", b =>
                 {
                     b.Property<Guid>("Id")
@@ -2424,6 +2601,15 @@ namespace JaxPower.Ipqc.Api.Data.Migrations
                 });
 
             modelBuilder.Entity("JaxPower.Ipqc.Api.Domain.AcceptedBatchReceipt", b =>
+                {
+                    b.HasOne("JaxPower.Ipqc.Api.Domain.SharedDraft", null)
+                        .WithMany()
+                        .HasForeignKey("TaskId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("JaxPower.Ipqc.Api.Domain.AcceptedOperationIdentity", b =>
                 {
                     b.HasOne("JaxPower.Ipqc.Api.Domain.SharedDraft", null)
                         .WithMany()
@@ -3125,6 +3311,70 @@ namespace JaxPower.Ipqc.Api.Data.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired()
                         .HasConstraintName("FK_SharedSampleProjections_ValueOperation");
+                });
+
+            modelBuilder.Entity("JaxPower.Ipqc.Api.Domain.UnableToMeasureOperation", b =>
+                {
+                    b.HasOne("JaxPower.Ipqc.Api.Domain.ApplicationUser", null)
+                        .WithMany()
+                        .HasForeignKey("ActorUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_Unable_Actor");
+
+                    b.HasOne("JaxPower.Ipqc.Api.Domain.ApplicationUser", null)
+                        .WithMany()
+                        .HasForeignKey("ContributorUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_Unable_Contributor");
+
+                    b.HasOne("JaxPower.Ipqc.Api.Domain.WorkContext", null)
+                        .WithMany()
+                        .HasForeignKey("SourceWorkContextId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_Unable_Source");
+
+                    b.HasOne("JaxPower.Ipqc.Api.Domain.InspectionAttempt", null)
+                        .WithMany()
+                        .HasForeignKey("InspectionAttemptId", "TaskItemId")
+                        .HasPrincipalKey("Id", "PatrolTaskItemId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_Unable_Attempt");
+
+                    b.HasOne("JaxPower.Ipqc.Api.Domain.AcceptedBatchReceipt", null)
+                        .WithMany()
+                        .HasForeignKey("TaskId", "BatchId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_Unable_Batch");
+
+                    b.HasOne("JaxPower.Ipqc.Api.Domain.DraftAttachmentOperation", null)
+                        .WithMany()
+                        .HasForeignKey("TaskId", "EvidenceOperationId", "AttachmentId", "EvidenceHash")
+                        .HasPrincipalKey("TaskId", "OperationId", "AttachmentId", "ContentHash")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("FK_Unable_Evidence");
+
+                    b.HasOne("JaxPower.Ipqc.Api.Domain.UnableToMeasureOperation", null)
+                        .WithMany()
+                        .HasForeignKey("TaskId", "PredecessorOperationId", "InspectionAttemptId", "PredecessorHash")
+                        .HasPrincipalKey("TaskId", "OperationId", "InspectionAttemptId", "ContentHash")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("FK_Unable_Predecessor");
+                });
+
+            modelBuilder.Entity("JaxPower.Ipqc.Api.Domain.UnableToMeasureProjection", b =>
+                {
+                    b.HasOne("JaxPower.Ipqc.Api.Domain.UnableToMeasureOperation", null)
+                        .WithMany()
+                        .HasForeignKey("TaskId", "LastOperationId", "InspectionAttemptId", "TaskItemId")
+                        .HasPrincipalKey("TaskId", "OperationId", "InspectionAttemptId", "TaskItemId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_UnableProjection_Operation");
                 });
 
             modelBuilder.Entity("JaxPower.Ipqc.Api.Domain.WorkContext", b =>
