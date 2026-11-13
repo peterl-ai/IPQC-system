@@ -29,7 +29,9 @@ public sealed record DraftOperationReceipt(Guid TaskId, Guid OperationId, Guid B
     DraftSampleValue? Value, bool IsRemoved, Guid ValueOperationId);
 public sealed record DraftBatchReceipt(Guid TaskId, Guid BatchId, string RequestFingerprint,
     Guid UploadedByUserId, Guid UploadedPersonalSessionId, DateTime AcceptedAtUtc,
-    long PreviousDraftVersion, long DraftVersion, List<DraftOperationReceipt> Operations);
+    long PreviousDraftVersion, long DraftVersion, List<DraftOperationReceipt> Operations,
+    [property:JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] List<ItemRemovalReceipt>? ItemOperations = null,
+    [property:JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] int? ReceiptVersion = null);
 public sealed record DraftBatchResult(DraftBatchReceipt? BatchReceipt, List<DraftOperationReceipt> Operations,
     bool ReplayOnly, bool CanExecute = false, bool AcceptsFormalInspection = false);
 public sealed record DraftSampleOutput(Guid SampleId, Guid TaskItemId, Guid InspectionAttemptId, Guid ClientSampleId,
@@ -38,4 +40,5 @@ public sealed record DraftSampleOutput(Guid SampleId, Guid TaskItemId, Guid Insp
 public sealed record DraftAttemptScope(Guid TaskItemId, Guid InspectionAttemptId, int MinimumSampleCount);
 public sealed record SharedDraftOutput(Guid TaskId, Guid LineId, int WorkflowVersion, long DraftVersion,
     string Availability, List<DraftAttemptScope> CurrentAttempts, List<DraftSampleOutput> Samples, bool CanExecute = false,
-    string Completeness = "NotEvaluatedForFormalSubmission");
+    string Completeness = "NotEvaluatedForFormalSubmission", List<DraftItemOutput>? Items = null,
+    bool AllItemsRemoved = false);

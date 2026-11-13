@@ -70,13 +70,14 @@ public sealed class InspectionIdentityMigrationTests
     }
 
     // Fingerprint every preexisting row, column, FK and index, including session/context history.
-    internal static Task<string> OldFacts(PersonalSessionFixture f, bool includeIdentities = false) => f.Read(async db => {
+    internal static Task<string> OldFacts(PersonalSessionFixture f, bool includeIdentities = false, bool includeDrafts = false) => f.Read(async db => {
         await db.Database.OpenConnectionAsync(); var connection = db.Database.GetDbConnection();
         async Task<List<string>> Query(string sql) {
             await using var c = connection.CreateCommand(); c.CommandText = sql; await using var r = await c.ExecuteReaderAsync(); var rows = new List<string>();
             while (await r.ReadAsync()) rows.Add(JsonSerializer.Serialize(Enumerable.Range(0, r.FieldCount).Select(i => r.IsDBNull(i) ? null : r.GetValue(i)).ToArray())); return rows;
         }
-        var excluded = "'__EFMigrationsHistory','__EFMigrationsLock','SharedDrafts','SharedSamples','SharedSampleProjections','ContributionOperations','ContributionDependencies','AcceptedBatchReceipts','SharedAcceptanceAudits'" +
+        var excluded = "'__EFMigrationsHistory','__EFMigrationsLock','ItemRemovalOperations','SharedOperationIdentities'" +
+            (includeDrafts ? "" : ",'SharedDrafts','SharedSamples','SharedSampleProjections','ContributionOperations','ContributionDependencies','AcceptedBatchReceipts','SharedAcceptanceAudits'") +
             (includeIdentities ? "" : ",'InspectionAttempts','InspectionAttemptApplicabilities'");
         var tables = new List<string>(); await using (var c = connection.CreateCommand()) {
             c.CommandText = db.Database.IsNpgsql() ? $"SELECT tablename FROM pg_tables WHERE schemaname='public' AND tablename NOT IN ({excluded}) ORDER BY tablename" :
@@ -92,7 +93,8 @@ public sealed class InspectionIdentityMigrationTests
             data["columns"] = await Query($"SELECT row_to_json(c)::text FROM information_schema.columns c WHERE table_schema='public' AND table_name NOT IN ({excluded}) ORDER BY table_name,ordinal_position");
             data["indexes"] = await Query($"SELECT indexdef FROM pg_indexes WHERE schemaname='public' AND tablename NOT IN ({excluded}) ORDER BY tablename,indexname");
             data["constraints"] = await Query($"SELECT conrelid::regclass::text,conname,pg_get_constraintdef(oid) FROM pg_constraint WHERE connamespace='public'::regnamespace AND replace(conrelid::regclass::text,'\"','') NOT IN ({excluded}) ORDER BY conrelid::regclass::text,conname");
-        } else data["schema"] = await Query($"SELECT type,name,tbl_name,sql FROM sqlite_master WHERE tbl_name NOT IN ({excluded}) AND name NOT LIKE 'sqlite_%' ORDER BY type,name");
+        // The new additive ID registration trigger is checked separately by Removed migration tests.
+        } else data["schema"] = await Query($"SELECT type,name,tbl_name,sql FROM sqlite_master WHERE tbl_name NOT IN ({excluded}) AND name NOT LIKE 'sqlite_%' AND name <> 'TR_ContributionOperations_Identity' ORDER BY type,name");
         return JsonSerializer.Serialize(data);
     });
 }

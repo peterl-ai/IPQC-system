@@ -565,6 +565,97 @@ namespace JaxPower.Ipqc.Api.Data.Migrations
                     b.ToTable("InspectionAttemptApplicabilities");
                 });
 
+            modelBuilder.Entity("JaxPower.Ipqc.Api.Domain.ItemRemovalOperation", b =>
+                {
+                    b.Property<Guid>("TaskId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("OperationId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("AcceptedAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("BatchId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("CanonicalPayload")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("CanonicalizationVersion")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("ContentHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("ContributorUserId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("DraftVersion")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("EnvironmentId")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("InspectionAttemptId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("LineId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ReceiptJson")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("SourceWorkContextId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("TaskItemId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("UploadedByUserId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("UploadedPersonalSessionId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("WorkflowVersion")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("TaskId", "OperationId");
+
+                    b.HasIndex("ContributorUserId");
+
+                    b.HasIndex("InspectionAttemptId")
+                        .IsUnique();
+
+                    b.HasIndex("LineId");
+
+                    b.HasIndex("SourceWorkContextId");
+
+                    b.HasIndex("UploadedByUserId");
+
+                    b.HasIndex("InspectionAttemptId", "TaskItemId");
+
+                    b.HasIndex("TaskId", "BatchId")
+                        .IsUnique();
+
+                    b.ToTable("ItemRemovalOperations", t =>
+                        {
+                            t.HasCheckConstraint("CK_ItemRemovals_Contract", "\"OperationId\" <> '00000000-0000-0000-0000-000000000000' AND \"WorkflowVersion\" = 2 AND \"CanonicalizationVersion\" = 1 AND \"Kind\" = 'RemoveItem' AND \"DraftVersion\" > 0 AND length(\"ContentHash\") = 64 AND length(\"CanonicalPayload\") > 0 AND length(\"ReceiptJson\") > 0");
+                        });
+                });
+
             modelBuilder.Entity("JaxPower.Ipqc.Api.Domain.PatrolPlan", b =>
                 {
                     b.Property<Guid>("Id")
@@ -1655,6 +1746,27 @@ namespace JaxPower.Ipqc.Api.Data.Migrations
                         });
                 });
 
+            modelBuilder.Entity("JaxPower.Ipqc.Api.Domain.SharedOperationIdentity", b =>
+                {
+                    b.Property<Guid>("TaskId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("OperationId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Domain")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("TaskId", "OperationId");
+
+                    b.ToTable("SharedOperationIdentities", t =>
+                        {
+                            t.HasCheckConstraint("CK_SharedOperationIdentities_Domain", "\"Domain\" IN ('Sample','ItemRemoval')");
+                        });
+                });
+
             modelBuilder.Entity("JaxPower.Ipqc.Api.Domain.SharedSample", b =>
                 {
                     b.Property<Guid>("Id")
@@ -2058,6 +2170,48 @@ namespace JaxPower.Ipqc.Api.Data.Migrations
                     b.Navigation("PatrolTaskItem");
                 });
 
+            modelBuilder.Entity("JaxPower.Ipqc.Api.Domain.ItemRemovalOperation", b =>
+                {
+                    b.HasOne("JaxPower.Ipqc.Api.Domain.ApplicationUser", null)
+                        .WithMany()
+                        .HasForeignKey("ContributorUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("JaxPower.Ipqc.Api.Domain.ProductionLine", null)
+                        .WithMany()
+                        .HasForeignKey("LineId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("JaxPower.Ipqc.Api.Domain.WorkContext", null)
+                        .WithMany()
+                        .HasForeignKey("SourceWorkContextId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("JaxPower.Ipqc.Api.Domain.ApplicationUser", null)
+                        .WithMany()
+                        .HasForeignKey("UploadedByUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("JaxPower.Ipqc.Api.Domain.InspectionAttempt", null)
+                        .WithMany()
+                        .HasForeignKey("InspectionAttemptId", "TaskItemId")
+                        .HasPrincipalKey("Id", "PatrolTaskItemId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_ItemRemovals_Attempt");
+
+                    b.HasOne("JaxPower.Ipqc.Api.Domain.AcceptedBatchReceipt", null)
+                        .WithMany()
+                        .HasForeignKey("TaskId", "BatchId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_ItemRemovals_Batch");
+                });
+
             modelBuilder.Entity("JaxPower.Ipqc.Api.Domain.PatrolPlan", b =>
                 {
                     b.HasOne("JaxPower.Ipqc.Api.Domain.ProductionLine", "Line")
@@ -2313,6 +2467,15 @@ namespace JaxPower.Ipqc.Api.Data.Migrations
                         .IsRequired();
                 });
 
+            modelBuilder.Entity("JaxPower.Ipqc.Api.Domain.SharedOperationIdentity", b =>
+                {
+                    b.HasOne("JaxPower.Ipqc.Api.Domain.SharedDraft", null)
+                        .WithMany()
+                        .HasForeignKey("TaskId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("JaxPower.Ipqc.Api.Domain.SharedSample", b =>
                 {
                     b.HasOne("JaxPower.Ipqc.Api.Domain.SharedDraft", null)
@@ -2450,7 +2613,7 @@ namespace JaxPower.Ipqc.Api.Data.Migrations
                 {
                     b.Navigation("Samples");
                 });
-            // Keep provider-default types resolved by the active provider.
+// Keep provider-default types resolved by the active provider.
             foreach (var entity in modelBuilder.Model.GetEntityTypes())
                 foreach (var property in entity.GetProperties()) property.SetColumnType(null);
 #pragma warning restore 612, 618

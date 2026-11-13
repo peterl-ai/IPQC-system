@@ -35,6 +35,10 @@ The scoped [typed shared draft acceptance foundation](docs/20_R3204_SHARED_DRAFT
 adds real sample contributions, DraftVersion CAS and durable provenance/receipts.
 Draft acceptance does not complete or submit an inspection; no execution UI is activated.
 
+The scoped [per-item Removed disposition](docs/21_R3205_ITEM_REMOVED.md) records explicit
+Production/Equipment-confirmed absence/non-applicability while retaining definitions,
+attempts and sampled history. An all-Removed draft is not a formal NotPerformed submission.
+
 The product has two major clients:
 
 1. **Web application** — Phase 1. Used by Admin, PQE, and IPQA for Line Patrol configuration, scheduling, approval, history, reports, and administration.
