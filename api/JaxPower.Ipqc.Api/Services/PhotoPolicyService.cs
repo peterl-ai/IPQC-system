@@ -68,7 +68,8 @@ public sealed class PhotoPolicyService(IpqcDbContext db, LineSharedPlanningStore
             items.Add(new(standardId, item.Id, item.PhotoRequirement, current ? d!.Id : null, current ? d!.Version : null, hash,
                 receipt is not null ? "ExplicitlyConfirmed" : current && state!.ConfirmationId is not null ? "InvalidConfiguration" : "Unconfirmed", receipt));
         }
-        return new PhotoPolicyPage(standardId, items);
+        // Review text and exact confirmation preconditions must describe the same locked source read.
+        return new PhotoPolicyPage(standardId, items, PatrolStandardService.ToOutput(standard));
     }, ct);
     public Task<PhotoPolicyReceipt> ConfirmAsync(Guid standardId, Guid itemId, PhotoPolicyConfirmInput input, ClaimsPrincipal actor, CancellationToken ct) => store.WriteAsync(actor, async () => {
         var authority = await access.ValidateAsync(actor, false, ct);
