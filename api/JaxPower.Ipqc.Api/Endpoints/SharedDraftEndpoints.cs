@@ -40,6 +40,10 @@ public static class SharedDraftEndpoints
             Results.Ok(await s.ReadDispositionsAsync(taskId,h.User,ct,beforeDraftVersion))),true).WithMetadata(new PhotoRequest(false));
         PersonalAccess.RequireCurrent(g.MapGet("/shared-draft/evidence-assessment",async(Guid taskId,int? page,int? pageSize,long? expectedDraftVersion,SharedDraftService s,HttpContext h,CancellationToken ct)=>
             Results.Ok(await s.AssessEvidenceAsync(taskId,h.User,ct,page??1,pageSize??20,expectedDraftVersion))),true).WithMetadata(new PhotoRequest(false));
+        PersonalAccess.RequireCurrent(g.MapGet("/shared-draft/submit-preflight",async(Guid taskId,int? page,int? pageSize,long? expectedDraftVersion,
+            Guid? expectedTaskLineId,Guid? expectedTaskItemId,Guid? expectedInspectionAttemptId,SharedDraftService s,HttpContext h,CancellationToken ct)=>
+            Results.Ok(await s.SubmitPreflightAsync(taskId,h.User,ct,page??1,pageSize??20,expectedDraftVersion,expectedTaskLineId,expectedTaskItemId,expectedInspectionAttemptId))),true)
+            .WithMetadata(new PhotoRequest(false));
         PersonalAccess.RequireCurrent(g.MapPost("/sample-evidence-batches",async(Guid taskId,SampleEvidenceBatchInput input,SharedDraftService s,HttpContext h,CancellationToken ct)=>
             Results.Ok(await s.AcceptSampleEvidenceAsync(taskId,input,h.User,ct))),true).RequireAuthorization(IpqcPermissions.LinePatrolContributeDraft).WithMetadata(new SharedDraftMutation(),new PhotoRequest(false));
         PersonalAccess.RequireCurrent(g.MapGet("/shared-draft/evidence-bindings",async(Guid taskId,int? page,int? pageSize,long? beforeDraftVersion,SharedDraftService s,HttpContext h,CancellationToken ct)=>

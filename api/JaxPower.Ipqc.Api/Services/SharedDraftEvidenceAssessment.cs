@@ -15,14 +15,21 @@ public sealed partial class SharedDraftService
             throw Error("InvalidEvidenceAssessmentQuery", 400);
         var task = await identity.Target(taskId, null, ct); var version = task.SharedDraft?.DraftVersion ?? 0;
         if (expectedDraftVersion is { } expected && expected != version) throw Error("EvidenceAssessmentVersionConflict");
+        return await AssessEvidencePage(task, authority.EnvironmentId, ct, page, pageSize);
+    }, ct);
+
+    // Caller owns the existing current-authority/line/Task read unit. Never nest stores or accept work here.
+    private async Task<DraftEvidenceAssessmentOutput> AssessEvidencePage(PatrolTask task, string environment, CancellationToken ct, int page, int pageSize)
+    {
+        var version = task.SharedDraft?.DraftVersion ?? 0;
         var planning = PlanningSnapshot.Read(task);
         var supported = planning is not null && InitialInspectionIdentity.State(task) == "Initialized" &&
             LineSharedTaskEligibility.Availability(task) is "FoundationOnly" or "DraftFoundation";
         var items = new List<DraftEvidenceItem>();
         foreach (var item in task.Items.OrderBy(x => x.SequenceNo).ThenBy(x => x.Id).Skip((page - 1) * pageSize).Take(pageSize))
-            items.Add(await AssessItem(task, item, supported, authority.EnvironmentId, planning, ct));
-        return new DraftEvidenceAssessmentOutput(taskId, task.LineId!.Value, 2, version, page, pageSize, task.Items.Count, items);
-    }, ct);
+            items.Add(await AssessItem(task, item, supported, environment, planning, ct));
+        return new DraftEvidenceAssessmentOutput(task.Id, task.LineId!.Value, 2, version, page, pageSize, task.Items.Count, items);
+    }
 
     private async Task<DraftEvidenceItem> AssessItem(PatrolTask task, PatrolTaskItem item, bool supported, string environment, PlanningDefinitionV1? planning, CancellationToken ct)
     {
