@@ -1,5 +1,89 @@
 # R32-05 — Explicit confirmed photo policies and frozen Task contract
 
+## 2026-11-16 Web configuration follow-up
+
+Peter separately authorized the PQE photo-policy Web UI after merging PR #26.
+Actual reviewed HEAD `0ad625cbafd8b80753ec1619e390ffebcb3b3a4b` merged as
+`73073d0bb89aadc5b6a9e15e9832922c2c1fe020`, also the verified latest main.
+The merge has the identical reviewed tree. Merged-main
+[CI43904931203](https://github.com/peterl-ai/IPQC-system/actions/runs/43904931203)
+completed successfully: backend920 PASS/513 opt-in PG SKIP/0 FAIL; actual
+PostgreSQL17.12 513 PASS/0 SKIP/0 FAIL; Web90 PASS/18 files, lint/typecheck/build;
+Release0 warnings/errors. Final UI-PR HEAD evidence is recorded separately in its PR.
+
+The existing Standards row now opens a per-item photo-policy drawer. It shows real
+Standard/item IDs, original raw text, current applicability, confirmed value, definition
+revision/hash, immutable confirmation ID/version, actual PQE user ID and plant-time UTC
+conversion. The exact source header and all item fields are available for review.
+PQE must explicitly choose Required/Optional, attest review and click Confirm. Nothing
+is preselected from raw text or an old confirmation. Admin can view and retain normal
+Standard editing but receives no Confirm control. IPQA receives no configuration access.
+English and Simplified Chinese use existing i18n. No bulk Confirm All, Plan override,
+task generation, readiness success or execution control is added.
+
+A narrow additive **read projection**, `PhotoPolicyPage.ReviewStandard`, returns the
+existing StandardOutput from the **same locked planning transaction** as policy hashes
+and preconditions. Independent Standard and policy GETs could otherwise mix review text
+from one definition with another hash. No confirmation authority, mutation input,
+database schema, migration, security hook or frozen Task contract changes. A new actual
+API race test verifies both sides of the source read on SQLite and real PostgreSQL,
+including observed PostgreSQL planning-gate blocking and the later invalidated state.
+
+The existing API client sends exactly RequestId, CanonicalizationVersion1, nullable
+ExpectedDefinitionId, ExpectedDefinitionHash, ExpectedConfirmationId and Value. The
+RequestId is client idempotency only; confirmation IDs/versions/actors/families/times
+come from server receipts. Same-origin authentication, bounded one-refresh behavior and
+explicit no-store are reused. A different intended confirmation creates a new RequestId.
+
+Before POST, only the non-secret exact intent (current actor ID, Standard/item IDs and
+six input fields) is retained in sessionStorage, scoped to that actor and Standard.
+No token, password, proof, credential or authoritative client policy copy is stored.
+Storage failure prevents POST. Reload/remount restores the same request without sending
+it. Unknown network/5xx/response outcomes retain it for **explicit exact retry**. Refresh
+can discover its matching current RequestId and GET the exact immutable receipt; a
+superseding current confirmation is not proof of this older request's failure. Explicit
+retry can recover the original older receipt without rewriting today's policy. Receipt
+scope/value/hash/identity/actor must match before displaying accepted success.
+
+SessionStorage survives reload in the same tab, not tab/browser-data destruction. This
+slice adds no cross-tab coordinator, server RequestId query, cancellation or background
+sender. Do not treat a missing local request or a GET404 as proof a prior in-flight
+request never accepted. A deliberate new action still uses freshly read server
+preconditions; current server authority and CAS remain final. Historical receipt and
+current applicability are displayed separately.
+
+400/401/403/404/409/429 and unavailable responses have bilingual explicit messages.
+Definition/competing-confirmation409 retains the selected value, reloads actual source
+and current decision, clears review acknowledgement and requires a new deliberate
+confirmation/new RequestId. No automatic rebase or write occurs. Unknown originals are
+retained across session denial for that same actor's later authorized recovery; another
+user never sends the prior actor's request. Successful Standard editing refreshes the
+policy view; no-op preserves server confirmation and meaningful edit requires another
+confirmation. Standard Save itself never calls the confirmation endpoint.
+
+Developer self-review confirmed **P2**: an older accepted success banner initially
+remained visible when a second confirmation's response was unknown. A negative regression
+failed before the fix; starting a genuinely new request now clears that previous success
+indicator while retaining independently loaded current configuration. The full Web suite
+then passed127 tests/20 files. New protocol/component coverage comprises37 cases, including
+both languages, actor changes, exact recovery/replay, malformed scope, competing edits,
+null initial IDs, all specified errors and Standard Save/no-op/invalidation integration.
+The new SQLite API review-read test passed; its real PostgreSQL twin is in the existing
+PhotoPolicyPostgresTests CI filter. Initial test-only regex/lint/type corrections are
+not classified as application defects.
+
+Actual Playwright browser checks used an isolated temporary SQLite database, synthetic
+accounts/Standard and disabled scheduler: PQE reviewed and confirmed Required through
+the real API; EN/ZH status/definitions were inspected; Admin retained Edit and had only
+read-only policy status. Screenshots and disposable evidence remain outside the repo.
+This is browser/HTTP evidence, not tablet UAT, production migration or deployment.
+The original foundation delivery below remains historical evidence; its UI deferral is
+superseded only by this authorized configuration slice. Formal workflows, photo newness/
+coverage, F2/F3, execution UI and production operations remain deferred; canExecute=false.
+Stop after one UI PR for independent ChatGPT Final Review and Peter's merge decision.
+
+## Original foundation delivery
+
 Date: 2026-11-16. Status: implementation for independent ChatGPT Final Review.
 Peter's attached Photo Policy Confirmation implementation authorization and explicit
 A/A business decisions apply. No merge, deployment or subsequent phase is authorized.

@@ -220,7 +220,7 @@ public sealed class PatrolStandardService(IpqcDbContext db, TimeProvider clock, 
     private static string Clean(string? value) => value?.Trim() ?? "";
     private static DateTime Utc(DateTime value) => DateTime.SpecifyKind(value, DateTimeKind.Utc);
 
-    private static StandardOutput ToOutput(PatrolStandard row) => new(row.Id, row.PatrolStandardName,
+    internal static StandardOutput ToOutput(PatrolStandard row) => new(row.Id, row.PatrolStandardName,
         row.FactoryCode, row.FactoryName, row.WorkshopCode, row.LineCode, row.LineName, row.MaterialCode,
         row.CreatedBy, Utc(row.CreatedAtUtc), row.UpdatedBy, Utc(row.UpdatedAtUtc),
         row.InspectionItems.OrderBy(x => x.SequenceNo).Select(x => new ItemOutput(x.Id, x.SequenceNo,

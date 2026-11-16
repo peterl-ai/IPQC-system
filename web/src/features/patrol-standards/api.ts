@@ -1,5 +1,6 @@
 import { authFetch } from '@/services/authFetch'
 import type { PatrolStandard, PatrolStandardDraft, PatrolStandardItem, PatrolStandardSummary } from './model'
+import type { PhotoPolicyInput, PhotoPolicyPage, PhotoPolicyReceipt } from './photoPolicyModel'
 
 interface ApiItem extends Omit<PatrolStandardItem, 'id' | 'itemCategory' | 'upperOperator' | 'upperValue' | 'lowerOperator' | 'lowerValue'> {
   id: string
@@ -77,6 +78,18 @@ function payload(draft: PatrolStandardDraft) {
 }
 
 export const patrolStandardsApi = {
+  async photoPolicies(id: string): Promise<PhotoPolicyPage> {
+    const data = await (await request(`/patrol-standards/${encodeURIComponent(id)}/photo-policies`, { cache: 'no-store' })).json() as
+      Omit<PhotoPolicyPage, 'reviewStandard'> & { reviewStandard: ApiStandard | null }
+    return { ...data, reviewStandard: data.reviewStandard ? mapStandard(data.reviewStandard) : null }
+  },
+  async confirmPhotoPolicy(id: string, item: string, input: PhotoPolicyInput): Promise<PhotoPolicyReceipt> {
+    return (await request(`/patrol-standards/${encodeURIComponent(id)}/items/${encodeURIComponent(item)}/photo-policy-confirmations`,
+      { method: 'POST', cache: 'no-store', body: JSON.stringify(input) })).json()
+  },
+  async photoPolicyReceipt(id: string): Promise<PhotoPolicyReceipt> {
+    return (await request(`/photo-policy-confirmations/${encodeURIComponent(id)}`, { cache: 'no-store' })).json()
+  },
   async list(params: { name: string; factory?: string; line?: string; page: number; pageSize: number }) {
     const query = new URLSearchParams({ page: String(params.page), pageSize: String(params.pageSize) })
     if (params.name) query.set('standardName', params.name)

@@ -51,6 +51,7 @@
           <template v-else-if="column.key === 'actions'">
             <a-space size="small">
               <a-button type="link" size="small" @click="openEdit(record)">{{ t('common.edit') }}</a-button>
+              <a-button v-if="canViewPolicies" type="link" size="small" :disabled="busy" @click="openPolicies(record.id)">{{ t('photoPolicy.title') }}</a-button>
               <a-popconfirm
                 :title="t('editor.deleteTitle')"
                 :description="t('editor.deleteConfirm')"
@@ -126,6 +127,7 @@
         <a-form-item :label="t('field.defectLevel')"><a-input v-model:value="itemForm.defectLevel" /></a-form-item>
       </a-form>
     </a-modal>
+    <PhotoPolicyPanel v-if="policyStandardId" :standard-id="policyStandardId" :open="policyOpen" :refresh-version="policyRefreshVersion" @close="policyOpen = false" @edit="editFromPolicies" />
   </section>
 </template>
 
@@ -135,6 +137,8 @@ import { useI18n } from 'vue-i18n'
 import { message, type FormInstance, type TableColumnsType, type UploadProps } from 'ant-design-vue'
 import { CopyOutlined, DownloadOutlined, ExportOutlined, ImportOutlined, PlusOutlined, ReloadOutlined, SaveOutlined, SearchOutlined } from '@ant-design/icons-vue'
 import PageHeader from '@/components/PageHeader.vue'
+import { authSession } from '@/services/authSession'
+import PhotoPolicyPanel from './PhotoPolicyPanel.vue'
 import {
   emptyPatrolStandardDraft,
   emptyPatrolStandardItem,
@@ -160,6 +164,17 @@ const pageSize = ref(10)
 const total = ref(0)
 const loading = ref(false)
 const busy = ref(false)
+const policyStandardId = ref<string | null>(null), policyOpen = ref(false), policyRefreshVersion = ref(0)
+const returnToPolicies = ref(false)
+const canViewPolicies = computed(() => authSession.user.value?.isActive && !authSession.user.value.mustChangePassword &&
+  ['Admin', 'PQE'].includes(authSession.user.value.role) && authSession.user.value.permissions.includes('PatrolStandards.Read'))
+function openPolicies(id: string) { policyStandardId.value = id; policyOpen.value = true }
+async function editFromPolicies() {
+  if (!policyStandardId.value) return
+  policyOpen.value = false
+  const standard = standards.value.find(x => x.id === policyStandardId.value)
+  if (standard) { await openEdit(standard); returnToPolicies.value = editorOpen.value }
+}
 
 const editorOpen = ref(false)
 const editorMode = ref<EditorMode>('new')
@@ -200,7 +215,7 @@ const columns = computed<TableColumnsType>(() => [
   column('field.workshopCode', 'workshopCode'), column('field.lineCode', 'lineCode'), column('field.lineName', 'lineName', 170),
   column('field.materialCode', 'materialCode'), column('field.createdBy', 'createdBy'), column('field.createdTime', 'createdTime', 170),
   column('field.updatedBy', 'updatedBy'), column('field.updatedTime', 'updatedTime', 170),
-  { title: t('common.actions'), key: 'actions', fixed: 'right', width: 140 },
+  { title: t('common.actions'), key: 'actions', fixed: 'right', width: 300 },
 ])
 const detailColumns = computed<TableColumnsType>(() => [
   { title: t('field.no'), key: 'no', width: 60, fixed: 'left' },
@@ -265,10 +280,12 @@ async function openSelectedCopy() {
 }
 
 async function openNew() {
+  returnToPolicies.value = false
   await openEditor('new', emptyPatrolStandardDraft())
 }
 
 async function openEdit(standard: PatrolStandardSummary) {
+  returnToPolicies.value = false
   selectedRowKeys.value = [standard.id]
   busy.value = true
   try {
@@ -317,8 +334,13 @@ async function saveEditor() {
     inspectionItems: editorItems.value.map((item) => ({ ...item })),
   }
   try {
-    if (editorMode.value === 'edit' && editingId.value) await patrolStandardsApi.update(editingId.value, draft)
-    else await patrolStandardsApi.create(draft)
+    const saved = editorMode.value === 'edit' && editingId.value
+      ? await patrolStandardsApi.update(editingId.value, draft) : await patrolStandardsApi.create(draft)
+    if (policyStandardId.value === saved.id) {
+      policyRefreshVersion.value++
+      if (returnToPolicies.value) policyOpen.value = true
+    }
+    returnToPolicies.value = false
     message.success(t('editor.saved'))
     editorOpen.value = false
     await loadStandards()

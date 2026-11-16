@@ -4,6 +4,7 @@ namespace JaxPower.Ipqc.Api.Tests;
 
 public sealed class PhotoPolicyPostgresTests
 {
+    [DisposablePostgresFact] public async Task CoherentReviewRead() { await using var f = await PersonalSessionFixture.CreateAsync(true); await PhotoPolicyReadTests.Review(f); }
     [DisposablePostgresFact] public async Task Lifecycle() { await using var f = await PersonalSessionFixture.CreateAsync(true); await PhotoPolicyTests.Lifecycle(f); }
     [DisposablePostgresFact] public async Task Drift() { await using var f = await PersonalSessionFixture.CreateAsync(true); await PhotoPolicyTests.Drift(f); }
     [DisposablePostgresFact] public async Task Legacy() { await using var p = await PhotoFixture.Create(true); await PhotoPolicyTests.Legacy(p); }
