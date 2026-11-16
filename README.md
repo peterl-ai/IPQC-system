@@ -56,6 +56,12 @@ photo references, with shared CAS and explicit correction/withdrawal. Photo reus
 facts only; newness/coverage and unconfirmed policy remain unresolved. No formal Submit
 or shared execution is activated.
 
+The scoped [explicit photo-policy confirmation](docs/27_R3205_CONFIRMED_PHOTO_POLICIES.md)
+adds PQE-only, current-family confirmation of exact Standard item definitions and atomic
+policy freezing for new shared tasks. Admin/Plan edits grant no confirmation, old tasks
+remain unconfirmed, and ordinary OK assessment uses only genuine frozen Required/Optional.
+NG transition newness/coverage and formal execution remain deferred.
+
 The scoped [atomic draft attachment references](docs/23_R3206_DRAFT_ATTACHMENT_REFERENCES.md)
 adds explicit Ready-object association/detachment, shared DraftVersion CAS and immutable
 receipts/history. Storage Ready alone accepts no business reference. No formal Submit,

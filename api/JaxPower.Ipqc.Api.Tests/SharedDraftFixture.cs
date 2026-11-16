@@ -46,9 +46,9 @@ internal sealed record DraftSetup(PersonalSessionFixture F,Guid TaskId,Guid Item
 
 internal static class SharedDraftFixture
 {
-    public static async Task<DraftSetup> Setup(PersonalSessionFixture f,bool quantitative=false,string? sampleCount=null,string? photoRequirement=null) {
+    public static async Task<DraftSetup> Setup(PersonalSessionFixture f,bool quantitative=false,string? sampleCount=null,string? photoRequirement=null,bool historicalPhotoPolicy=false) {
         f.Clock.Now=new(2026,11,11,11,59,0,TimeSpan.Zero);
-        var standard=await LineSharedPlanningFixture.Standard(f);
+        var standard=await LineSharedPlanningFixture.Standard(f,confirmPolicy:!historicalPhotoPolicy);
         if(sampleCount is not null) await f.Edit(async db=> {
             foreach(var i in await db.PatrolStandardItems.Where(x=>x.PatrolStandardId==standard).ToListAsync()) i.SampleCount=sampleCount;
         });
@@ -60,8 +60,12 @@ internal static class SharedDraftFixture
                 i.InspectionType="Quantitative";i.LowerLimitOperator=">=";i.LowerLimitValue="1.5";i.UpperLimitOperator="<=";i.UpperLimitValue="2.5";
             }
         });
-        await LineSharedPlanningFixture.Plan(f,standard);f.Clock.Now=f.Clock.Now.AddMinutes(1);
-        Assert.Equal(1,await LineSharedPlanningFixture.Generate(f));
+        if (historicalPhotoPolicy) {
+            var response = await (await LineSharedPlanningFixture.Admin(f)).PostAsJsonAsync("/api/line-patrol-plans",LineSharedPlanningFixture.Input(f,standard));
+            response.EnsureSuccessStatusCode();
+        } else await LineSharedPlanningFixture.Plan(f,standard);
+        f.Clock.Now=f.Clock.Now.AddMinutes(1);
+        Assert.Equal(1,await LineSharedPlanningFixture.Generate(f,historicalPhotoPolicy));
         var task=Assert.Single(await LineSharedPlanningFixture.Tasks(f));var a=await f.Login();var b=await f.Login("dev-ipqa-2");
         var scope=(await f.Client(b.AccessToken).GetFromJsonAsync<InspectionIdentityOutput>(InspectionIdentityTests.Root(task.Id)))!;
         var item=scope.Items[0];var source=await WorkContextFixture.Issue(f,task.Id,a);

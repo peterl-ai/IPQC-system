@@ -15,20 +15,24 @@ public sealed partial class SharedDraftService
             throw Error("InvalidEvidenceAssessmentQuery", 400);
         var task = await identity.Target(taskId, null, ct); var version = task.SharedDraft?.DraftVersion ?? 0;
         if (expectedDraftVersion is { } expected && expected != version) throw Error("EvidenceAssessmentVersionConflict");
-        var supported = PlanningSnapshot.Status(task) == "ValidV1" && InitialInspectionIdentity.State(task) == "Initialized" &&
+        var planning = PlanningSnapshot.Read(task);
+        var supported = planning is not null && InitialInspectionIdentity.State(task) == "Initialized" &&
             LineSharedTaskEligibility.Availability(task) is "FoundationOnly" or "DraftFoundation";
         var items = new List<DraftEvidenceItem>();
         foreach (var item in task.Items.OrderBy(x => x.SequenceNo).ThenBy(x => x.Id).Skip((page - 1) * pageSize).Take(pageSize))
-            items.Add(await AssessItem(task, item, supported, authority.EnvironmentId, ct));
+            items.Add(await AssessItem(task, item, supported, authority.EnvironmentId, planning, ct));
         return new DraftEvidenceAssessmentOutput(taskId, task.LineId!.Value, 2, version, page, pageSize, task.Items.Count, items);
     }, ct);
 
-    private async Task<DraftEvidenceItem> AssessItem(PatrolTask task, PatrolTaskItem item, bool supported, string environment, CancellationToken ct)
+    private async Task<DraftEvidenceItem> AssessItem(PatrolTask task, PatrolTaskItem item, bool supported, string environment, PlanningDefinitionV1? planning, CancellationToken ct)
     {
         var attempt = item.CurrentInspectionAttempt?.InspectionAttemptId;
         var minimum = item.InspectionAttempts.SingleOrDefault(x => x.Id == attempt)?.MinimumSampleCount;
         // Peter's A/A decision: free text is not an explicit policy-confirmation record.
         var policy = new DraftEvidencePolicy(item.PhotoRequirement, item.PhotoRequirement is "Required" or "Optional" ? item.PhotoRequirement : "Unknown", "PolicyConfigurationUnresolved");
+        var frozenPolicy = await policies.ReadFrozenAsync(task, item, planning, ct);
+        if (frozenPolicy.FrozenPolicy is { } fp) policy = new(item.PhotoRequirement, fp.Policy.Value, "ExplicitlyConfirmed", true, fp);
+        else if (frozenPolicy.State == "InvalidConfiguration") policy = policy with { State = "InvalidConfiguration" };
         var samples = new List<DraftEvidenceSample>(); var transitions = new List<DraftEvidenceTransition>(); var photos = new List<DraftEvidencePhoto>();
         var reasons = new List<string>(); var unproven = new List<string>(); var categories = new List<string>();
         var bindings = new List<SampleEvidenceOutput>(); var bindingsComplete = false;
@@ -103,9 +107,23 @@ public sealed partial class SharedDraftService
             return Output();
         }
         if (active.Count < minimum) { categories.Add("ResultNotEstablished"); reasons.Add("FrozenMinimumNotMet"); unproven.Add("CompleteApplicableOKResult"); return Output(); }
-        categories.Add("FrozenOKPhotoPolicy"); status = "PolicyConfigurationUnresolved";
+        categories.Add("FrozenOKPhotoPolicy");
+        if (policy.HasExplicitConfirmation) {
+            if (policy.RecognizedText == "Optional") status = "Satisfied";
+            else if (photos.Any(x => x.IsEligibleEvidence)) status = "Satisfied";
+            else if (photos.Any(x => x.LastReference is not null)) { status = "InvalidEvidence"; reasons.Add("AcceptedReferencesDetachedOrUnavailable"); }
+            else { status = "MissingEvidence"; reasons.Add("NoAcceptedCurrentAttemptReference"); }
+            return Output();
+        }
+        status = "PolicyConfigurationUnresolved";
         reasons.Add("FrozenPhotoPolicyHasNoExplicitConfirmation"); unproven.Add("ConfirmedRequiredOrOptionalPolicy"); return Output();
     }
+
+    public Task<TaskPhotoPolicies> ReadPhotoPoliciesAsync(Guid taskId, ClaimsPrincipal actor, CancellationToken ct) => store.RunAsync(actor, false, taskId, [], async _ => {
+        var task = await identity.Target(taskId, null, ct); var items = new List<TaskPhotoPolicyItem>(); var planning = PlanningSnapshot.Read(task);
+        foreach (var item in task.Items.OrderBy(x => x.SequenceNo)) items.Add(await policies.ReadFrozenAsync(task, item, planning, ct));
+        return new TaskPhotoPolicies(taskId, items);
+    }, ct);
 
     private static bool BuildEvidenceHistory(PatrolTask task, PatrolTaskItem item, Guid attempt, List<SharedSample> identities,
         List<ContributionOperation> rows, List<ContributionDependency> deps, Dictionary<Guid, SharedSampleProjection> projections,

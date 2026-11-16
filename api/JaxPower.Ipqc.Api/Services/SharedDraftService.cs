@@ -15,7 +15,7 @@ public sealed class DraftQuarantineException(string code, Guid[] operations, Gui
 }
 
 public sealed partial class SharedDraftService(IpqcDbContext db, WorkContextStore store, InspectionAttemptService identity, TimeProvider clock,
-    IProtectedPhotoStore files, PhotoVerifier verifier)
+    IProtectedPhotoStore files, PhotoVerifier verifier, PhotoPolicyService policies)
 {
     private static PersonalAccessException Error(string code,int status=409)=>new(code,status);
     private static T Decode<T>(string json)=>JsonSerializer.Deserialize<T>(json,DraftCanonical.Json) ?? throw new InvalidOperationException("Missing accepted receipt.");

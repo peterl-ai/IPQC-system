@@ -5,7 +5,7 @@ using Microsoft.EntityFrameworkCore;
 
 namespace JaxPower.Ipqc.Api.Services;
 
-public sealed class PatrolStandardService(IpqcDbContext db, TimeProvider clock, LineSharedPlanningStore planning)
+public sealed class PatrolStandardService(IpqcDbContext db, TimeProvider clock, LineSharedPlanningStore planning, PhotoPolicyService policies)
 {
     public static Dictionary<string, string[]> Validate(StandardInput input)
     {
@@ -148,6 +148,7 @@ public sealed class PatrolStandardService(IpqcDbContext db, TimeProvider clock, 
         if (enabledShared && !LineSharedPlanService.Ready(row))
             throw new PersonalAccessException("SharedStandardNotReady", 400);
         await db.SaveChangesAsync(ct);
+        await policies.SynchronizeAsync(row, false, ct);
         return await GetAsync(id, ct);
     }, ct);
 
@@ -157,6 +158,7 @@ public sealed class PatrolStandardService(IpqcDbContext db, TimeProvider clock, 
         if (row is null) return false;
         if (await db.PatrolPlans.AnyAsync(x => x.PatrolStandardId == id, ct) || await db.PatrolTasks.AnyAsync(x => x.PatrolStandardId == id, ct))
             throw new PersonalAccessException("StandardInUse", 409);
+        await policies.SynchronizeAsync(row, true, ct);
         db.PatrolStandards.Remove(row);
         await db.SaveChangesAsync(ct);
         return true;

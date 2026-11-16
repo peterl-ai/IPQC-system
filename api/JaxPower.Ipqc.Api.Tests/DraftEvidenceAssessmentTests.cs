@@ -30,9 +30,15 @@ public sealed class DraftEvidenceAssessmentTests
         if (ready) a = await PhotoFixture.Ready(s, a.AttachmentId, bytes);
         return (a, associate ? Assert.Single((await DraftAttachmentTests.Accept(s, DraftAttachmentTests.Input(s, a, await Version(s)))).Operations) : null);
     }
-    internal static async Task<string> Facts(PhotoFixture p) => await InspectionIdentityMigrationTests.OldFacts(p.F, true, true, true, true, true) +
-        await p.F.Read(async db => JsonSerializer.Serialize(new { Unable = await db.UnableToMeasureOperations.OrderBy(x => x.OperationId).ToListAsync(),
-            Projections = await db.UnableToMeasureProjections.OrderBy(x => x.LastOperationId).ToListAsync(), Keys = await db.AcceptedOperationIdentities.OrderBy(x => x.OperationId).ToListAsync() }));
+    internal static async Task<string> Facts(PhotoFixture p) {
+        var facts = await InspectionIdentityMigrationTests.OldFacts(p.F, true, true, true, true, true) +
+            await p.F.Read(async db => JsonSerializer.Serialize(new { Unable = await db.UnableToMeasureOperations.OrderBy(x => x.OperationId).ToListAsync(),
+                Projections = await db.UnableToMeasureProjections.OrderBy(x => x.LastOperationId).ToListAsync(), Keys = await db.AcceptedOperationIdentities.OrderBy(x => x.OperationId).ToListAsync() }));
+        // Empty additive tables change no old facts during upgrade; any materialized policy fact is protected by GET assertions too.
+        if (await PhotoPolicyFixture.Available(p.F) && await p.F.Read(async db => await db.PhotoPolicyDefinitions.AnyAsync() || await db.PhotoPolicyConfirmations.AnyAsync() ||
+            await db.PhotoPolicyStates.AnyAsync() || await db.FrozenTaskPhotoPolicies.AnyAsync())) facts += await PhotoPolicyTests.Facts(p.F);
+        return facts;
+    }
     [Fact] public async Task Genuine_first_NG_evidence_preserves_provenance_and_every_fact() { await using var p = await PhotoFixture.Create(); await Genuine(p); }
     internal static async Task Genuine(PhotoFixture p) {
         var s = await SharedDraftFixture.Setup(p.F, sampleCount: "5"); var capture = await Sample(s); var (a, _) = await Photo(s, associate: false);
@@ -69,7 +75,7 @@ public sealed class DraftEvidenceAssessmentTests
     [Theory][InlineData("Required")][InlineData("Optional")][InlineData("optional")][InlineData("")][InlineData("Legacy photo needed")]
     public async Task Frozen_free_text_is_never_unconfirmed_optional(string raw) { await using var p = await PhotoFixture.Create(); await Policy(p, raw); }
     internal static async Task Policy(PhotoFixture p, string raw) {
-        var s = await SharedDraftFixture.Setup(p.F, photoRequirement: raw); await Sample(s, "OK"); await Photo(s);
+        var s = await SharedDraftFixture.Setup(p.F, photoRequirement: raw, historicalPhotoPolicy: true); await Sample(s, "OK"); await Photo(s);
         // Mutable today's Standard cannot reinterpret the actual frozen policy.
         await p.F.Edit(async db => { foreach (var row in await db.PatrolStandardItems.ToListAsync()) row.PhotoRequirement = "Optional"; });
         var before = await Facts(p); var i = await Item(s);

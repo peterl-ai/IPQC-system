@@ -7,7 +7,7 @@ namespace JaxPower.Ipqc.Api.Services;
 
 public sealed class LineSharedTaskGenerationService(IpqcDbContext db, LineSharedPlanningStore store,
     ConfiguredLineDirectory directory, TimeProvider clock, IConfiguration configuration,
-    ILogger<LineSharedTaskGenerationService> logger)
+    ILogger<LineSharedTaskGenerationService> logger, PhotoPolicyService policies)
 {
     public async Task<int> GenerateDueAsync(CancellationToken ct = default)
     {
@@ -37,6 +37,8 @@ public sealed class LineSharedTaskGenerationService(IpqcDbContext db, LineShared
                         var line = await db.ProductionLines.AsNoTracking().SingleAsync(x => x.Id == p.LineId, ct);
                         var s = await db.PatrolStandards.AsNoTracking().Include(x => x.InspectionItems).SingleOrDefaultAsync(x => x.Id == p.PatrolStandardId, ct);
                         if (s is null || !LineSharedPlanService.Ready(s)) return 0;
+                        var confirmed = await policies.EffectiveAsync(s, ct);
+                        if (confirmed is null) { logger.LogWarning("SharedTaskPhotoPolicyUnconfirmed Standard {StandardId}", s.Id); return 0; }
                         var collisions = await db.PatrolTasks.AsNoTracking().Where(x => x.WorkflowVersion == WorkflowVersion.LineSharedV1 &&
                             x.LineId == p.LineId && x.ScheduledOccurrenceUtc == occurrence).ToListAsync(ct);
                         if (collisions.Count > 0)
@@ -66,6 +68,7 @@ public sealed class LineSharedTaskGenerationService(IpqcDbContext db, LineShared
                         task.PlanningSnapshotJson = PlanningSnapshot.Serialize(PlanningSnapshot.Freeze(task, p, s, line));
                         InitialInspectionIdentity.Create(task, now);
                         db.PatrolTasks.Add(task);
+                        policies.Freeze(task, p, confirmed);
                         return 1;
                     }, ct);
             }

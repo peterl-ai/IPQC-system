@@ -22,6 +22,8 @@ public static class SharedDraftEndpoints
         var g=app.MapGroup("/api/line-patrol/tasks/{taskId:guid}");
         PersonalAccess.RequireCurrent(g.MapGet("/shared-draft",async(Guid taskId,SharedDraftService s,HttpContext h,CancellationToken ct)=>
             Results.Ok(await s.ReadAsync(taskId,h.User,ct))),true);
+        PersonalAccess.RequireCurrent(g.MapGet("/photo-policies",async(Guid taskId,SharedDraftService s,HttpContext h,CancellationToken ct)=>
+            Results.Ok(await s.ReadPhotoPoliciesAsync(taskId,h.User,ct))),true);
         PersonalAccess.RequireCurrent(g.MapPost("/operation-batches",async(Guid taskId,DraftBatchInput input,SharedDraftService s,HttpContext h,CancellationToken ct)=>
             Results.Ok(await s.AcceptAsync(taskId,input,h.User,ct))),true)
             .RequireAuthorization(IpqcPermissions.LinePatrolContributeDraft).WithMetadata(new SharedDraftMutation());
