@@ -46,7 +46,9 @@ public sealed class LineSharedPlanningConcurrencyTests
         var edit = Task.Run(() => a.PutAsJsonAsync($"/api/patrol-standards/{s}", input));
         await f.Fault.Entered.Task.WaitAsync(TimeSpan.FromSeconds(15));
         var generation = Task.Run(() => Generate(f)); await Task.Delay(150); Assert.False(generation.IsCompleted);
-        f.Fault.Release.TrySetResult(); (await edit).EnsureSuccessStatusCode(); Assert.Equal(1, await generation);
+        f.Fault.Release.TrySetResult(); (await edit).EnsureSuccessStatusCode(); Assert.Equal(0, await generation);
+        Assert.Empty(await Tasks(f)); // The coherent edited definition is unconfirmed; it cannot borrow the old policy.
+        await PhotoPolicyFixture.ConfirmAll(f, s); Assert.Equal(1, await Generate(f));
         var frozen = PlanningSnapshot.Read(Assert.Single(await Tasks(f)))!;
         Assert.Equal("Edited standard", frozen.StandardName);
         Assert.Equal(source.InspectionItems.Select(x => x.Id).Reverse(), frozen.Items.Select(x => x.SourcePatrolStandardItemId));

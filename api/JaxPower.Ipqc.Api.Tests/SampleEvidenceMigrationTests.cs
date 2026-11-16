@@ -17,7 +17,7 @@ public sealed class SampleEvidenceMigrationTests
         var snapshot = db.GetService<IModelRuntimeInitializer>().Initialize(db.GetService<IMigrationsAssembly>().ModelSnapshot!.Model, designTime: true);
         var diff = db.GetService<IMigrationsModelDiffer>().GetDifferences(snapshot.GetRelationalModel(), db.GetService<Microsoft.EntityFrameworkCore.Metadata.IDesignTimeModel>().Model.GetRelationalModel());
         Assert.True(diff.Count == 0, string.Join(";", diff.Select(d => d.GetType().Name + JsonSerializer.Serialize(d, d.GetType()))));
-        var sql = db.GetService<IMigrator>().GenerateScript(Previous);
+        var sql = db.GetService<IMigrator>().GenerateScript(Previous, "20261113211600_R3205SampleTransitionEvidenceBindings");
         foreach (var table in new[] { "SampleEvidenceOperations", "SampleEvidenceProjections" }) Assert.Contains("CREATE TABLE \"" + table + "\"", sql);
         Assert.Equal(2, System.Text.RegularExpressions.Regex.Matches(sql, "CREATE TABLE ").Count);
         Assert.DoesNotContain("ALTER TABLE", sql); Assert.DoesNotContain("DROP TABLE", sql); Assert.Contains("ON DELETE RESTRICT", sql);

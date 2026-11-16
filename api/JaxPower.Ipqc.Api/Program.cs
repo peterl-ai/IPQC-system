@@ -65,6 +65,7 @@ builder.Services.AddScoped<DeviceEnrollmentService>();
 builder.Services.AddScoped<DeviceCredentialIssuance>();
 builder.Services.AddHostedService<DeviceCredentialIssuanceWorker>();
 builder.Services.AddScoped<PatrolStandardService>();
+builder.Services.AddScoped<PhotoPolicyService>();
 builder.Services.AddScoped<PatrolPlanService>();
 builder.Services.AddScoped<PatrolTaskGenerationService>();
 builder.Services.AddScoped<InspectionJudgmentService>();
@@ -307,6 +308,7 @@ group.MapPost("/import", async (IFormFile file, PatrolStandardExcel excel, Patro
 
 app.MapPatrolPlans();
 app.MapLineSharedPlans();
+app.MapPhotoPolicies();
 app.MapPatrolTasks();
 app.MapCompletedPatrolRecords();
 

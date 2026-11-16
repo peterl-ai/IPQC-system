@@ -838,6 +838,38 @@ namespace JaxPower.Ipqc.Api.Data.Migrations
                         });
                 });
 
+            modelBuilder.Entity("JaxPower.Ipqc.Api.Domain.FrozenTaskPhotoPolicy", b =>
+                {
+                    b.Property<Guid>("TaskItemId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("ConfirmationId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SnapshotHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SnapshotJson")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("TaskId")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("TaskItemId");
+
+                    b.HasIndex("ConfirmationId");
+
+                    b.HasIndex("TaskId");
+
+                    b.ToTable("FrozenTaskPhotoPolicies", t =>
+                        {
+                            t.HasCheckConstraint("CK_FrozenTaskPhotoPolicy", "length(\"SnapshotHash\")=64 AND length(\"SnapshotJson\")>0");
+                        });
+                });
+
             modelBuilder.Entity("JaxPower.Ipqc.Api.Domain.InspectionAttachment", b =>
                 {
                     b.Property<Guid>("Id")
@@ -1874,6 +1906,155 @@ namespace JaxPower.Ipqc.Api.Data.Migrations
                     b.ToTable("PatrolTaskSubmissionSamples");
                 });
 
+            modelBuilder.Entity("JaxPower.Ipqc.Api.Domain.PhotoPolicyConfirmation", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("ActorPersonalSessionId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("ActorUserId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("ConfirmedAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("DefinitionId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("EnvironmentId")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("ExpectedConfirmationId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("PolicyVersion")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("ReceiptJson")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("RequestHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("RequestId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("StandardId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("StandardItemId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Value")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasAlternateKey("Id", "DefinitionId", "StandardItemId", "PolicyVersion")
+                        .HasName("AK_PhotoPolicyConfirmation_State");
+
+                    b.HasIndex("ActorUserId");
+
+                    b.HasIndex("RequestId")
+                        .IsUnique();
+
+                    b.HasIndex("DefinitionId", "StandardItemId");
+
+                    b.HasIndex("StandardItemId", "PolicyVersion")
+                        .IsUnique()
+                        .HasDatabaseName("IX_PhotoPolicyConfirmation_Version");
+
+                    b.ToTable("PhotoPolicyConfirmations", t =>
+                        {
+                            t.HasCheckConstraint("CK_PhotoPolicyConfirmation", "\"Value\" IN ('Required','Optional') AND \"PolicyVersion\">0 AND length(\"RequestHash\")=64 AND length(\"ReceiptJson\")>0 AND length(\"EnvironmentId\") BETWEEN 1 AND 200");
+                        });
+                });
+
+            modelBuilder.Entity("JaxPower.Ipqc.Api.Domain.PhotoPolicyDefinition", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("DefinitionHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("DefinitionJson")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("StandardId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("StandardItemId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("Version")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasAlternateKey("Id", "StandardItemId")
+                        .HasName("AK_PhotoPolicyDefinition_Item");
+
+                    b.HasIndex("StandardItemId", "Version")
+                        .IsUnique()
+                        .HasDatabaseName("IX_PhotoPolicyDefinition_Version");
+
+                    b.ToTable("PhotoPolicyDefinitions", t =>
+                        {
+                            t.HasCheckConstraint("CK_PhotoPolicyDefinition", "\"Version\">0 AND length(\"DefinitionHash\")=64 AND length(\"DefinitionJson\")>0");
+                        });
+                });
+
+            modelBuilder.Entity("JaxPower.Ipqc.Api.Domain.PhotoPolicyState", b =>
+                {
+                    b.Property<Guid>("StandardItemId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("ConfirmationId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("DefinitionId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("IsPresent")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("PolicyVersion")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<Guid>("StandardId")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("StandardItemId");
+
+                    b.HasIndex("DefinitionId", "StandardItemId");
+
+                    b.HasIndex("ConfirmationId", "DefinitionId", "StandardItemId", "PolicyVersion")
+                        .HasDatabaseName("IX_PhotoPolicyState_Confirmation");
+
+                    b.ToTable("PhotoPolicyStates", t =>
+                        {
+                            t.HasCheckConstraint("CK_PhotoPolicyState", "\"PolicyVersion\">=0 AND (\"IsPresent\" OR \"ConfirmationId\" IS NULL)");
+                        });
+                });
+
             modelBuilder.Entity("JaxPower.Ipqc.Api.Domain.ProductionLine", b =>
                 {
                     b.Property<Guid>("Id")
@@ -2265,7 +2446,8 @@ namespace JaxPower.Ipqc.Api.Data.Migrations
                     b.HasIndex("TaskId", "TaskItemId", "InspectionAttemptId")
                         .HasDatabaseName("IX_SampleEvidence_Item");
 
-                    b.HasIndex("SampleId", "TaskId", "TaskItemId", "InspectionAttemptId").HasDatabaseName("IX_SampleEvidence_Sample");
+                    b.HasIndex("SampleId", "TaskId", "TaskItemId", "InspectionAttemptId")
+                        .HasDatabaseName("IX_SampleEvidence_Sample");
 
                     b.HasIndex("TaskId", "PhotoReferenceOperationId", "AttachmentId", "PhotoReferenceHash")
                         .HasDatabaseName("IX_SampleEvidence_Photo");
@@ -3051,6 +3233,22 @@ namespace JaxPower.Ipqc.Api.Data.Migrations
                         .IsRequired();
                 });
 
+            modelBuilder.Entity("JaxPower.Ipqc.Api.Domain.FrozenTaskPhotoPolicy", b =>
+                {
+                    b.HasOne("JaxPower.Ipqc.Api.Domain.PhotoPolicyConfirmation", null)
+                        .WithMany()
+                        .HasForeignKey("ConfirmationId")
+                        .HasConstraintName("FK_FrozenPhotoPolicy_Confirmation")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("JaxPower.Ipqc.Api.Domain.PatrolTaskItem", null)
+                        .WithMany()
+                        .HasForeignKey("TaskItemId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("JaxPower.Ipqc.Api.Domain.InspectionAttachment", b =>
                 {
                     b.HasOne("JaxPower.Ipqc.Api.Domain.ApplicationUser", null)
@@ -3318,6 +3516,41 @@ namespace JaxPower.Ipqc.Api.Data.Migrations
                         .HasConstraintName("FK_PatrolTaskSubmissionSamples_PatrolTaskSubmissionItems_PatrolTaskSubmissionItemId");
 
                     b.Navigation("PatrolTaskSubmissionItem");
+                });
+
+            modelBuilder.Entity("JaxPower.Ipqc.Api.Domain.PhotoPolicyConfirmation", b =>
+                {
+                    b.HasOne("JaxPower.Ipqc.Api.Domain.ApplicationUser", null)
+                        .WithMany()
+                        .HasForeignKey("ActorUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("JaxPower.Ipqc.Api.Domain.PhotoPolicyDefinition", null)
+                        .WithMany()
+                        .HasForeignKey("DefinitionId", "StandardItemId")
+                        .HasPrincipalKey("Id", "StandardItemId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_PhotoPolicyConfirmation_Definition");
+                });
+
+            modelBuilder.Entity("JaxPower.Ipqc.Api.Domain.PhotoPolicyState", b =>
+                {
+                    b.HasOne("JaxPower.Ipqc.Api.Domain.PhotoPolicyDefinition", null)
+                        .WithMany()
+                        .HasForeignKey("DefinitionId", "StandardItemId")
+                        .HasPrincipalKey("Id", "StandardItemId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_PhotoPolicyState_Definition");
+
+                    b.HasOne("JaxPower.Ipqc.Api.Domain.PhotoPolicyConfirmation", null)
+                        .WithMany()
+                        .HasForeignKey("ConfirmationId", "DefinitionId", "StandardItemId", "PolicyVersion")
+                        .HasPrincipalKey("Id", "DefinitionId", "StandardItemId", "PolicyVersion")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("FK_PhotoPolicyState_Confirmation");
                 });
 
             modelBuilder.Entity("JaxPower.Ipqc.Api.Domain.ProvisioningAuditEvent", b =>

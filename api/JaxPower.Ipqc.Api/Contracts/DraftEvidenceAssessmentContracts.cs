@@ -1,7 +1,7 @@
 namespace JaxPower.Ipqc.Api.Contracts;
 
 public sealed record DraftEvidencePolicy(string FrozenText, string RecognizedText, string State,
-    bool HasExplicitConfirmation = false);
+    bool HasExplicitConfirmation = false, FrozenPhotoPolicy? FrozenPolicy = null);
 public sealed record DraftEvidenceSample(Guid SampleId, Guid ClientSampleId, int SequenceNo, bool IsRemoved,
     Guid LastOperationId, DraftOperationReceipt? ValueOperation);
 public sealed record DraftEvidenceTransition(Guid SampleId, Guid OperationId, string Kind, string Classification,
@@ -20,6 +20,6 @@ public sealed record DraftEvidenceItem(Guid TaskItemId, Guid? InspectionAttemptI
     UnableToMeasureReceipt? UnableOperation = null, List<SampleEvidenceOutput>? AcceptedBindings = null,
     bool BindingFactsComplete = false);
 public sealed record DraftEvidenceAssessmentOutput(Guid TaskId, Guid LineId, int WorkflowVersion, long DraftVersion,
-    int Page, int PageSize, int TotalItems, List<DraftEvidenceItem> Items, int AssessmentVersion = 2,
+    int Page, int PageSize, int TotalItems, List<DraftEvidenceItem> Items, int AssessmentVersion = 3,
     bool CanExecute = false, bool AcceptsFormalInspection = false,
     string Completeness = "NotEvaluatedForFormalSubmission");

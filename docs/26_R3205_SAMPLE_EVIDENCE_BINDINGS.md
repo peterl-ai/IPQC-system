@@ -172,6 +172,12 @@ F3 deletion/claims, production storage recovery and physical authenticity are de
 
 ## Assessment integration and self-review fix
 
+2026-11-16 scoped follow-up: [explicit confirmed photo policies](27_R3205_CONFIRMED_PHOTO_POLICIES.md)
+adds PQE-only Standard-item confirmation and immutable policy snapshots for new Tasks.
+Existing Tasks/binding receipts remain unchanged. AssessmentVersion3 recognizes those
+genuine frozen policies; NG transition newness/coverage and formal events remain unsupported.
+The original delivery results and Version2 descriptions below remain historical evidence.
+
 AssessmentVersion2 adds bounded accepted binding observations and BindingFactsComplete.
 At most100 active roots per item are observed; overflow is explicit and cannot prove
 complete association. A photo's BindsSampleTransition=true means a real active accepted

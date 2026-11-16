@@ -12,7 +12,7 @@ namespace JaxPower.Ipqc.Api.Tests;
 
 internal static class LineSharedPlanningFixture
 {
-    public static async Task<Guid> Standard(PersonalSessionFixture f, int items = 2)
+    public static async Task<Guid> Standard(PersonalSessionFixture f, int items = 2, bool confirmPolicy = true)
     {
         var id = Guid.NewGuid();
         await f.Edit(db =>
@@ -22,7 +22,9 @@ internal static class LineSharedPlanningFixture
                 InspectionItems = Enumerable.Range(1, items).Select(i => new PatrolStandardItem { Id = Guid.NewGuid(), SequenceNo = i,
                     InspectionItem = $"Synthetic item {i}", InspectionType = "Qualitative", PhotoRequirement = "FutureRawPolicy" }).ToList() });
             return Task.CompletedTask;
-        }); return id;
+        });
+        if (confirmPolicy && await PhotoPolicyFixture.Available(f)) await PhotoPolicyFixture.ConfirmAll(f, id);
+        return id;
     }
     public static SharedPlanInput Input(PersonalSessionFixture f, Guid standard, Guid? line = null, params string[] rounds) => new(null,
         "Synthetic shared plan", standard, line ?? f.Line1, rounds.Length > 0 ? rounds.ToList() : ["Day", "Night"],
@@ -30,13 +32,20 @@ internal static class LineSharedPlanningFixture
     public static async Task<HttpClient> Admin(PersonalSessionFixture f, string name = "admin") => f.Client((await f.Login(name)).AccessToken);
     public static async Task<SharedPlanOutput> Plan(PersonalSessionFixture f, Guid standard, Guid? line = null, params string[] rounds)
     {
+        if (await PhotoPolicyFixture.Available(f)) await PhotoPolicyFixture.ConfirmAll(f, standard);
         var response = await (await Admin(f)).PostAsJsonAsync("/api/line-patrol-plans", Input(f, standard, line, rounds));
         Assert.True(response.IsSuccessStatusCode, await response.Content.ReadAsStringAsync());
         return (await response.Content.ReadFromJsonAsync<SharedPlanOutput>())!;
     }
-    public static async Task<int> Generate(PersonalSessionFixture f)
+    public static async Task<int> Generate(PersonalSessionFixture f, bool historical = false)
     {
         using var scope = f.Factory.Services.CreateScope();
+        if (historical || !await PhotoPolicyFixture.Available(f)) {
+            var sp = scope.ServiceProvider;
+            return await new HistoricalPlanningGenerator(sp.GetRequiredService<IpqcDbContext>(), sp.GetRequiredService<LineSharedPlanningStore>(),
+                sp.GetRequiredService<ConfiguredLineDirectory>(), sp.GetRequiredService<TimeProvider>(),
+                sp.GetRequiredService<Microsoft.Extensions.Configuration.IConfiguration>(), sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<HistoricalPlanningGenerator>>()).GenerateDueAsync();
+        }
         return await scope.ServiceProvider.GetRequiredService<PatrolTaskGenerationService>().GenerateDueAsync();
     }
     public static async Task<List<PatrolTask>> Tasks(PersonalSessionFixture f) => await f.Read(db => db.PatrolTasks.AsNoTracking().Include(x => x.Items).ToListAsync());
