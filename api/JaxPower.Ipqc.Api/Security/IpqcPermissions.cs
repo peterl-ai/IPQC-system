@@ -22,15 +22,17 @@ public static class IpqcPermissions
     public const string DevicesRead = "DeviceRegistry.Read";
     public const string DevicesWrite = "DeviceRegistry.Write";
     public const string ClaimType = "ipqc_permission";
+    public const string PicsRead = "PicRoster.Read";
+    public const string PicsWrite = "PicRoster.Write";
 
     public static readonly string[] All = [StandardsRead, StandardsWrite, PlansRead, PlansWrite, PhotoPoliciesConfirm,
-        TasksReview, TasksExecuteOwn, LinePatrolRead, LinePatrolContributeDraft, RecordsRead, RecordsExport, UsersRead, UsersWrite, LinesRead, LinesWrite, DevicesRead, DevicesWrite];
+        TasksReview, TasksExecuteOwn, LinePatrolRead, LinePatrolContributeDraft, RecordsRead, RecordsExport, UsersRead, UsersWrite, LinesRead, LinesWrite, DevicesRead, DevicesWrite, PicsRead, PicsWrite];
     private static readonly string[] Business = [StandardsRead, StandardsWrite, PlansRead, PlansWrite,
         TasksReview, RecordsRead, RecordsExport];
 
     public static IReadOnlyList<string> ForRole(string role) => role switch
     {
-        "Admin" => [.. Business, UsersRead, UsersWrite, LinesRead, LinesWrite, DevicesRead, DevicesWrite],
+        "Admin" => [.. Business, UsersRead, UsersWrite, LinesRead, LinesWrite, DevicesRead, DevicesWrite, PicsRead, PicsWrite],
         "PQE" => [.. Business, PhotoPoliciesConfirm],
         "IPQA" => [TasksExecuteOwn, LinePatrolRead, LinePatrolContributeDraft, RecordsRead, RecordsExport],
         _ => []

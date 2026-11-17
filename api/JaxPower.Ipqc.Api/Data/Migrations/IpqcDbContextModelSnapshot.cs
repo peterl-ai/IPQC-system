@@ -2055,6 +2055,92 @@ namespace JaxPower.Ipqc.Api.Data.Migrations
                         });
                 });
 
+            modelBuilder.Entity("JaxPower.Ipqc.Api.Domain.PicRosterEntry", b =>
+                {
+                    b.Property<Guid>("PicId")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("PicId");
+
+                    b.ToTable("PicRosterEntries", t =>
+                        {
+                            t.HasCheckConstraint("CK_Pic_Identity", "\"PicId\"<>'00000000-0000-0000-0000-000000000000'");
+                        });
+                });
+
+            modelBuilder.Entity("JaxPower.Ipqc.Api.Domain.PicRosterRevision", b =>
+                {
+                    b.Property<Guid>("PicId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("Revision")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Action")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("ActorPersonalSessionId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("ActorUserId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ActorUsername")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("ContractVersion")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Department")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("EnvironmentId")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("OccurredAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("RequestHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("RequestId")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("PicId", "Revision");
+
+                    b.HasIndex("ActorUserId");
+
+                    b.HasIndex("RequestId")
+                        .IsUnique();
+
+                    b.ToTable("PicRosterRevisions", t =>
+                        {
+                            t.HasCheckConstraint("CK_Pic_Revision", "\"Revision\">0 AND \"ContractVersion\"=1 AND \"RequestId\"<>'00000000-0000-0000-0000-000000000000' AND length(\"RequestHash\")=64 AND length(\"Name\") BETWEEN 1 AND 200 AND length(trim(\"Name\"))>0 AND length(\"Department\") BETWEEN 1 AND 200 AND length(trim(\"Department\"))>0 AND length(\"ActorUsername\") BETWEEN 1 AND 100 AND length(\"EnvironmentId\") BETWEEN 1 AND 200 AND \"ActorPersonalSessionId\"<>'00000000-0000-0000-0000-000000000000' AND \"Action\" IN ('Created','Updated','Activated','Deactivated')");
+                        });
+                });
+
             modelBuilder.Entity("JaxPower.Ipqc.Api.Domain.ProductionLine", b =>
                 {
                     b.Property<Guid>("Id")
@@ -3683,6 +3769,21 @@ namespace JaxPower.Ipqc.Api.Data.Migrations
                         .HasPrincipalKey("Id", "DefinitionId", "StandardItemId", "PolicyVersion")
                         .OnDelete(DeleteBehavior.Restrict)
                         .HasConstraintName("FK_PhotoPolicyState_Confirmation");
+                });
+
+            modelBuilder.Entity("JaxPower.Ipqc.Api.Domain.PicRosterRevision", b =>
+                {
+                    b.HasOne("JaxPower.Ipqc.Api.Domain.ApplicationUser", null)
+                        .WithMany()
+                        .HasForeignKey("ActorUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("JaxPower.Ipqc.Api.Domain.PicRosterEntry", null)
+                        .WithMany()
+                        .HasForeignKey("PicId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("JaxPower.Ipqc.Api.Domain.ProvisioningAuditEvent", b =>

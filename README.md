@@ -74,6 +74,12 @@ the same shared DraftVersion CAS, immutable history and A/B provenance. All thre
 optional bounded text. Reads distinguish absent, explicit null, empty and whitespace;
 legacy headers, frozen Standards and task state are unchanged. Formal Submit stays disabled.
 
+The backend-only [independent PIC roster](docs/30_R3205_PIC_ROSTER.md) provides a global
+Admin-maintained reference roster shared by both lines. PIC identities are independent
+of login accounts; revisions preserve name/department/active history and original
+maintenance actors. Current IPQA task-scoped lookup returns active entries only.
+Per-NG selection, formal submission snapshots and notifications remain deferred.
+
 The scoped [atomic draft attachment references](docs/23_R3206_DRAFT_ATTACHMENT_REFERENCES.md)
 adds explicit Ready-object association/detachment, shared DraftVersion CAS and immutable
 receipts/history. Storage Ready alone accepts no business reference. No formal Submit,
