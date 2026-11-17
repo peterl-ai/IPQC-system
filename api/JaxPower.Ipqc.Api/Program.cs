@@ -26,6 +26,7 @@ builder.Services.AddScoped<WorkContextStore>();
 builder.Services.AddScoped<WorkContextSecurity>();
 builder.Services.AddScoped<WorkContextService>();
 builder.Services.AddScoped<InspectionAttemptService>();
+builder.Services.AddScoped<PicRosterService>();
 builder.Services.AddScoped<SharedDraftService>();
 builder.Services.AddScoped<InspectionAttachmentService>();
 builder.Services.AddSingleton<IProtectedPhotoStore,ProtectedPhotoStore>();
@@ -172,7 +173,7 @@ app.Use(async (context, next) =>
 {
     if (context.Request.Path.StartsWithSegments("/api/auth") || context.Request.Path.StartsWithSegments("/api/line-patrol") ||
         context.Request.Path.StartsWithSegments("/api/line-patrol-plans") || context.Request.Path.StartsWithSegments("/api/admin/work-contexts") ||
-        context.Request.Path.StartsWithSegments("/api/admin/inspection-identities"))
+        context.Request.Path.StartsWithSegments("/api/admin/inspection-identities") || context.Request.Path.StartsWithSegments("/api/admin/pic-roster"))
         context.Response.Headers.CacheControl = "no-store";
     try { await next(context); }
     catch (DraftQuarantineException ex) when (!context.Response.HasStarted)
@@ -233,6 +234,7 @@ app.MapInspectionAttempts();
 app.MapAuth();
 app.MapLinePatrol();
 app.MapUsers();
+app.MapPicRoster();
 app.MapProductionLines();
 app.MapDeviceRegistry();
 app.MapDeviceEnrollment();
