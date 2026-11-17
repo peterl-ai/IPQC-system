@@ -6,6 +6,7 @@ public sealed class BasicInformationPostgresTests
 {
     private static async Task Run(Func<PersonalSessionFixture, Task> test) { await using var f = await PersonalSessionFixture.CreateAsync(true); await test(f); }
     private static async Task Photo(Func<PhotoFixture, Task> test) { await using var p = await PhotoFixture.Create(true); await test(p); }
+    private static async Task PriorPhoto(Func<PhotoFixture, Task> test) { await using var p = await PhotoFixture.Create(true, migration: BasicInformationFixture.Previous); await test(p); }
     [DisposablePostgresFact] public Task Lifecycle() => Run(BasicInformationTests.Lifecycle);
     [DisposablePostgresFact] public Task Value_0() => Run(f => BasicInformationTests.Values(f, "null"));
     [DisposablePostgresFact] public Task Value_1() => Run(f => BasicInformationTests.Values(f, "empty"));
@@ -53,10 +54,10 @@ public sealed class BasicInformationPostgresTests
     [DisposablePostgresFact] public Task SecurityRace_1_3() => Run(f => BasicInformationConcurrencyTests.SecurityRace(f, false, "explicit"));
     [DisposablePostgresFact] public Task LogoutRace_0() => Run(f => BasicInformationConcurrencyTests.LogoutRace(f, true));
     [DisposablePostgresFact] public Task LogoutRace_1() => Run(f => BasicInformationConcurrencyTests.LogoutRace(f, false));
-    [DisposablePostgresFact] public Task Upgrade() => Photo(BasicInformationMigrationTests.Upgrade);
-    [DisposablePostgresFact] public Task MigrationRollback_0() => Photo(p => BasicInformationMigrationTests.MigrationRollback(p, "CREATE TABLE \"TaskHeaderProjections\""));
-    [DisposablePostgresFact] public Task MigrationRollback_1() => Photo(p => BasicInformationMigrationTests.MigrationRollback(p, "CREATE TRIGGER \"TR_header_scope\""));
-    [DisposablePostgresFact] public Task MigrationRollback_2() => Photo(p => BasicInformationMigrationTests.MigrationRollback(p, "INSERT INTO \"__EFMigrationsHistory\""));
+    [DisposablePostgresFact] public Task Upgrade() => PriorPhoto(BasicInformationMigrationTests.Upgrade);
+    [DisposablePostgresFact] public Task MigrationRollback_0() => PriorPhoto(p => BasicInformationMigrationTests.MigrationRollback(p, "CREATE TABLE \"TaskHeaderProjections\""));
+    [DisposablePostgresFact] public Task MigrationRollback_1() => PriorPhoto(p => BasicInformationMigrationTests.MigrationRollback(p, "CREATE TRIGGER \"TR_header_scope\""));
+    [DisposablePostgresFact] public Task MigrationRollback_2() => PriorPhoto(p => BasicInformationMigrationTests.MigrationRollback(p, "INSERT INTO \"__EFMigrationsHistory\""));
     [DisposablePostgresFact] public Task Namespace() => Photo(BasicInformationIdentityTests.Namespace);
     [DisposablePostgresFact] public Task Cas_0_0() => Photo(p => BasicInformationConcurrencyTests.Cas(p, true, "sample"));
     [DisposablePostgresFact] public Task Cas_0_1() => Photo(p => BasicInformationConcurrencyTests.Cas(p, true, "removed"));

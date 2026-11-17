@@ -223,6 +223,19 @@ in-scope production defect was found locally. Test-oracle corrections above and 
 parameter native fault probes prevent false-positive evidence; full final-HEAD CI and
 independent review remain separate gates.
 
+Real-PG CI follow-up (2026-11-17): the first Push PG run was not green:
+run44104279387/job134112285850 reported619PASS/4FAIL/0SKIP. P2 test-coverage defect:
+the four new PG populated-upgrade/DDL-rollback wrappers started at the latest schema,
+so Upgrade did not actually upgrade and three injection points could not run. They now
+explicitly create the previous-migration fixture; the shared preparation asserts the
+exact applied baseline on both providers before populating it. P3 historical test
+compatibility defect: WorkContext's PG old-schema fingerprint did not exclude the two
+new tables and incorrectly ordered them by a nonexistent Id. Exclude exactly those
+new tables from its old-row/column/FK/index comparison; independent header preservation
+and native guard checks remain. These are test fixes, not a production-schema or
+authorization relaxation. The failed run remains evidence; final updated-HEAD CI
+results must be verified separately in the PR delivery.
+
 ## Explicit exclusions
 
 Formal Submit/frozen submission headers/revisions, PQE decisions, reinspection producers,

@@ -29,6 +29,8 @@ public sealed class BasicInformationMigrationTests
     }
     [Fact] public async Task Populated_upgrade_preserves_all_existing_rows_columns_indexes_FKs_and_seeds_no_values() { await using var p = await PhotoFixture.Create(migration: Previous); await Upgrade(p); }
     internal static async Task<BindingSetup> Prior(PhotoFixture p) {
+        // Both providers must really start before the additive migration, never test an already-current schema.
+        Assert.Equal(Previous, await p.F.Read(async db => (await db.Database.GetAppliedMigrationsAsync()).Last()));
         var u = await SampleEvidenceTests.Setup(p); await SampleEvidenceTests.Accept(u, SampleEvidenceTests.Input(u));
         return u;
     }
