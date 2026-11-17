@@ -68,6 +68,12 @@ policy and physical evidence. Individual observations never authorize formal sub
 `canSubmit=false` and `canExecute=false` remain, with explicit unsupported formal,
 transition-newness and all-Removed special-path prerequisites. GET accepts no work.
 
+The scoped [Task Basic Information draft](docs/29_R3205_BASIC_INFORMATION_DRAFT.md)
+accepts explicit per-field Customer, Production and Product MO capture/correction with
+the same shared DraftVersion CAS, immutable history and A/B provenance. All three remain
+optional bounded text. Reads distinguish absent, explicit null, empty and whitespace;
+legacy headers, frozen Standards and task state are unchanged. Formal Submit stays disabled.
+
 The scoped [atomic draft attachment references](docs/23_R3206_DRAFT_ATTACHMENT_REFERENCES.md)
 adds explicit Ready-object association/detachment, shared DraftVersion CAS and immutable
 receipts/history. Storage Ready alone accepts no business reference. No formal Submit,

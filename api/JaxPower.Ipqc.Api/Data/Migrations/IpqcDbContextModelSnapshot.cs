@@ -2650,6 +2650,138 @@ namespace JaxPower.Ipqc.Api.Data.Migrations
                         });
                 });
 
+            modelBuilder.Entity("JaxPower.Ipqc.Api.Domain.TaskHeaderOperation", b =>
+                {
+                    b.Property<Guid>("TaskId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("OperationId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("AcceptedAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("ActorPersonalSessionId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("ActorUserId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("BaseDraftVersion")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<Guid>("BatchId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("CanonicalPayload")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("CanonicalizationVersion")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("ContentHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("ContributorUserId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("DraftVersion")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("EnvironmentId")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Field")
+                        .IsRequired()
+                        .HasMaxLength(24)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("LineId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("OriginLocalEditVersion")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("PredecessorHash")
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("PredecessorOperationId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ReceiptJson")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("SourceWorkContextId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Value")
+                        .HasMaxLength(200)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("WorkflowVersion")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("TaskId", "OperationId");
+
+                    b.HasAlternateKey("TaskId", "OperationId", "Field")
+                        .HasName("AK_Header_ProjectionScope");
+
+                    b.HasAlternateKey("TaskId", "OperationId", "Field", "ContentHash")
+                        .HasName("AK_Header_PredecessorScope");
+
+                    b.HasIndex("ActorUserId");
+
+                    b.HasIndex("ContributorUserId");
+
+                    b.HasIndex("SourceWorkContextId");
+
+                    b.HasIndex("TaskId", "BatchId")
+                        .IsUnique()
+                        .HasDatabaseName("IX_Header_Batch");
+
+                    b.HasIndex("TaskId", "DraftVersion")
+                        .IsUnique()
+                        .HasDatabaseName("IX_Header_Version");
+
+                    b.HasIndex("TaskId", "PredecessorOperationId", "Field", "PredecessorHash").HasDatabaseName("IX_Header_Predecessor");
+
+                    b.ToTable("TaskHeaderOperations", t =>
+                        {
+                            t.HasCheckConstraint("CK_Header_Contract", "\"OperationId\" <> '00000000-0000-0000-0000-000000000000' AND \"WorkflowVersion\"=2 AND \"CanonicalizationVersion\"=1 AND \"BaseDraftVersion\">=0 AND \"OriginLocalEditVersion\">=0 AND \"DraftVersion\">0 AND \"DraftVersion\"=\"BaseDraftVersion\"+1 AND \"Field\" IN ('Customer','Production','ProductMo') AND (\"Value\" IS NULL OR length(\"Value\")<=200) AND length(\"ContentHash\")=64 AND length(\"CanonicalPayload\")>0 AND length(\"ReceiptJson\")>0 AND ((\"Kind\"='CaptureBasicInformationField' AND \"PredecessorOperationId\" IS NULL AND \"PredecessorHash\" IS NULL) OR (\"Kind\"='CorrectBasicInformationField' AND \"PredecessorOperationId\" IS NOT NULL AND \"PredecessorHash\" IS NOT NULL AND length(\"PredecessorHash\")=64))");
+                        });
+                });
+
+            modelBuilder.Entity("JaxPower.Ipqc.Api.Domain.TaskHeaderProjection", b =>
+                {
+                    b.Property<Guid>("TaskId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Field")
+                        .HasMaxLength(24)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("LastOperationId")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("TaskId", "Field");
+
+                    b.HasIndex("TaskId", "LastOperationId", "Field");
+
+                    b.ToTable("TaskHeaderProjections");
+                });
+
             modelBuilder.Entity("JaxPower.Ipqc.Api.Domain.UnableToMeasureOperation", b =>
                 {
                     b.Property<Guid>("TaskId")
@@ -3790,6 +3922,62 @@ namespace JaxPower.Ipqc.Api.Data.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired()
                         .HasConstraintName("FK_SharedSampleProjections_ValueOperation");
+                });
+
+            modelBuilder.Entity("JaxPower.Ipqc.Api.Domain.TaskHeaderOperation", b =>
+                {
+                    b.HasOne("JaxPower.Ipqc.Api.Domain.ApplicationUser", null)
+                        .WithMany()
+                        .HasForeignKey("ActorUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_Header_Actor");
+
+                    b.HasOne("JaxPower.Ipqc.Api.Domain.ApplicationUser", null)
+                        .WithMany()
+                        .HasForeignKey("ContributorUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_Header_Contributor");
+
+                    b.HasOne("JaxPower.Ipqc.Api.Domain.WorkContext", null)
+                        .WithMany()
+                        .HasForeignKey("SourceWorkContextId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_Header_Source");
+
+                    b.HasOne("JaxPower.Ipqc.Api.Domain.SharedDraft", null)
+                        .WithMany()
+                        .HasForeignKey("TaskId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_Header_Draft");
+
+                    b.HasOne("JaxPower.Ipqc.Api.Domain.AcceptedBatchReceipt", null)
+                        .WithMany()
+                        .HasForeignKey("TaskId", "BatchId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_Header_Batch");
+
+                    b.HasOne("JaxPower.Ipqc.Api.Domain.TaskHeaderOperation", null)
+                        .WithMany()
+                        .HasForeignKey("TaskId", "PredecessorOperationId", "Field", "PredecessorHash")
+                        .HasPrincipalKey("TaskId", "OperationId", "Field", "ContentHash")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("FK_Header_Predecessor");
+                });
+
+            modelBuilder.Entity("JaxPower.Ipqc.Api.Domain.TaskHeaderProjection", b =>
+                {
+                    b.HasOne("JaxPower.Ipqc.Api.Domain.TaskHeaderOperation", null)
+                        .WithMany()
+                        .HasForeignKey("TaskId", "LastOperationId", "Field")
+                        .HasPrincipalKey("TaskId", "OperationId", "Field")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_HeaderProjection_Operation");
                 });
 
             modelBuilder.Entity("JaxPower.Ipqc.Api.Domain.UnableToMeasureOperation", b =>

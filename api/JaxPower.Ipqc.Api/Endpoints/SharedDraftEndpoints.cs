@@ -20,6 +20,13 @@ public static class SharedDraftEndpoints
     public static void MapSharedDrafts(this WebApplication app)
     {
         var g=app.MapGroup("/api/line-patrol/tasks/{taskId:guid}");
+        PersonalAccess.RequireCurrent(g.MapPost("/basic-information-batches",async(Guid taskId,BasicInformationBatchInput input,SharedDraftService s,HttpContext h,CancellationToken ct)=>
+            Results.Ok(await s.AcceptBasicInformationAsync(taskId,input,h.User,ct))),true)
+            .RequireAuthorization(IpqcPermissions.LinePatrolContributeDraft).WithMetadata(new SharedDraftMutation());
+        PersonalAccess.RequireCurrent(g.MapGet("/shared-draft/basic-information",async(Guid taskId,int? limit,long? beforeDraftVersion,long? expectedDraftVersion,Guid? expectedTaskLineId,
+            SharedDraftService s,HttpContext h,CancellationToken ct)=>Results.Ok(await s.ReadBasicInformationAsync(taskId,h.User,ct,limit??20,beforeDraftVersion,expectedDraftVersion,expectedTaskLineId))),true);
+        PersonalAccess.RequireCurrent(g.MapGet("/basic-information-operations/{operationId:guid}/receipt",async(Guid taskId,Guid operationId,SharedDraftService s,HttpContext h,CancellationToken ct)=>
+            Results.Ok(await s.BasicInformationReceiptAsync(taskId,operationId,h.User,ct))),true);
         PersonalAccess.RequireCurrent(g.MapGet("/shared-draft",async(Guid taskId,SharedDraftService s,HttpContext h,CancellationToken ct)=>
             Results.Ok(await s.ReadAsync(taskId,h.User,ct))),true);
         PersonalAccess.RequireCurrent(g.MapGet("/photo-policies",async(Guid taskId,SharedDraftService s,HttpContext h,CancellationToken ct)=>
