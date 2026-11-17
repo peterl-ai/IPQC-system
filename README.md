@@ -18,6 +18,15 @@ The R32-02 implementation adds stable personal refresh families, atomic account/
 
 Admin/PQE shared Plans now use actual configured lines, fixed New York Day07/Night19 rounds, revision/overlap controls and server-side ownerless generation. Versioned planning snapshots freeze source facts; all shared task reads remain `canExecute=false`. Legacy personal Plans and R32-01/02 contracts remain. See [implemented contracts, migration safety and verification](docs/17_R3203_SHARED_PLANNING.md). Scheduling is not inspection activation; WorkContext, shared writes/Submit/photos and Android remain deferred. No production rollout is performed.
 
+## R32-05 optional NG PIC draft selection
+
+Current IPQA personal sessions can explicitly accept zero or more global roster PICs
+for a genuine NG TaskItem/current InspectionAttempt. Server-frozen roster snapshots,
+exact predecessors, the shared Task CAS and immutable receipts preserve A/B attribution
+and history. PIC is optional; draft acceptance does not submit an inspection or create
+a formal assignment. See [API, eligibility, migration and validation boundaries](docs/31_R3205_NG_PIC_SELECTIONS.md).
+Shared execution and Submit remain disabled. No client execution UI is included.
+
 ## Product direction
 
 The first R32-04 backend foundation adds task-scoped WorkContext source proofs,
