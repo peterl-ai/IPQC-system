@@ -14,7 +14,7 @@ public sealed class PhotoPolicyMigrationTests
     [Theory][InlineData(false)][InlineData(true)] public void Native_models_and_additive_four_table_contract(bool postgres) {
         var o = new DbContextOptionsBuilder<IpqcDbContext>(); if (postgres) o.UseNpgsql("Host=localhost;Database=model_only;Username=unused"); else o.UseSqlite("Data Source=:memory:");
         using var db = new IpqcDbContext(o.Options); Assert.False(db.Database.HasPendingModelChanges());
-        var sql = db.GetService<IMigrator>().GenerateScript(PhotoPolicyFixture.Previous);
+        var sql = db.GetService<IMigrator>().GenerateScript(PhotoPolicyFixture.Previous, "20261116145540_R3205ConfirmedPhotoPolicies");
         Assert.Equal(4, System.Text.RegularExpressions.Regex.Matches(sql, "CREATE TABLE ").Count); Assert.DoesNotContain("ALTER TABLE", sql); Assert.DoesNotContain("DROP TABLE", sql);
         foreach (var t in new[] { "PhotoPolicyDefinitions", "PhotoPolicyConfirmations", "PhotoPolicyStates", "FrozenTaskPhotoPolicies" }) Assert.Contains("CREATE TABLE \"" + t + "\"", sql);
         Assert.Contains("TR_policy_confirmation_scope", sql); Assert.Contains("TR_policy_frozen_scope", sql); Assert.Contains("ON DELETE RESTRICT", sql);
