@@ -196,3 +196,67 @@ decision remains authoritative. Formal submitted PIC eligibility/freeze, future 
 reinspection producers, new-attempt creation/carry-forward, disposition after NG changes,
 notifications and execution UI remain deferred. No deployment/production migration or
 automatic merge/next PR is authorized by this implementation.
+
+## 2026-11-18 CAS admission correction and separate historical risk
+
+Independent review identified a P2 test-design defect in the existing five-domain
+`SampleEvidenceConcurrencyTests.Every_draft_domain_contends_on_the_same_CAS`:
+starting losers after pausing a writer did not prove their database-backed JWT and
+current-family admission had completed. A pre-endpoint availability failure is not
+a business CAS conflict. No production retry, timeout, isolation, authorization,
+error mapping, schema or migration is changed by this correction.
+
+`AdmittedCasRace`, `AdmittedCasTestCase` and `CasAdmissionTests` are test-only.
+A per-cohort endpoint wrapper preserves the original route metadata and delegate;
+real JWT, role and current-family middleware still run before the wrapper. All five
+requests must arrive there before any writer is released. The winner is paused in
+its actual transaction; all four losers are then released together. SQLite observes
+each loser's native `BEGIN IMMEDIATE` entry before releasing the winner, without
+replacing the provider's busy handler. PostgreSQL requires a real lock-manager path
+from each loser's backend PID to the holder. This is concurrent contention, not five
+sequential writes. See the provider's [nondeferred transaction implementation](https://github.com/dotnet/efcore/blob/v10.0.0/src/Microsoft.Data.Sqlite.Core/SqliteTransaction.cs)
+and [endpoint-matched diagnostic boundary](https://github.com/dotnet/aspnetcore/blob/v10.0.0/src/Http/Routing/src/EndpointRoutingMiddleware.cs).
+
+Every variant requires one200/four409, exact business codes, five real transactions,
+one commit and one new version/receipt/audit/operation identity, with only the winning
+domain appending a row. Zero-row CAS SQL is distinguished from valid pre-CAS
+`DraftItemRemoved`, `BindingItemNotApplicable`, `BindingPhotoDetached` or
+`UnableEvidenceDetached` rejection. Original common/typed receipts must recover
+exactly; same-ID replay cannot alter accepted state.
+
+The delayed-family-read regression holds the fifth real admission read and requires
+zero business transactions/version changes until admission completes. A controlled
+old winner-first schedule failed this assertion before the new controller was
+restored; the experimental legacy switch is not shipped. Separate authorization
+cases verify anonymous, wrong-role, missing-family, proof-as-token and revoked-family
+callers cannot enter the wrapper. The real SQLite exclusive-lock case requires503
+`PersonalAccessTemporarilyUnavailable` before endpoint admission, no accepted facts,
+then receipt lookup, original-ID acceptance and immutable replay after lock release.
+This proven uncommitted case does not generalize to arbitrary lost responses.
+
+Failure diagnostics include domain, response/status/code, observed transaction/CAS
+stages and actual persisted state. An exception observer returns false to preserve
+the existing500 mapping and records correlated server stacks/inner chains with known
+credentials redacted. Its deliberate EF-wrapped exception control verifies capture
+and full rollback; that synthetic500 is not a naturally recurring historical failure.
+Disposable PostgreSQL wrappers run the five variants and delayed-admission/authority
+regressions through the existing real PostgreSQL17 CI job. Final-source Windows,
+targeted regression, Release/Web and exact-HEAD Push/PR results belong in the PR
+description; opt-in PostgreSQL skips are never counted as executed PostgreSQL tests.
+
+Historical evidence is retained: the original sample-first Windows failure did not
+preserve both non409 statuses; the related Round1 removed-first trace
+`0HNQ4T7TVDUH5` returned500 without a surviving internal exception stack. Round2
+proved a separate JWT-stage SQLite-lock503 path, not the historical503's precise
+stage and not the500's cause. The earlier instrumented Windows full run completed
+1155 PASS/743 SKIP/0 FAIL (1898 total); it is historical diagnostic evidence, not the
+new final-source gate. Original logs, JSON/TRX files and SHA256 manifests remain.
+
+The historical intermittent HTTP500 remains **root cause unknown**. If it does not
+recur in the revised gates, classify it as not reproduced, not fixed or PASS. The
+bounded disposition proposed for independent review is to retain the known trace
+and evidence, complete the specified provider/Windows gates once on final source,
+and stop for review. Any natural recurrence requires the actual captured exception
+to be investigated; green reruns must not erase it. Peter alone may accept or reject
+this explicitly separate residual risk. PR31 remains Draft; neither this correction
+nor passing tests authorizes merge, deployment, production migration or another PR.

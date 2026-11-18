@@ -50,32 +50,7 @@ public sealed class SampleEvidenceConcurrencyTests
         Assert.Equal(1, await f.Read(db => db.ContributionOperations.CountAsync())); Assert.Equal(1, await f.Read(db => db.DraftAttachmentOperations.CountAsync()));
     }
     [Theory][InlineData("binding")][InlineData("sample")][InlineData("removed")][InlineData("photo")][InlineData("unable")]
-    public async Task Every_draft_domain_contends_on_the_same_CAS(string first) { await using var p = await PhotoFixture.Create(); await Cas(p, first); }
-    internal static async Task Cas(PhotoFixture p, string first) {
-        var u = await SampleEvidenceTests.Setup(p); var s = u.S; var f = p.F;
-        Task<HttpResponseMessage> Write(string kind) => kind switch {
-            "binding" => s.Client().PostAsJsonAsync(SampleEvidenceTests.Url(s), SampleEvidenceTests.Input(u)),
-            "sample" => s.Client().PostAsJsonAsync(s.Root + "/operation-batches", s.Batch(s.Capture(version: 2), 2)),
-            "removed" => s.Client().PostAsJsonAsync(ItemRemovalTests.Url(s), ItemRemovalTests.Input(s, 2)),
-            "photo" => s.Client().PostAsJsonAsync(DraftAttachmentTests.Url(s), DraftAttachmentTests.Input(s, u.Photo, 2, previous: u.Reference, kind: "DetachAttachment")),
-            _ => s.Client().PostAsJsonAsync(UnableToMeasureTests.Url(s), UnableToMeasureTests.Input(new(s, u.Photo, u.Reference), 2)) };
-        var holder = 0; var waiter = new TaskCompletionSource<int>(TaskCreationOptions.RunContinuationsAsynchronously);
-        f.Fault.ObserveAsync = (c, _) => {
-            if (c.Connection is NpgsqlConnection n) {
-                if (c.CommandText.Contains("UPDATE \"SharedDrafts\"", StringComparison.Ordinal)) Interlocked.CompareExchange(ref holder, n.ProcessID, 0);
-                else if (holder != 0 && n.ProcessID != holder && c.CommandText.Contains("FOR ", StringComparison.Ordinal)) waiter.TrySetResult(n.ProcessID);
-            } return Task.CompletedTask;
-        };
-        f.Fault.Arm("UPDATE \"SharedDrafts\""); var winning = Write(first); var others = new List<Task<HttpResponseMessage>>();
-        try {
-            await f.Fault.Entered.Task.WaitAsync(TimeSpan.FromSeconds(15));
-            foreach (var k in new[] { "binding", "sample", "removed", "photo", "unable" }.Where(x => x != first)) others.Add(Write(k));
-            await Blocked(f, holder, waiter.Task);
-        } finally { f.Fault.Release.TrySetResult(); }
-        var results = await Task.WhenAll(others.Prepend(winning)); Assert.Single(results, x => x.StatusCode == HttpStatusCode.OK); Assert.Equal(4, results.Count(x => x.StatusCode == HttpStatusCode.Conflict));
-        Assert.Equal(3, await DraftEvidenceAssessmentTests.Version(s)); Assert.Equal(3, await f.Read(db => db.AcceptedBatchReceipts.CountAsync())); Assert.Equal(3, await f.Read(db => db.SharedAcceptanceAudits.CountAsync()));
-        Assert.Equal(3, await f.Read(db => db.AcceptedOperationIdentities.CountAsync()));
-    }
+    public Task Every_draft_domain_contends_on_the_same_CAS(string first) => AdmittedCasTestCase.Run(false, first);
     [Theory][InlineData(true, "sample")][InlineData(false, "sample")][InlineData(true, "detach")][InlineData(false, "detach")]
     public async Task Later_sample_or_reference_write_cannot_silently_retarget_binding(bool first, string change) { await using var p = await PhotoFixture.Create(); await LaterWrite(p, first, change); }
     internal static async Task LaterWrite(PhotoFixture p, bool bindingFirst, string change) {

@@ -29,7 +29,7 @@ internal sealed class PhotoFixture : IAsyncDisposable
     public required PersonalSessionFixture F;
     public required string DirectoryPath;
     public required PhotoFault Fault;
-    public static async Task<PhotoFixture> Create(bool postgres=false,string? migration=null,string? environment=PersonalSessionFixture.Environment)
+    public static async Task<PhotoFixture> Create(bool postgres=false,string? migration=null,string? environment=PersonalSessionFixture.Environment,Action<IServiceCollection>? configure=null)
     {
         var path=Path.Combine(Path.GetTempPath(),"ipqc-photo-test-"+Guid.NewGuid().ToString("N"));Directory.CreateDirectory(path);
         if(OperatingSystem.IsLinux()) File.SetUnixFileMode(path,UnixFileMode.UserRead|UnixFileMode.UserWrite|UnixFileMode.UserExecute);
@@ -40,8 +40,10 @@ internal sealed class PhotoFixture : IAsyncDisposable
             System.IO.FileSystemAclExtensions.SetAccessControl(new DirectoryInfo(path),acl);
         }
         PhotoFault? fault=null;
-        var f=await PersonalSessionFixture.CreateAsync(postgres,environment:environment,migration:migration,configure:services=>
-            services.AddSingleton<IProtectedPhotoStore>(sp=>fault=new PhotoFault {Inner=new ProtectedPhotoStore(sp.GetRequiredService<IConfiguration>(),sp.GetRequiredService<Microsoft.AspNetCore.Hosting.IWebHostEnvironment>())}));
+        var f=await PersonalSessionFixture.CreateAsync(postgres,environment:environment,migration:migration,configure:services=> {
+            services.AddSingleton<IProtectedPhotoStore>(sp=>fault=new PhotoFault {Inner=new ProtectedPhotoStore(sp.GetRequiredService<IConfiguration>(),sp.GetRequiredService<Microsoft.AspNetCore.Hosting.IWebHostEnvironment>())});
+            configure?.Invoke(services);
+        });
         f.Factory.Services.GetRequiredService<IConfiguration>()["InspectionPhotos:Root"]=path;
         _=f.Factory.Services.GetRequiredService<IProtectedPhotoStore>();
         return new(){F=f,DirectoryPath=path,Fault=fault!};
