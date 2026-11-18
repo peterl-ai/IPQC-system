@@ -21,6 +21,7 @@ namespace JaxPower.Ipqc.Api.Tests;
 internal sealed class AdmittedCasRace : IObserver<DiagnosticListener>, IObserver<KeyValuePair<string, object?>>, IExceptionHandler, IDisposable
 {
     internal static readonly string[] Domains = ["binding", "sample", "removed", "photo", "unable"];
+    private readonly IReadOnlyCollection<string> domains;
     private const string Matched = "Microsoft.AspNetCore.Routing.EndpointMatched";
     private readonly IDisposable listeners;
     private readonly ConcurrentBag<IDisposable> subscriptions = [];
@@ -40,6 +41,7 @@ internal sealed class AdmittedCasRace : IObserver<DiagnosticListener>, IObserver
     internal bool DelayBindingAdmission { get; set; }
     internal Guid Actor { get; set; }
     internal Guid Family { get; set; }
+    internal IReadOnlyDictionary<string, (Guid UserId, Guid SessionId)>? AuthorityByDomain { get; set; }
     internal string[] Secrets { get; set; } = [];
     internal int AdmittedCount => admitted.Count;
     internal int Transactions => transactions.Values.Sum();
@@ -51,8 +53,9 @@ internal sealed class AdmittedCasRace : IObserver<DiagnosticListener>, IObserver
     internal Task FourAdmitted => four.Task;
     internal Task AdmissionReadHeld => held.Task;
     private static TaskCompletionSource Signal() => new(TaskCreationOptions.RunContinuationsAsynchronously);
-    internal AdmittedCasRace() {
-        foreach (var d in Domains) { release[d] = Signal(); writerStarted[d] = Signal(); locking[d] = new(TaskCreationOptions.RunContinuationsAsynchronously); }
+    internal AdmittedCasRace(IReadOnlyCollection<string>? domains = null) {
+        this.domains = domains ?? Domains;
+        foreach (var d in this.domains) { release[d] = Signal(); writerStarted[d] = Signal(); locking[d] = new(TaskCreationOptions.RunContinuationsAsynchronously); }
         listeners = DiagnosticListener.AllListeners.Subscribe(this);
     }
     internal void Configure(IServiceCollection services) {
@@ -60,7 +63,7 @@ internal sealed class AdmittedCasRace : IObserver<DiagnosticListener>, IObserver
         services.AddSingleton<IInterceptor>(sp => { accessor = sp.GetRequiredService<IHttpContextAccessor>(); return new Commands(this); });
         services.AddSingleton<IInterceptor>(new Connections(this)); services.AddSingleton<IInterceptor>(new TransactionsObserver(this));
     }
-    private string? Domain(HttpContext? h) => h?.Request.Headers["X-IPQC-Cas-Race"].ToString() == Id.ToString() && Domains.Contains(h.Request.Headers["X-IPQC-Cas-Domain"].ToString(), StringComparer.Ordinal)
+    private string? Domain(HttpContext? h) => h?.Request.Headers["X-IPQC-Cas-Race"].ToString() == Id.ToString() && domains.Contains(h.Request.Headers["X-IPQC-Cas-Domain"].ToString(), StringComparer.Ordinal)
         ? h.Request.Headers["X-IPQC-Cas-Domain"].ToString() : null;
     private string? CurrentDomain => Domain(accessor?.HttpContext);
     internal void Note(string stage, object? detail = null, string? domain = null) => events.Enqueue(new {
@@ -86,9 +89,10 @@ internal sealed class AdmittedCasRace : IObserver<DiagnosticListener>, IObserver
         h.SetEndpoint(new RouteEndpoint(async context => {
             Assert.True(context.User.Identity?.IsAuthenticated == true, "CAS gate must follow JWT authentication");
             var authority = Assert.IsType<PersonalAuthority>(context.Items[typeof(PersonalAuthority)]);
-            Assert.Equal(Actor, authority.UserId); Assert.Equal(Family, authority.PersonalSessionId);
+            var expected = AuthorityByDomain is { } authors ? authors[d] : (UserId: Actor, SessionId: Family);
+            Assert.Equal(expected.UserId, authority.UserId); Assert.Equal(expected.SessionId, authority.PersonalSessionId);
             Assert.True(admitted.TryAdd(d, 0), "Duplicate domain in one CAS cohort"); Note("Admitted", new { HttpTrace = context.TraceIdentifier }, d);
-            if (admitted.Count >= 4) four.TrySetResult(); if (admitted.Count == Domains.Length) all.TrySetResult();
+            if (admitted.Count >= 4) four.TrySetResult(); if (admitted.Count == domains.Count) all.TrySetResult();
             if (!ObserveOnly) await release[d].Task.WaitAsync(TimeSpan.FromSeconds(20), context.RequestAborted);
             await original.RequestDelegate(context);
         }, original.RoutePattern, original.Order, original.Metadata, original.DisplayName));
@@ -96,7 +100,7 @@ internal sealed class AdmittedCasRace : IObserver<DiagnosticListener>, IObserver
     public void OnCompleted() { }
     public void OnError(Exception error) { }
     internal void Release(string d) { Note("Release", domain: d); release[d].TrySetResult(); }
-    internal void ReleaseAll() { foreach (var d in Domains) release[d].TrySetResult(); holdRelease.TrySetResult(); }
+    internal void ReleaseAll() { foreach (var d in domains) release[d].TrySetResult(); holdRelease.TrySetResult(); }
     internal Task WriterStarted(string domain) => writerStarted[domain].Task;
     internal Task<int> LockingPid(string domain) => locking[domain].Task;
     internal void ReleaseAdmissionRead() => holdRelease.TrySetResult();
