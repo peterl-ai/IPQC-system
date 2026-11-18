@@ -146,10 +146,11 @@ internal sealed class PersonalSessionFixture : IAsyncDisposable
                 services.RemoveAll<AuthenticationClock>(); services.AddSingleton(new AuthenticationClock(clock));
                 services.RemoveAll<TimeProvider>(); services.AddSingleton<TimeProvider>(clock);
                 services.RemoveAll<PersonalAccessOptions>(); services.AddSingleton(options);
-                services.AddDbContext<IpqcDbContext>(o =>
+                services.AddDbContext<IpqcDbContext>((sp, o) =>
                 {
                     if (postgres) o.UseNpgsql(connection); else o.UseSqlite(connection);
                     o.AddInterceptors(fault, commitFault);
+                    o.AddInterceptors(sp.GetServices<IInterceptor>());
                 });
                 configure?.Invoke(services);
             });

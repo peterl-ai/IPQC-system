@@ -1135,6 +1135,187 @@ namespace JaxPower.Ipqc.Api.Data.Migrations
                         });
                 });
 
+            modelBuilder.Entity("JaxPower.Ipqc.Api.Domain.NgPicSelectionMember", b =>
+                {
+                    b.Property<Guid>("TaskId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("OperationId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("PicId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Department")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("RosterRevision")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("TaskId", "OperationId", "PicId");
+
+                    b.HasIndex("PicId", "RosterRevision");
+
+                    b.ToTable("NgPicSelectionMembers", t =>
+                        {
+                            t.HasCheckConstraint("CK_NgPicMember_Snapshot", "\"RosterRevision\">0 AND length(\"Name\") BETWEEN 1 AND 200 AND length(\"Department\") BETWEEN 1 AND 200");
+                        });
+                });
+
+            modelBuilder.Entity("JaxPower.Ipqc.Api.Domain.NgPicSelectionOperation", b =>
+                {
+                    b.Property<Guid>("TaskId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("OperationId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("AcceptedAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("ActorPersonalSessionId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("ActorUserId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("BaseDraftVersion")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<Guid>("BatchId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("CanonicalPayload")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("CanonicalizationVersion")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("ContentHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("ContributorUserId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("DraftVersion")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("EnvironmentId")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("InspectionAttemptId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("LineId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("NgBasisJson")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("NgKind")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("OriginLocalEditVersion")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("PicCount")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("PredecessorHash")
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("PredecessorOperationId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ReceiptJson")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("SourceWorkContextId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("TaskItemId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("WorkflowVersion")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("TaskId", "OperationId");
+
+                    b.HasAlternateKey("TaskId", "OperationId", "TaskItemId", "InspectionAttemptId")
+                        .HasName("AK_NgPic_Projection");
+
+                    b.HasAlternateKey("TaskId", "OperationId", "TaskItemId", "InspectionAttemptId", "ContentHash")
+                        .HasName("AK_NgPic_Predecessor");
+
+                    b.HasIndex("ActorUserId");
+
+                    b.HasIndex("ContributorUserId");
+
+                    b.HasIndex("SourceWorkContextId");
+
+                    b.HasIndex("InspectionAttemptId", "TaskItemId");
+
+                    b.HasIndex("TaskId", "BatchId")
+                        .IsUnique()
+                        .HasDatabaseName("IX_NgPic_Batch");
+
+                    b.HasIndex("TaskId", "DraftVersion")
+                        .IsUnique()
+                        .HasDatabaseName("IX_NgPic_Version");
+
+                    b.HasIndex("TaskId", "PredecessorOperationId", "TaskItemId", "InspectionAttemptId", "PredecessorHash")
+                        .HasDatabaseName("IX_NgPic_Predecessor");
+
+                    b.ToTable("NgPicSelectionOperations", t =>
+                        {
+                            t.HasCheckConstraint("CK_NgPic_Operation", "\"OperationId\"<>'00000000-0000-0000-0000-000000000000' AND \"WorkflowVersion\"=2 AND \"CanonicalizationVersion\"=1 AND \"BaseDraftVersion\">=0 AND \"OriginLocalEditVersion\">=0 AND \"DraftVersion\">0 AND \"DraftVersion\"=\"BaseDraftVersion\"+1 AND \"PicCount\" BETWEEN 0 AND 100 AND \"NgKind\" IN ('OrdinaryNG','UnableToMeasureNG') AND length(\"NgBasisJson\")>0 AND length(\"ContentHash\")=64 AND length(\"CanonicalPayload\")>0 AND length(\"ReceiptJson\")>0 AND ((\"Kind\"='SelectNgPics' AND \"PredecessorOperationId\" IS NULL AND \"PredecessorHash\" IS NULL) OR (\"Kind\"='CorrectNgPics' AND \"PredecessorOperationId\" IS NOT NULL AND \"PredecessorHash\" IS NOT NULL AND length(\"PredecessorHash\")=64))");
+                        });
+                });
+
+            modelBuilder.Entity("JaxPower.Ipqc.Api.Domain.NgPicSelectionProjection", b =>
+                {
+                    b.Property<Guid>("TaskId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("TaskItemId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("InspectionAttemptId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("LastOperationId")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("TaskId", "TaskItemId", "InspectionAttemptId");
+
+                    b.HasIndex("TaskId", "LastOperationId", "TaskItemId", "InspectionAttemptId")
+                        .HasDatabaseName("IX_NgPicProjection_Last");
+
+                    b.ToTable("NgPicSelectionProjections");
+                });
+
             modelBuilder.Entity("JaxPower.Ipqc.Api.Domain.PatrolPlan", b =>
                 {
                     b.Property<Guid>("Id")
@@ -3586,6 +3767,87 @@ namespace JaxPower.Ipqc.Api.Data.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired()
                         .HasConstraintName("FK_ItemRemovals_Batch");
+                });
+
+            modelBuilder.Entity("JaxPower.Ipqc.Api.Domain.NgPicSelectionMember", b =>
+                {
+                    b.HasOne("JaxPower.Ipqc.Api.Domain.PicRosterRevision", null)
+                        .WithMany()
+                        .HasForeignKey("PicId", "RosterRevision")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_NgPicMember_Roster");
+
+                    b.HasOne("JaxPower.Ipqc.Api.Domain.NgPicSelectionOperation", null)
+                        .WithMany()
+                        .HasForeignKey("TaskId", "OperationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_NgPicMember_Operation");
+                });
+
+            modelBuilder.Entity("JaxPower.Ipqc.Api.Domain.NgPicSelectionOperation", b =>
+                {
+                    b.HasOne("JaxPower.Ipqc.Api.Domain.ApplicationUser", null)
+                        .WithMany()
+                        .HasForeignKey("ActorUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_NgPic_Actor");
+
+                    b.HasOne("JaxPower.Ipqc.Api.Domain.ApplicationUser", null)
+                        .WithMany()
+                        .HasForeignKey("ContributorUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_NgPic_Contributor");
+
+                    b.HasOne("JaxPower.Ipqc.Api.Domain.WorkContext", null)
+                        .WithMany()
+                        .HasForeignKey("SourceWorkContextId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_NgPic_Source");
+
+                    b.HasOne("JaxPower.Ipqc.Api.Domain.SharedDraft", null)
+                        .WithMany()
+                        .HasForeignKey("TaskId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_NgPic_Draft");
+
+                    b.HasOne("JaxPower.Ipqc.Api.Domain.InspectionAttempt", null)
+                        .WithMany()
+                        .HasForeignKey("InspectionAttemptId", "TaskItemId")
+                        .HasPrincipalKey("Id", "PatrolTaskItemId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_NgPic_Attempt");
+
+                    b.HasOne("JaxPower.Ipqc.Api.Domain.AcceptedBatchReceipt", null)
+                        .WithMany()
+                        .HasForeignKey("TaskId", "BatchId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_NgPic_Batch");
+
+                    b.HasOne("JaxPower.Ipqc.Api.Domain.NgPicSelectionOperation", null)
+                        .WithMany()
+                        .HasForeignKey("TaskId", "PredecessorOperationId", "TaskItemId", "InspectionAttemptId", "PredecessorHash")
+                        .HasPrincipalKey("TaskId", "OperationId", "TaskItemId", "InspectionAttemptId", "ContentHash")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("FK_NgPic_Predecessor");
+                });
+
+            modelBuilder.Entity("JaxPower.Ipqc.Api.Domain.NgPicSelectionProjection", b =>
+                {
+                    b.HasOne("JaxPower.Ipqc.Api.Domain.NgPicSelectionOperation", null)
+                        .WithMany()
+                        .HasForeignKey("TaskId", "LastOperationId", "TaskItemId", "InspectionAttemptId")
+                        .HasPrincipalKey("TaskId", "OperationId", "TaskItemId", "InspectionAttemptId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_NgPicProjection_Operation");
                 });
 
             modelBuilder.Entity("JaxPower.Ipqc.Api.Domain.PatrolPlan", b =>

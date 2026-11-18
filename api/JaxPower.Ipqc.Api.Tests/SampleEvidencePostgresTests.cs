@@ -59,11 +59,13 @@ public sealed class SampleEvidencePostgresTests
     [DisposablePostgresFact] public Task Security_false_reset() => Run(p => SampleEvidenceConcurrencyTests.Security(p, false, "reset"));
     [DisposablePostgresFact] public Task Security_false_role() => Run(p => SampleEvidenceConcurrencyTests.Security(p, false, "role"));
     [DisposablePostgresFact] public Task Security_false_deactivate() => Run(p => SampleEvidenceConcurrencyTests.Security(p, false, "deactivate"));
-    [DisposablePostgresFact] public Task Cas_binding() => Run(p => SampleEvidenceConcurrencyTests.Cas(p, "binding"));
-    [DisposablePostgresFact] public Task Cas_sample() => Run(p => SampleEvidenceConcurrencyTests.Cas(p, "sample"));
-    [DisposablePostgresFact] public Task Cas_removed() => Run(p => SampleEvidenceConcurrencyTests.Cas(p, "removed"));
-    [DisposablePostgresFact] public Task Cas_photo() => Run(p => SampleEvidenceConcurrencyTests.Cas(p, "photo"));
-    [DisposablePostgresFact] public Task Cas_unable() => Run(p => SampleEvidenceConcurrencyTests.Cas(p, "unable"));
+    [DisposablePostgresFact] public Task Cas_binding() => AdmittedCasTestCase.Run(true, "binding");
+    [DisposablePostgresFact] public Task Cas_sample() => AdmittedCasTestCase.Run(true, "sample");
+    [DisposablePostgresFact] public Task Cas_removed() => AdmittedCasTestCase.Run(true, "removed");
+    [DisposablePostgresFact] public Task Cas_photo() => AdmittedCasTestCase.Run(true, "photo");
+    [DisposablePostgresFact] public Task Cas_unable() => AdmittedCasTestCase.Run(true, "unable");
+    [DisposablePostgresFact] public Task DelayedAdmission() => AdmittedCasTestCase.Run(true, "sample", true);
+    [DisposablePostgresFact] public Task AdmissionAuthority() => CasAdmissionTests.Authority(true);
     [DisposablePostgresFact] public Task LaterWrite_true_sample() => Run(p => SampleEvidenceConcurrencyTests.LaterWrite(p, true, "sample"));
     [DisposablePostgresFact] public Task LaterWrite_true_detach() => Run(p => SampleEvidenceConcurrencyTests.LaterWrite(p, true, "detach"));
     [DisposablePostgresFact] public Task LaterWrite_false_sample() => Run(p => SampleEvidenceConcurrencyTests.LaterWrite(p, false, "sample"));
