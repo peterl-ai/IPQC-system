@@ -1,7 +1,20 @@
 import { describe, expect, it } from 'vitest'
-import { defaultRouteForRole, hasPermission, rolePermissions } from './permissions'
+import { canReadPicRoster, canWritePicRoster, defaultRouteForRole, hasPermission, rolePermissions } from './permissions'
 
 describe('role permission mapping', () => {
+  it('requires granular PIC permissions in addition to current Admin authority', () => {
+    const admin = { id: '1', username: 'test', displayName: 'Admin', role: 'Admin' as const, isActive: true, mustChangePassword: false, permissions: ['PicRoster.Read'] }
+    expect(hasPermission('admin', 'pic-roster:view')).toBe(false)
+    expect(hasPermission(admin.permissions, 'pic-roster:view')).toBe(true)
+    expect(canReadPicRoster(admin)).toBe(true)
+    expect(canWritePicRoster(admin)).toBe(false)
+    expect(canWritePicRoster({ ...admin, permissions: ['PicRoster.Read', 'PicRoster.Write'] })).toBe(true)
+    expect(canWritePicRoster({ ...admin, permissions: ['PicRoster.Write'] })).toBe(false)
+    expect(canReadPicRoster({ ...admin, role: 'PQE' })).toBe(false)
+    expect(canReadPicRoster({ ...admin, isActive: false })).toBe(false)
+    expect(canReadPicRoster({ ...admin, mustChangePassword: true })).toBe(false)
+  })
+
   it('keeps provisioning outside PQE and IPQA business permissions', () => {
     expect(hasPermission('admin', 'provisioning:view')).toBe(true)
     expect(hasPermission('pqe', 'provisioning:view')).toBe(false)

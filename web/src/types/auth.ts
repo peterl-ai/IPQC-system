@@ -8,3 +8,4 @@ export type Permission =
   | 'records:view'
   | 'users:view'
   | 'provisioning:view'
+  | 'pic-roster:view'

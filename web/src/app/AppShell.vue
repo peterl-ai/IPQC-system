@@ -14,7 +14,7 @@
     <a-layout>
       <a-layout-header class="app-header">
         <div class="header-context">
-          <span class="header-kicker">{{ t('nav.linePatrol') }}</span>
+          <span class="header-kicker">{{ t(route.name === 'pic-roster' ? 'nav.system' : 'nav.linePatrol') }}</span>
           <strong>{{ currentTitle }}</strong>
         </div>
         <div class="header-actions">
@@ -50,7 +50,7 @@ import {
 } from '@ant-design/icons-vue'
 import type { ItemType, MenuProps } from 'ant-design-vue'
 import { saveLocale, type SupportedLocale } from '@/i18n'
-import { hasPermission } from '@/services/permissions'
+import { canReadPicRoster, hasPermission } from '@/services/permissions'
 import { authSession } from '@/services/authSession'
 
 const { t, locale } = useI18n()
@@ -74,11 +74,12 @@ const menuItems = computed<ItemType[]>(() => {
   const systemChildren: ItemType[] = []
   if (hasPermission(permissions, 'users:view')) systemChildren.push({ key: '/users', icon: icon(TeamOutlined), label: t('nav.users') })
   if (hasPermission(permissions, 'provisioning:view')) systemChildren.push({ key: '/provisioning', icon: icon(SettingOutlined), label: t('provisioning.title') })
+  if (canReadPicRoster(authSession.user.value)) systemChildren.push({ key: '/pic-roster', icon: icon(TeamOutlined), label: t('picRoster.title') })
   if (systemChildren.length) items.push({ key: 'system', icon: icon(SettingOutlined), label: t('nav.system'), children: systemChildren })
   return items
 })
 
-const titleKeys: Record<string, string> = { '/home': 'nav.home', '/standards': 'nav.standards', '/plans': 'nav.plans', '/tasks': 'nav.tasks', '/records': 'nav.records', '/users': 'nav.users', '/provisioning': 'provisioning.title' }
+const titleKeys: Record<string, string> = { '/home': 'nav.home', '/standards': 'nav.standards', '/plans': 'nav.plans', '/tasks': 'nav.tasks', '/records': 'nav.records', '/users': 'nav.users', '/provisioning': 'provisioning.title', '/pic-roster': 'picRoster.title' }
 const currentTitle = computed(() => t(titleKeys[route.path] ?? 'product.name'))
 const initials = computed(() => (authSession.user.value?.displayName ?? '').split(' ').map((part) => part[0]).join(''))
 

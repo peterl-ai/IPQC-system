@@ -14,6 +14,7 @@ interface AuthResponse { accessToken: string; accessExpiresAtUtc: string; user: 
 const user = ref<CurrentUser | null>(null)
 const accessToken = ref<string | null>(null)
 const initialized = ref(false)
+const signingOut = ref(false)
 let restorePromise: Promise<void> | null = null
 let refreshPromise: Promise<boolean> | null = null
 
@@ -33,8 +34,9 @@ async function refresh(): Promise<boolean> {
       })
       if (!response.ok) throw new Error('Refresh failed')
       const data = await response.json() as AuthResponse
+      const current = await me(data.accessToken)
       accessToken.value = data.accessToken
-      user.value = await me(data.accessToken)
+      user.value = current
       return true
     } catch {
       accessToken.value = null
@@ -49,6 +51,7 @@ export const authSession = {
   user,
   accessToken,
   initialized,
+  signingOut,
   authenticated: computed(() => user.value !== null),
   async restore() {
     if (initialized.value) return
@@ -63,8 +66,9 @@ export const authSession = {
     })
     if (!response.ok) throw new Error('Invalid username or password.')
     const data = await response.json() as AuthResponse
+    const current = await me(data.accessToken)
     accessToken.value = data.accessToken
-    user.value = await me(data.accessToken)
+    user.value = current
     initialized.value = true
   },
   async changePassword(currentPassword: string, newPassword: string) {
@@ -77,6 +81,7 @@ export const authSession = {
     user.value = null
   },
   async logout() {
+    signingOut.value = true
     try {
       const send = () => fetch('/api/auth/logout', {
         method: 'POST', headers: { Authorization: `Bearer ${accessToken.value}`, 'Content-Type': 'application/json' },
@@ -85,7 +90,7 @@ export const authSession = {
       if (!accessToken.value && !await refresh()) return
       const response = await send()
       if (response.status === 401 && await refresh()) await send()
-    } finally { accessToken.value = null; user.value = null; initialized.value = true }
+    } finally { accessToken.value = null; user.value = null; initialized.value = true; signingOut.value = false }
   },
   clear() { accessToken.value = null; user.value = null; initialized.value = true },
 }

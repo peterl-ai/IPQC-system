@@ -8,13 +8,14 @@ import CompletedRecordsPage from '@/features/completed-records/CompletedRecordsP
 import DeviceProvisioningPage from '@/features/device-provisioning/DeviceProvisioningPage.vue'
 import UserManagementPage from '@/features/user-management/UserManagementPage.vue'
 import StatusPage from '@/features/system/StatusPage.vue'
-import { defaultRouteForRole, hasPermission } from '@/services/permissions'
+import { canReadPicRoster, defaultRouteForRole, hasPermission } from '@/services/permissions'
 import { authSession } from '@/services/authSession'
 import LoginPage from '@/features/auth/LoginPage.vue'
 import ChangePasswordPage from '@/features/auth/ChangePasswordPage.vue'
 import type { Permission } from '@/types/auth'
 
 export function routeIsAuthorized(route: Pick<RouteLocationNormalized, 'meta'>): boolean {
+  if (route.meta.permission === 'pic-roster:view') return canReadPicRoster(authSession.user.value)
   return hasPermission(authSession.user.value?.permissions ?? [], route.meta.permission as Permission | undefined)
 }
 
@@ -35,6 +36,7 @@ export const router = createRouter({
         { path: 'records', name: 'records', component: CompletedRecordsPage, meta: { permission: 'records:view' } },
         { path: 'provisioning', name: 'provisioning', component: DeviceProvisioningPage, meta: { permission: 'provisioning:view' } },
         { path: 'users', name: 'users', component: UserManagementPage, meta: { permission: 'users:view' } },
+        { path: 'pic-roster', name: 'pic-roster', component: () => import('@/features/pic-roster/PicRosterPage.vue'), meta: { permission: 'pic-roster:view' } },
         { path: 'forbidden', name: 'forbidden', component: StatusPage, meta: { status: 'permission' } },
         { path: ':pathMatch(.*)*', name: 'not-found', component: StatusPage, meta: { status: 'notFound' } },
       ],
