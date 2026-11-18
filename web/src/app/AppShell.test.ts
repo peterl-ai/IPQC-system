@@ -11,7 +11,7 @@ afterEach(() => { app?.unmount(); host?.remove() })
 describe('System Management menu', () => {
   it('shows provisioning only with its server permission and removes it when permissions change', async () => {
     host = document.createElement('div'); document.body.append(host)
-    authSession.user.value = { id: 'admin', username: 'admin', displayName: 'Admin', role: 'Admin', isActive: true, mustChangePassword: false, permissions: ['Users.Read', 'DeviceRegistry.Read'] }
+    authSession.user.value = { id: 'admin', username: 'admin', displayName: 'Admin', role: 'Admin', isActive: true, mustChangePassword: false, permissions: ['Users.Read', 'DeviceRegistry.Read', 'PicRoster.Read'] }
     const router = createRouter({ history: createMemoryHistory(), routes: [{ path: '/', component: { render: () => null } }] })
     app = createApp(AppShell); app.use(router); app.use(createI18n({ legacy: false, locale: 'en', messages: { en } }))
     const passthrough = defineComponent({ setup(_, { slots }) { return () => h('div', slots.default?.()) } })
@@ -19,7 +19,11 @@ describe('System Management menu', () => {
     app.component('AMenu', defineComponent({ props: { items: { type: Array, default: () => [] } }, setup(p) { return () => h('nav', JSON.stringify(p.items)) } }))
     await router.isReady(); app.mount(host); await nextTick()
     expect(host.querySelector('nav')?.textContent).toContain('/provisioning'); expect(host.querySelector('nav')?.textContent).toContain('/users')
-    authSession.user.value = { ...authSession.user.value, role: 'PQE', permissions: ['PatrolStandards.Read'] }; await nextTick()
+    expect(host.querySelector('nav')?.textContent).toContain('/pic-roster')
+    authSession.user.value = { ...authSession.user.value, permissions: ['Users.Read', 'DeviceRegistry.Read'] }; await nextTick()
+    expect(host.querySelector('nav')?.textContent).not.toContain('/pic-roster')
+    authSession.user.value = { ...authSession.user.value, role: 'PQE', permissions: ['PatrolStandards.Read', 'PicRoster.Read'] }; await nextTick()
+    expect(host.querySelector('nav')?.textContent).not.toContain('/pic-roster')
     expect(host.querySelector('nav')?.textContent).not.toContain('/provisioning'); expect(host.querySelector('nav')?.textContent).not.toContain('/users')
   })
 })

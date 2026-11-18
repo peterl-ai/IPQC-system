@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { RouteLocationNormalized } from 'vue-router'
-import { routeIsAuthorized } from './index'
+import { router, routeIsAuthorized } from './index'
 import { authSession } from '@/services/authSession'
 
 function routeWith(permission: RouteLocationNormalized['meta']['permission']) {
@@ -8,6 +8,21 @@ function routeWith(permission: RouteLocationNormalized['meta']['permission']) {
 }
 
 describe('route authorization helper', () => {
+  it('guards direct PIC roster navigation for Admin, PQE and IPQA', async () => {
+    const admin = { id: '1', username: 'admin', displayName: 'Admin', role: 'Admin' as const, isActive: true, mustChangePassword: false, permissions: ['PicRoster.Read'] }
+    authSession.initialized.value = true
+    authSession.user.value = admin
+    await router.push('/pic-roster')
+    expect(router.currentRoute.value.name).toBe('pic-roster')
+    for (const user of [{ ...admin, permissions: [] }, { ...admin, role: 'PQE' as const }, { ...admin, role: 'IPQA' as const }]) {
+      authSession.user.value = user
+      await router.push('/forbidden')
+      await router.push('/pic-roster')
+      expect(router.currentRoute.value.name).toBe('forbidden')
+      expect(router.currentRoute.value.query.from).toBe('/pic-roster')
+    }
+  })
+
   it('requires the provisioning permission even when navigating directly', () => {
     authSession.user.value = { id: '1', username: 'pqe', displayName: 'PQE', role: 'PQE', isActive: true, mustChangePassword: false, permissions: ['PatrolTasks.Review'] }
     expect(routeIsAuthorized(routeWith('provisioning:view'))).toBe(false)
