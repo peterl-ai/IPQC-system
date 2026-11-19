@@ -1,0 +1,59 @@
+# Android V1 A02 protected offline read foundation
+
+A02 extends the English-only Patrol app with downloaded line directories, task pages and frozen definitions. A verified IPQA operator can view those cached records and switch among that session's cached lines while offline. The app labels cached status, shows the server's validation timestamp for each task and shows the offline receipt's verification time, age and deadline.
+
+## Verified baseline
+
+PR #35 merged at `6f99143f27042575133a7cb3dd82d703363b6f8e` with reviewed head `c6bfb3f69492d3a0214093debb85adad5b54cbd7`. Its merged-main Push run completed before implementation. Each actual job log checked out the merge commit. Android passed 25 JVM tests, lint and both debug APK assemblies, then uploaded both APKs. Backend passed 1,186 tests with 766 opt-in PostgreSQL skips and zero failures. PostgreSQL 17.12 passed 766 tests with zero skips and failures. Web passed 166 tests in 23 files, lint, typecheck and production build. Both Release builds reported zero warnings and errors. [PR #35](https://github.com/peterl-ai/IPQC-system/pull/35) · [Merged-main CI](https://github.com/peterl-ai/IPQC-system/actions/runs/44613746903)
+
+## Receipt and time policy
+
+The authenticated HTTPS `POST /api/line-patrol/access/verify` response supplies the version 1 receipt. The app checks `UserId`, `PersonalSessionId` and `EnvironmentId` against current online authority and confirms that the deadline is the earlier of `VerifiedAtUtc + 72 hours` and the absolute personal-session expiry. The local store keeps the server fields verbatim alongside the configured origin and the last active operator. The receipt supplies only local read authorization. Online reads still use the current bearer and the server's current authorization checks.
+
+Peter approved Option 1 for A02 under [Rev3.2 §5.2](architecture/IPQC_ANDROID_ARCHITECTURE_V1_REV3_2_2026-11-10.md). The last active eligible user can resume ordinary read-only access after a normal reboot. The app records Android's boot count, device UTC and `SystemClock.elapsedRealtime()` before requesting verification. It binds that observation to the server's `VerifiedAtUtc` and accounts conservatively for the time taken by the verification request. Within one boot, monotonic elapsed time includes sleep. The app compares wall and monotonic progress with a two-second allowance for small clock corrections and sampling differences. A wall clock earlier than the last saved observation, an unexplained monotonic reset, boot count regression or progress outside the allowance locks offline access.
+
+After a reboot, the app advances the last server-time estimate using device UTC progress since the last saved observation. It checks that the UTC interval can account for the new boot's uptime within the sampling allowance and advances by at least that uptime. It then anchors subsequent same-boot checks to that estimate. The app requires online verification at equality with the server deadline, on detectable time inconsistencies, or when it cannot reconcile the protected anchors and identity. The app checks expiry before and after reading cached data and while the offline screen is visible. It conceals offline content when the Activity stops and checks again on return. A successful current server verification can still allow live browsing when the tablet cannot establish a valid local clock anchor. In that case offline admission stays locked. [Android monotonic clock](https://developer.android.com/reference/android/os/SystemClock) · [Android boot count](https://developer.android.com/reference/android/provider/Settings.Global#BOOT_COUNT)
+
+A process restart, reboot, failed request, failed token refresh or line switch cannot renew the deadline. Only a newer authenticated server verification can supply a new receipt, within the same family's absolute expiry. A duplicate or late verification reply preserves the saved anchor. Peter accepted the residual limitation that ordinary Android APIs cannot independently establish elapsed wall time across reboot while completely offline. A UTC change that leaves plausibly consistent anchors may affect the expiry decision. Detectable rollback and inconsistencies still lock access.
+
+## Protected persistence
+
+| Location under the app's no-backup directory | Format and scope | Protection |
+| --- | --- | --- |
+| `personal-session.v1` | Existing A01 refresh vault | Existing `ipqc.personal-session.v1` Keystore key |
+| `offline-admission.v1` | Version 1 singleton active receipt, server origin, operator, identity and clock anchors | AtomicFile, AES-256-GCM, separate `ipqc.offline-admission.v1` Keystore key |
+| `patrol-task-cache.db` and SQLite sidecars | Room v1, exported schema, opaque `cache_chunk(slot, part, ciphertext)` rows | Authenticated AES-256-GCM payloads sealed before Room, independent `ipqc.shared-task-cache.v1` Keystore key |
+
+All keys are generated independently. The shared-work key lifecycle is separate from the account, its credentials and its personal session. The Room workspace has a random installation UUID stored in its own authenticated record. The UUID organizes storage. The server remains authoritative for identity, line and workflow.
+
+The content envelope and opaque slot bind a version, installation workspace, HTTPS origin, environment, user, personal session and entry kind. Pages also bind the authoritative line, workflow and page number. Frozen detail binds the authoritative line, task ID and workflow. Each payload records the device UTC download time and preserves server validation timestamps, status, revision, snapshot markers and source item identities where those fields occur in the response. AES-GCM authenticates the slot and format. Only slot identifiers, chunk order, lengths and ciphertext reach SQLite and its journals. A transaction replaces all chunks for one fully validated response. Authentication or schema errors lock access and retain the underlying records. Unsupported Room versions require an explicit migration. A missing key in a populated store fails closed.
+
+App-private storage and ordinary Android Keystore protect against other apps and ordinary file disclosure or corruption. Android excludes the data from app backup and device transfer. The production Activity sets `FLAG_SECURE` to protect screen capture and recents. The app avoids logging or placing protected content in navigation arguments or a saved instance bundle. The model assumes the app and the unlocked Android OS are trusted. Rooted or compromised devices and undetected whole-state rollback are outside the protection offered by ordinary platform encryption.
+
+## Session and browsing behavior
+
+- Online sign-in, refresh, verification, line directory and task APIs reuse A01 and the existing backend contracts. Only a fully validated live response can update a snapshot. Failed HTTP, malformed and wrong-scope responses preserve the previous accepted cache. A verified read may fail closed if protected local storage is unavailable.
+- A first login or account switch requires online authentication. Offline startup offers only the last verified active session. Selecting a line never moves its task records or falls back to the other line. A line without a downloaded page shows an explicit empty cached state.
+- A detail screen requires both the selected summary in its downloaded page and an actual frozen detail with matching task, line, workflow, revision and planning snapshot markers. The list cannot be used to synthesize an inspection definition.
+- The client clears visible cached content before online revalidation. An unreachable server can fall back to the eligible offline receipt. Where reusable credentials are unavailable, the app can open the same eligible cache locally. Definitive HTTP 401/403 or a rejected verification can revoke local eligibility. The app requires successful current online authorization before returning to live browsing.
+- Sign-out clears local admission and the reusable personal credential and stops protected display immediately. If online credentials are available, A01 attempts remote revocation after local clear and reports whether the server confirmed it. The work key and original facts remain in the archive. A different user or a newly issued family cannot read the previous session's cache. Future reconciliation can use the retained facts through a separately authorized coordinator.
+
+## Verification
+
+Windows used JDK 17, Gradle 8.13, SDK 36 and build-tools 35.0.0. Room 2.8.5 and its compiler and Gradle plugin are pinned. The app and instrumentation APKs report `minSdk 30` and `targetSdk 36`. The generated debug `SERVER_URL` was empty. [Room release notes](https://developer.android.com/jetpack/androidx/releases/room)
+
+```powershell
+.\gradlew.bat --console=plain --max-workers=1 --no-watch-fs --offline '-PIPQC_SERVER_URL=' :app:testDebugUnitTest :app:lintDebug :app:assembleDebug :app:assembleDebugAndroidTest
+adb -s <emulator-serial> shell am instrument -w -r --no-window-animation com.jaxpower.ipqc.patrol.test/androidx.test.runner.AndroidJUnitRunner
+git diff --check
+```
+
+- Android JVM tests passed **44/44**, including all 25 A01 tests. New tests cover exact expiry boundaries, absolute family expiry, clock anomalies, persisted progress, identity isolation, failed and successful cache updates, offline navigation, logout and reconnect authority.
+- Debug lint and both debug APK assemblies passed. Windows lint reported zero errors and 17 advisory warnings, including version suggestions and the KAPT advisory. An initial Windows dex transform cache move failed in the shared Gradle home. The isolated A02 Gradle home completed both assemblies.
+- The same app and instrumentation APKs passed **13/13** on the API 30 emulator and **13/13** on the API 35 emulator. Both instrumentation commands returned exit 0 with a successful runner result. They exercise real Android Keystore, AtomicFile, Room and Compose. They read Android's boot-count API and inject deterministic boot and clock observations for the offline policy cases. The suites verify encrypted storage and journals, key deletion and separation, wrong-slot rejection, multi-chunk assembly, transaction rollback, schema rejection, Activity recreation and disabled execution controls.
+- The initial API 35 suite timed out in the Activity recreation case. The revised test drains the previous session monitor before injecting the next boot's clock and reports which Activity state failed to arrive. Both final full suites passed. Samsung SM-T500 and SM-X210 physical UAT was not run.
+- The unchanged CI workflow executes the 44-test Android JVM suite, lint and both APK assemblies, plus the existing Backend Release restore/build/test, real PostgreSQL 17 test filter and Web lint/test/typecheck/build gates. Exact Push and Pull Request run links, job logs and artifact evidence are delivered with the pinned independent review packet.
+
+## Execution boundary and deferred work
+
+`canExecute=false`, `canSubmit=false` and `acceptsFormalInspection=false` remain the effective limits. A02 provides no paths for inspection entry, sample or NG edits, PIC selection, Save Draft, photo capture or upload, WorkContext issuance, sync, outbox processing, Formal Submit, PQE actions or reinspection. Material Verification remains the inert home entry. A03 draft and outbox work, physical Samsung UAT and plant HTTPS acceptance are separate phases.

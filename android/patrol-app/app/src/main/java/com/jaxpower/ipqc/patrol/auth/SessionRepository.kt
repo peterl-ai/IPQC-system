@@ -4,6 +4,7 @@ import com.jaxpower.ipqc.patrol.api.Issue
 import com.jaxpower.ipqc.patrol.api.NativeAuth
 import com.jaxpower.ipqc.patrol.api.NativeLogin
 import com.jaxpower.ipqc.patrol.api.NativeRefresh
+import com.jaxpower.ipqc.patrol.api.OfflineAccessReceipt
 import com.jaxpower.ipqc.patrol.api.PasswordChange
 import com.jaxpower.ipqc.patrol.api.PatrolApi
 import com.jaxpower.ipqc.patrol.api.PatrolFailure
@@ -12,6 +13,9 @@ import com.jaxpower.ipqc.patrol.api.responseBody
 import com.jaxpower.ipqc.patrol.api.responseNoContent
 import com.jaxpower.ipqc.patrol.api.utc
 import com.jaxpower.ipqc.patrol.api.validGuid
+import com.jaxpower.ipqc.patrol.offline.ClockProgress
+import com.jaxpower.ipqc.patrol.offline.ClockSample
+import com.jaxpower.ipqc.patrol.offline.OfflineCache
 import java.time.Clock
 import java.time.Instant
 import java.time.temporal.ChronoUnit
@@ -22,7 +26,9 @@ import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.Serializable
 
+@Serializable
 data class SessionIdentity(val userId: String, val familyId: String, val environment: String)
 data class Operator(val displayName: String, val mustChangePassword: Boolean)
 
@@ -31,6 +37,7 @@ class SessionRepository(
     private val vault: CredentialVault,
     private val origin: String,
     private val clock: Clock = Clock.systemUTC(),
+    private val offline: OfflineCache? = null,
 ) {
     private val mutex = Mutex()
     private val generation = AtomicLong()
@@ -62,7 +69,7 @@ class SessionRepository(
             } ?: return@withLock null
             if (saved.origin != origin || !validGuid(saved.userId) || !validGuid(saved.familyId) ||
                 saved.environment.isBlank() || !validToken(saved.refreshToken)) {
-                storage { vault.clear() }
+                endSession()
                 throw PatrolFailure(Issue.REAUTHENTICATE)
             }
             val expiry = try {
@@ -79,7 +86,7 @@ class SessionRepository(
         val stamp = generation.incrementAndGet()
         return mutex.withLock {
             checkGeneration(stamp)
-            discard()
+            endSession()
             val auth = try {
                 responseBody { api.login(NativeLogin(username, password, "Native")) }
             } catch (e: PatrolFailure) {
@@ -116,7 +123,7 @@ class SessionRepository(
         val prior = withContext(NonCancellable) {
             mutex.withLock {
                 checkGeneration(stamp)
-                active.also { discard() }
+                active.also { endSession() }
             }
         } ?: return false
         if (!attemptRemote) return false
@@ -128,43 +135,68 @@ class SessionRepository(
         }
     }
 
-    suspend fun verifyOnline(): Operator = read { bearer, identity ->
-        val auth = currentSnapshot(identity)
-        validateReceipt(responseBody { api.verify(bearer) }, auth)
-        auth.operator
-    }
+    suspend fun verifyOnline(): Operator = authenticatedRead(
+        accepted = { auth, verified -> acceptVerification(auth, verified) },
+        request = { auth ->
+            try {
+                verify(auth)
+            } catch (e: PatrolFailure) {
+                if (e.issue == Issue.RESPONSE || e.issue == Issue.CONFIGURATION) invalidate(auth)
+                throw e
+            }
+        },
+    ).operator
 
-    suspend fun <T> read(request: suspend (String, SessionIdentity) -> T): T {
+    suspend fun <T> read(
+        accepted: suspend (SessionIdentity, T) -> Unit = { _, _ -> },
+        request: suspend (String, SessionIdentity) -> T,
+    ): T = authenticatedRead(
+        accepted = { auth, result -> accepted(auth.identity, result) },
+        request = { auth -> request(auth.bearer, auth.identity) },
+    )
+
+    private suspend fun <T> authenticatedRead(
+        accepted: suspend (Credentials, T) -> Unit,
+        request: suspend (Credentials) -> T,
+    ): T {
         val first = authorize()
         try {
-            return admittedRead(first, request)
+            return admittedRead(first, accepted, request)
         } catch (e: PatrolFailure) {
             if (e.issue == Issue.FORBIDDEN) invalidate(first)
             if (e.issue != Issue.UNAUTHENTICATED || generation.get() != first.generation) throw e
+            mutex.withLock {
+                if (active === first && generation.get() == first.generation) offline?.revoke()
+            }
         }
         val renewed = authorize(first)
         return try {
-            admittedRead(renewed, request)
+            admittedRead(renewed, accepted, request)
         } catch (e: PatrolFailure) {
             if (e.issue == Issue.UNAUTHENTICATED || e.issue == Issue.FORBIDDEN) invalidate(renewed)
             throw e
         }
     }
 
-    private suspend fun <T> admittedRead(auth: Credentials, request: suspend (String, SessionIdentity) -> T): T {
+    private suspend fun <T> admittedRead(
+        auth: Credentials,
+        accepted: suspend (Credentials, T) -> Unit,
+        request: suspend (Credentials) -> T,
+    ): T {
         checkGeneration(auth.generation)
-        val result = request(auth.bearer, auth.identity)
-        checkGeneration(auth.generation)
-        currentSnapshot(auth.identity)
-        return result
-    }
-
-    private suspend fun currentSnapshot(identity: SessionIdentity): Credentials = mutex.withLock {
-        current().also { if (it.identity != identity) throw PatrolFailure(Issue.UNAUTHENTICATED) }
+        val result = request(auth)
+        return mutex.withLock {
+            val current = current()
+            if (current.identity != auth.identity || current.generation != auth.generation)
+                throw PatrolFailure(Issue.UNAUTHENTICATED)
+            accepted(current, result)
+            checkGeneration(auth.generation)
+            result
+        }
     }
 
     private suspend fun invalidate(rejected: Credentials) = mutex.withLock {
-        if (active === rejected && generation.get() == rejected.generation) discard()
+        if (active === rejected && generation.get() == rejected.generation) endSession()
     }
 
     private fun current(): Credentials {
@@ -188,7 +220,10 @@ class SessionRepository(
         // death cannot cause the same potentially rotated token to be sent again.
         discard()
         checkGeneration(stamp)
-        if (!expiry.isAfter(clock.instant())) throw PatrolFailure(Issue.UNAUTHENTICATED)
+        if (!expiry.isAfter(clock.instant())) {
+            offline?.revoke()
+            throw PatrolFailure(Issue.UNAUTHENTICATED)
+        }
         val next = try {
             val received = responseBody { api.refresh(NativeRefresh(saved.refreshToken)) }
             credentials(received, stamp).also {
@@ -197,8 +232,9 @@ class SessionRepository(
                 verifyAndPersist(it)
             }
         } catch (e: PatrolFailure) {
-            throw if (e.issue in setOf(Issue.UNAUTHENTICATED, Issue.FORBIDDEN, Issue.STORAGE)) e
-                else PatrolFailure(Issue.REAUTHENTICATE)
+            if (!e.canUseOffline && e.issue != Issue.RATE_LIMITED) offline?.revoke()
+            throw if (e.issue in setOf(Issue.UNAUTHENTICATED, Issue.FORBIDDEN, Issue.STORAGE, Issue.CACHE_STORAGE, Issue.OFFLINE_CLOCK)) e
+                else PatrolFailure(Issue.REAUTHENTICATE, canUseOffline = e.canUseOffline)
         }
         checkGeneration(stamp)
         active = next
@@ -225,14 +261,54 @@ class SessionRepository(
             SessionIdentity(auth.user.id, family, environment), auth.accessToken, requireNotNull(refresh), accessExpiry, familyExpiry)
     }
 
-    private suspend fun verifyAndPersist(auth: Credentials) {
-        checkGeneration(auth.generation)
-        auth.familyExpiry = validateReceipt(responseBody { api.verify(auth.bearer) }, auth)
-        checkGeneration(auth.generation)
-        storage { vault.replace(stored(auth)) }
+    private data class Verification(val receipt: OfflineAccessReceipt, val anchor: ClockSample?, val operator: Operator)
+
+    private suspend fun verify(auth: Credentials): Verification {
+        val anchor = try {
+            offline?.sample()
+        } catch (e: PatrolFailure) {
+            if (e.issue != Issue.OFFLINE_CLOCK) throw e
+            null
+        }
+        val receipt = responseBody { api.verify(auth.bearer) }
+        return Verification(receipt, anchor, auth.operator)
     }
 
-    private fun validateReceipt(receipt: com.jaxpower.ipqc.patrol.api.OfflineAccessReceipt, auth: Credentials): Instant {
+    private suspend fun acceptVerification(auth: Credentials, verification: Verification) {
+        try {
+            auth.familyExpiry = validateReceipt(verification.receipt, auth)
+            val anchor = verification.anchor
+            if (anchor == null) {
+                offline?.revoke()
+            } else {
+                try {
+                    offline?.accept(auth.identity, auth.operator, verification.receipt, anchor)
+                } catch (e: PatrolFailure) {
+                    if (e.issue != Issue.OFFLINE_CLOCK && e.issue != Issue.OFFLINE_EXPIRED) throw e
+                    // A valid current server check still permits live browsing.
+                    offline?.revoke()
+                }
+            }
+        } catch (failure: PatrolFailure) {
+            endSession()
+            throw failure
+        }
+    }
+
+    private suspend fun verifyAndPersist(auth: Credentials) {
+        checkGeneration(auth.generation)
+        val verification = verify(auth)
+        checkGeneration(auth.generation)
+        acceptVerification(auth, verification)
+        try {
+            storage { vault.replace(stored(auth)) }
+        } catch (e: PatrolFailure) {
+            endSession()
+            throw e
+        }
+    }
+
+    private fun validateReceipt(receipt: OfflineAccessReceipt, auth: Credentials): Instant {
         val verified = utc(receipt.verifiedAtUtc)
         val deadline = utc(receipt.offlineAccessUntilUtc)
         val expiry = utc(receipt.personalSessionExpiresAtUtc)
@@ -240,7 +316,7 @@ class SessionRepository(
             SessionIdentity(receipt.userId, receipt.personalSessionId, receipt.environmentId) == auth.identity &&
             // The login response can carry .NET ticks before PostgreSQL stores microseconds.
             (expiry == auth.familyExpiry || expiry == auth.familyExpiry.truncatedTo(ChronoUnit.MICROS)) &&
-            verified.isBefore(expiry) && deadline == minOf(verified.plusSeconds(72 * 3600L), expiry))
+            verified.isBefore(expiry) && deadline == minOf(verified.plusSeconds(ClockProgress.WINDOW_SECONDS), expiry))
         return expiry
     }
 
@@ -249,6 +325,15 @@ class SessionRepository(
 
     private fun checkGeneration(expected: Long) {
         if (generation.get() != expected) throw PatrolFailure(Issue.UNAUTHENTICATED)
+    }
+
+    private suspend fun endSession() {
+        active = null
+        try {
+            offline?.revoke()
+        } finally {
+            storage { vault.clear() }
+        }
     }
 
     private suspend fun discard() {

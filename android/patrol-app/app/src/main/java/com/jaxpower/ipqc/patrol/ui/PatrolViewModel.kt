@@ -10,8 +10,12 @@ import com.jaxpower.ipqc.patrol.api.PatrolFailure
 import com.jaxpower.ipqc.patrol.api.ProductionLine
 import com.jaxpower.ipqc.patrol.auth.Operator
 import com.jaxpower.ipqc.patrol.auth.SessionRepository
+import com.jaxpower.ipqc.patrol.offline.OfflineCache
+import com.jaxpower.ipqc.patrol.offline.OfflineSession
 import com.jaxpower.ipqc.patrol.tasks.PatrolRepository
+import java.time.Duration
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -41,31 +45,43 @@ data class PatrolUi(
     val busy: Boolean = false,
     val issue: Issue? = null,
     val message: String? = null,
+    val offline: OfflineSession? = null,
 )
 
 class PatrolViewModel(
     private val sessions: SessionRepository?,
     private val patrol: PatrolRepository?,
     connectivity: Flow<Boolean>,
+    private val cache: OfflineCache? = null,
 ) : ViewModel() {
     private val mutableUi = MutableStateFlow(PatrolUi(configured = sessions != null, issue = if (sessions == null) Issue.CONFIGURATION else null))
     val ui = mutableUi.asStateFlow()
     private var pending: Job? = null
     private var epoch = 0
     private var signingOut = false
+    private var networkKnown = false
+    private var foreground = true
+    private var recheck: Job? = null
 
     init {
         viewModelScope.launch {
             var first = true
             connectivity.distinctUntilChanged().collect { online ->
                 mutableUi.value = ui.value.copy(online = online)
-                if (sessions != null && !online && !signingOut) {
-                    interrupt()
-                    show(Screen.Login, issue = Issue.OFFLINE)
-                } else if (first && online && sessions != null) {
-                    resume()
-                } else if (online && ui.value.issue == Issue.OFFLINE) {
-                    show(Screen.Login)
+                networkKnown = true
+                if (sessions != null && !signingOut) {
+                    if (!foreground) {
+                        if (cache != null) {
+                            interrupt()
+                            show(Screen.Login)
+                        }
+                    } else if (!online) {
+                        enterOffline()
+                    } else if (first || cache != null) {
+                        reconnect()
+                    } else if (ui.value.issue == Issue.OFFLINE) {
+                        show(Screen.Login)
+                    }
                 }
                 first = false
             }
@@ -75,7 +91,9 @@ class PatrolViewModel(
     fun resume() {
         if (ui.value.screen != Screen.Login) return
         val service = sessions ?: return
-        run(Screen.Login) { routeFor(service.restore()) }
+        run(Screen.Login, allowOfflineFallback = true) {
+            routeFor(service.restore())
+        }
     }
 
     fun login(username: String, password: String) {
@@ -157,48 +175,144 @@ class PatrolViewModel(
     fun logout() {
         if (signingOut || (ui.value.screen == Screen.Login && ui.value.busy)) return
         val service = sessions ?: return
+        val remote = ui.value.online && ui.value.offline == null
         interrupt()
         signingOut = true
         show(Screen.Login, busy = true)
         pending = viewModelScope.launch {
             try {
-                val confirmed = service.logout(attemptRemote = ui.value.online)
+                val confirmed = service.logout(attemptRemote = remote)
                 show(Screen.Login, message = if (confirmed) "Signed out."
                     else "Signed out on this tablet. Server revocation could not be confirmed.")
             } catch (failure: PatrolFailure) {
-                show(Screen.Login, issue = failure.issue, message = "Patrol access has ended on this tablet. Server revocation could not be confirmed.")
+                show(Screen.Login, issue = failure.issue, message = "Sign-out could not be confirmed. Try clearing saved sign-in again.")
             } finally {
                 signingOut = false
             }
         }
     }
 
-    private fun loadLines(operator: Operator) = run(Screen.Lines(operator, Load.Loading)) {
-        Screen.Lines(operator, Load.Data(requireNotNull(patrol).lines()))
+    internal fun returnToForeground() {
+        if (foreground) return
+        foreground = true
+        if (!networkKnown || sessions == null || signingOut || cache == null || ui.value.screen != Screen.Login) return
+        if (ui.value.online) reconnect() else enterOffline()
     }
 
-    private fun loadTasks(operator: Operator, line: ProductionLine, page: Int) =
-        run(Screen.Tasks(operator, line, page, Load.Loading)) {
-            Screen.Tasks(operator, line, page, Load.Data(requireNotNull(patrol).tasks(line, page)))
+    internal fun leaveForeground() {
+        foreground = false
+        if (cache != null && !signingOut && (ui.value.offline != null || !ui.value.online)) {
+            interrupt()
+            show(Screen.Login)
         }
-
-    private fun loadDetail(screen: Screen.Detail) = run(screen) {
-        screen.copy(load = Load.Data(requireNotNull(patrol).detail(screen.line, screen.task)))
     }
 
-    private fun run(screen: Screen, message: String? = null, action: suspend () -> Screen) {
-        if (ui.value.busy || signingOut || !ui.value.online || !ui.value.configured) return
+    fun reconnect() {
+        if (!ui.value.online || !foreground || signingOut) return
+        interrupt()
+        show(Screen.Login)
+        resume()
+    }
+
+    private fun enterOffline(fallback: Issue? = Issue.OFFLINE) {
+        interrupt()
+        val service = cache
+        if (service == null || !foreground) {
+            show(Screen.Login, issue = fallback)
+            return
+        }
+        val stamp = epoch
+        show(Screen.Login, busy = true, issue = fallback)
+        pending = viewModelScope.launch {
+            try {
+                val grant = service.resume()
+                if (stamp != epoch) return@launch
+                if (grant == null) {
+                    show(Screen.Login, issue = fallback)
+                } else {
+                    mutableUi.value = ui.value.copy(screen = Screen.Home(grant.operator), busy = false,
+                        issue = null, message = null, offline = grant)
+                    monitorOffline(service)
+                }
+            } catch (failure: PatrolFailure) {
+                if (stamp == epoch) show(Screen.Login, issue = failure.issue)
+            }
+        }
+    }
+
+    private fun monitorOffline(service: OfflineCache) {
+        recheck = viewModelScope.launch {
+            while (true) {
+                val current = ui.value.offline ?: return@launch
+                val remaining = Duration.between(current.apparentNow, current.expiresAt)
+                delay(remaining.toMillis().coerceIn(1, 1_000))
+                try {
+                    val observed = service.resume(current.identity) ?: throw PatrolFailure(Issue.OFFLINE)
+                    if (ui.value.offline?.identity == current.identity)
+                        mutableUi.value = ui.value.copy(offline = observed)
+                } catch (failure: PatrolFailure) {
+                    if (ui.value.offline?.identity == current.identity) {
+                        interrupt()
+                        show(Screen.Login, issue = failure.issue)
+                    }
+                    return@launch
+                }
+            }
+        }
+    }
+
+    private fun loadLines(operator: Operator) {
+        val local = ui.value.offline
+        run(Screen.Lines(operator, Load.Loading), readCache = true, allowOfflineFallback = true) {
+            val lines = if (local != null) requireNotNull(cache).lines(local.identity) else requireNotNull(patrol).lines()
+            Screen.Lines(operator, Load.Data(lines))
+        }
+    }
+
+    private fun loadTasks(operator: Operator, line: ProductionLine, page: Int) {
+        val local = ui.value.offline
+        run(Screen.Tasks(operator, line, page, Load.Loading), readCache = true, allowOfflineFallback = true) {
+            val tasks = if (local != null) requireNotNull(cache).tasks(local.identity, line, page)
+                else requireNotNull(patrol).tasks(line, page)
+            Screen.Tasks(operator, line, page, Load.Data(tasks))
+        }
+    }
+
+    private fun loadDetail(screen: Screen.Detail) {
+        val local = ui.value.offline
+        run(screen, readCache = true, allowOfflineFallback = true) {
+            val detail = if (local != null) requireNotNull(cache).detail(local.identity, screen.line, screen.task, screen.listPage)
+                else requireNotNull(patrol).detail(screen.line, screen.task)
+            screen.copy(load = Load.Data(detail))
+        }
+    }
+
+    private fun run(
+        screen: Screen,
+        message: String? = null,
+        readCache: Boolean = false,
+        allowOfflineFallback: Boolean = false,
+        action: suspend () -> Screen,
+    ) {
+        val local = ui.value.offline
+        if (ui.value.busy || signingOut || !ui.value.configured || !foreground ||
+            (if (local == null) !ui.value.online else !readCache)) return
         val stamp = ++epoch
         show(screen, busy = true)
         pending = viewModelScope.launch {
             try {
                 val result = action()
-                if (stamp == epoch) show(result, message = message)
+                if (stamp == epoch) {
+                    if (result == Screen.Login && allowOfflineFallback && cache != null)
+                        enterOffline(fallback = null)
+                    else show(result, message = message)
+                }
             } catch (e: PatrolFailure) {
                 if (stamp != epoch) return@launch
                 val issue = e.issue
                 when {
-                    issue in END_SESSION -> show(Screen.Login, issue = issue)
+                    local == null && cache != null && allowOfflineFallback && e.canUseOffline -> enterOffline(issue)
+                    issue in END_SESSION || (local != null && issue == Issue.OFFLINE) -> show(Screen.Login, issue = issue)
                     screen is Screen.Lines -> show(screen.copy(load = Load.Failed(issue)))
                     screen is Screen.Tasks -> show(screen.copy(load = Load.Failed(issue)))
                     screen is Screen.Detail -> show(screen.copy(load = Load.Failed(issue)))
@@ -212,13 +326,17 @@ class PatrolViewModel(
         epoch++
         pending?.cancel()
         pending = null
+        recheck?.cancel()
+        recheck = null
     }
 
     private fun show(screen: Screen, busy: Boolean = false, issue: Issue? = null, message: String? = null) {
-        mutableUi.value = ui.value.copy(screen = screen, busy = busy, issue = issue, message = message)
+        mutableUi.value = ui.value.copy(screen = screen, busy = busy, issue = issue, message = message,
+            offline = ui.value.offline.takeUnless { screen == Screen.Login })
     }
 
     private companion object {
-        val END_SESSION = setOf(Issue.UNAUTHENTICATED, Issue.FORBIDDEN, Issue.REAUTHENTICATE, Issue.STORAGE)
+        val END_SESSION = setOf(Issue.UNAUTHENTICATED, Issue.FORBIDDEN, Issue.REAUTHENTICATE, Issue.STORAGE,
+            Issue.OFFLINE_EXPIRED, Issue.OFFLINE_CLOCK, Issue.CACHE_STORAGE)
     }
 }
