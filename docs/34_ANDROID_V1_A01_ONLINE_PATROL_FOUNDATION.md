@@ -19,7 +19,7 @@ PR #33 merged at `c71029c570c1616d4e37523c25a9cfe34ac5981e`. Its merged-main Pus
 | `app/src/test/`, `app/src/androidTest/` | TLS HTTP contract and state tests, device instrumentation |
 | `gradle/wrapper/`, `app/build.gradle.kts` | Pinned build and dependencies |
 
-Use JDK 17, Gradle 8.13, Android Gradle Plugin 8.13.2, Kotlin 2.2.21, Android SDK 36, build tools 35.0.0, `minSdk=30` and `targetSdk=36`. The Gradle distribution checksum is pinned in the wrapper properties. CI independently verifies the checked-in wrapper JAR checksum. [Android Gradle Plugin compatibility](https://developer.android.com/build/releases/agp-8-13-0-release-notes) · [Gradle release checksums](https://gradle.org/release-checksums/)
+Use JDK 17, Gradle 8.13, Android Gradle Plugin 8.13.2, Kotlin 2.2.21, Android SDK 36, build tools 35.0.0, `minSdk=30` and `targetSdk=36`. The Gradle distribution checksum is pinned in the wrapper properties. CI independently verifies the checked-in wrapper JAR checksum. CI invokes `sdkmanager` from the runner SDK directory. The initial Ubuntu 26.04 Push and PR jobs returned exit 127 because the SDK tool is installed outside `PATH`. [Android Gradle Plugin compatibility](https://developer.android.com/build/releases/agp-8-13-0-release-notes) · [Gradle release checksums](https://gradle.org/release-checksums/)
 
 Compose BOM 2025.10.00 controls Material 3 and Compose UI/test versions. Activity Compose is 1.11.0, Lifecycle 2.9.4, Navigation 2.9.5, Coroutines 1.10.2, Kotlin serialization JSON 1.9.0, Retrofit/converter 3.0.0 and OkHttp 4.12.0. Tests use JUnit 4.13.2, MockWebServer and OkHttp TLS 4.12.0, AndroidX Test JUnit 1.3.0 and Runner 1.7.0.
 
