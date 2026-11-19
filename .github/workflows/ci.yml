@@ -5,6 +5,23 @@ on:
   pull_request:
 
 jobs:
+  android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Verify Gradle Wrapper
+        working-directory: android/patrol-app
+        run: echo "81a82aaea5abcc8ff68b3dfcb58b3c3c429378efd98e7433460610fecd7ae45f  gradle/wrapper/gradle-wrapper.jar" | sha256sum --check
+      - name: Install Android SDK platform
+        run: sdkmanager 'platforms;android-36' 'build-tools;35.0.0'
+      - name: Verify Android app
+        working-directory: android/patrol-app
+        run: ./gradlew --no-daemon :app:testDebugUnitTest :app:lintDebug :app:assembleDebug :app:assembleDebugAndroidTest
+
   postgres:
     runs-on: ubuntu-latest
     services:
