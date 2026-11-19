@@ -37,7 +37,7 @@ public sealed class NgPicSelectionMigrationTests
     }
     [Fact] public async Task Real_previous_populated_upgrade_preserves_all_old_facts_and_roster_revisions() { await using var p = await PhotoFixture.Create(migration: Previous); await Upgrade(p); }
     internal static async Task Upgrade(PhotoFixture p) {
-        var before = await Prior(p); await p.F.Edit(db => db.Database.MigrateAsync()); Assert.Equal(before, await PicRosterTests.Facts(p.F));
+        var before = await Prior(p); await p.F.Edit(db => db.GetService<IMigrator>().MigrateAsync(Current)); Assert.Equal(before, await PicRosterTests.Facts(p.F));
         Assert.Equal(Current, await p.F.Read(async db => (await db.Database.GetAppliedMigrationsAsync()).Last()));
         Assert.Equal(0, await p.F.Read(db => db.NgPicSelectionOperations.CountAsync())); Assert.Equal(2, await p.F.Read(db => db.PicRosterRevisions.CountAsync()));
         if (p.F.PostgresRoot is null) await p.F.Read(async db => { await db.Database.OpenConnectionAsync(); await using var q = db.Database.GetDbConnection().CreateCommand(); q.CommandText = "PRAGMA foreign_key_check"; await using var r = await q.ExecuteReaderAsync(); Assert.False(await r.ReadAsync()); return true; });
@@ -45,9 +45,9 @@ public sealed class NgPicSelectionMigrationTests
     [Theory][InlineData("CREATE TABLE \"NgPicSelectionMembers\"")][InlineData("CREATE TRIGGER \"TR_ng_pic_scope\"")][InlineData("INSERT INTO \"__EFMigrationsHistory\"")]
     public async Task DDL_and_migration_history_failure_is_transactional(string point) { await using var p = await PhotoFixture.Create(migration: Previous); await MigrationRollback(p, point); }
     internal static async Task MigrationRollback(PhotoFixture p, string point) {
-        var before = await Prior(p); p.F.Fault.Arm(point, true); await Assert.ThrowsAsync<InvalidOperationException>(() => p.F.Edit(db => db.Database.MigrateAsync()));
+        var before = await Prior(p); p.F.Fault.Arm(point, true); await Assert.ThrowsAsync<InvalidOperationException>(() => p.F.Edit(db => db.GetService<IMigrator>().MigrateAsync(Current)));
         Assert.True(p.F.Fault.Entered.Task.IsCompletedSuccessfully); Assert.Equal(Previous, await p.F.Read(async db => (await db.Database.GetAppliedMigrationsAsync()).Last()));
-        Assert.Equal(before, await PicRosterTests.Facts(p.F)); await p.F.Edit(db => db.Database.MigrateAsync()); Assert.Equal(before, await PicRosterTests.Facts(p.F));
+        Assert.Equal(before, await PicRosterTests.Facts(p.F)); await p.F.Edit(db => db.GetService<IMigrator>().MigrateAsync(Current)); Assert.Equal(before, await PicRosterTests.Facts(p.F));
     }
     [Theory][InlineData("cas", false)][InlineData("receipt", false)][InlineData("operation", false)][InlineData("member", false)][InlineData("projection", false)][InlineData("audit", false)][InlineData("commit", false)]
     [InlineData("projection", true)][InlineData("audit", true)][InlineData("commit", true)]

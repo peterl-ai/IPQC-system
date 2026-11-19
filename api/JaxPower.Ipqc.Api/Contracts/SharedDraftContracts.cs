@@ -36,7 +36,8 @@ public sealed record DraftBatchReceipt(Guid TaskId, Guid BatchId, string Request
     [property:JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] List<UnableToMeasureReceipt>? UnableOperations = null,
     [property:JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] List<SampleEvidenceReceipt>? SampleEvidenceOperations = null,
     [property:JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] List<BasicInformationReceipt>? HeaderOperations = null,
-    [property:JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] List<NgPicSelectionReceipt>? PicSelectionOperations = null);
+    [property:JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] List<NgPicSelectionReceipt>? PicSelectionOperations = null,
+    [property:JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] List<OrdinaryNgDetailsReceipt>? OrdinaryNgDetailsOperations = null);
 public sealed record DraftBatchResult(DraftBatchReceipt? BatchReceipt, List<DraftOperationReceipt> Operations,
     bool ReplayOnly, bool CanExecute = false, bool AcceptsFormalInspection = false);
 public sealed record DraftSampleOutput(Guid SampleId, Guid TaskItemId, Guid InspectionAttemptId, Guid ClientSampleId,

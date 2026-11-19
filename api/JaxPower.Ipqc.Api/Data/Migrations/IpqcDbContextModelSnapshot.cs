@@ -1316,6 +1316,135 @@ namespace JaxPower.Ipqc.Api.Data.Migrations
                     b.ToTable("NgPicSelectionProjections");
                 });
 
+            modelBuilder.Entity("JaxPower.Ipqc.Api.Domain.OrdinaryNgDetailsOperation", b =>
+                {
+                    b.Property<Guid>("TaskId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("OperationId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("AcceptedAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("ActorPersonalSessionId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("ActorUserId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("BaseDraftVersion")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<Guid>("BatchId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("CanonicalPayload")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("CanonicalizationVersion")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("ContentHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("ContributorUserId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("DraftVersion")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("EnvironmentId")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("InspectionAttemptId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("LineId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("NgBasisJson")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("NgReason")
+                        .HasMaxLength(2000)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("NgType")
+                        .HasMaxLength(2000)
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("OriginLocalEditVersion")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("PredecessorHash")
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("PredecessorOperationId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ReceiptJson")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Remarks")
+                        .HasMaxLength(2000)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("SourceWorkContextId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("TaskItemId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("WorkflowVersion")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("TaskId", "OperationId");
+
+                    b.HasAlternateKey("TaskId", "OperationId", "TaskItemId", "InspectionAttemptId", "ContentHash")
+                        .HasName("AK_OrdNg_Predecessor");
+
+                    b.HasIndex("ActorUserId");
+
+                    b.HasIndex("ContributorUserId");
+
+                    b.HasIndex("SourceWorkContextId");
+
+                    b.HasIndex("InspectionAttemptId", "TaskItemId");
+
+                    b.HasIndex("TaskId", "BatchId")
+                        .IsUnique()
+                        .HasDatabaseName("IX_OrdNg_Batch");
+
+                    b.HasIndex("TaskId", "DraftVersion")
+                        .IsUnique()
+                        .HasDatabaseName("IX_OrdNg_Version");
+
+                    b.HasIndex("TaskId", "TaskItemId", "InspectionAttemptId", "DraftVersion")
+                        .HasDatabaseName("IX_OrdNg_Scope");
+
+                    b.HasIndex("TaskId", "PredecessorOperationId", "TaskItemId", "InspectionAttemptId", "PredecessorHash")
+                        .HasDatabaseName("IX_OrdNg_Predecessor");
+
+                    b.ToTable("OrdinaryNgDetailsOperations", t =>
+                        {
+                            t.HasCheckConstraint("CK_OrdNg_Operation", "\"OperationId\"<>'00000000-0000-0000-0000-000000000000' AND \"WorkflowVersion\"=2 AND \"CanonicalizationVersion\"=1\nAND \"BaseDraftVersion\">=0 AND \"OriginLocalEditVersion\">=0 AND \"DraftVersion\">0 AND \"DraftVersion\"=\"BaseDraftVersion\"+1\nAND length(\"ContentHash\")=64 AND length(\"CanonicalPayload\")>0 AND length(\"ReceiptJson\")>0 AND length(\"NgBasisJson\")>0\nAND ((\"Kind\"='SetOrdinaryNgDetails' AND \"PredecessorOperationId\" IS NULL AND \"PredecessorHash\" IS NULL)\n     OR (\"Kind\"='CorrectOrdinaryNgDetails' AND \"PredecessorOperationId\" IS NOT NULL AND \"PredecessorHash\" IS NOT NULL AND length(\"PredecessorHash\")=64))\nAND (\"NgType\" IS NULL OR length(\"NgType\")<=2000) AND (\"NgReason\" IS NULL OR length(\"NgReason\")<=2000)\nAND (\"Remarks\" IS NULL OR length(\"Remarks\")<=2000)");
+                        });
+                });
+
             modelBuilder.Entity("JaxPower.Ipqc.Api.Domain.PatrolPlan", b =>
                 {
                     b.Property<Guid>("Id")
@@ -3848,6 +3977,59 @@ namespace JaxPower.Ipqc.Api.Data.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired()
                         .HasConstraintName("FK_NgPicProjection_Operation");
+                });
+
+            modelBuilder.Entity("JaxPower.Ipqc.Api.Domain.OrdinaryNgDetailsOperation", b =>
+                {
+                    b.HasOne("JaxPower.Ipqc.Api.Domain.ApplicationUser", null)
+                        .WithMany()
+                        .HasForeignKey("ActorUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_OrdNg_Actor");
+
+                    b.HasOne("JaxPower.Ipqc.Api.Domain.ApplicationUser", null)
+                        .WithMany()
+                        .HasForeignKey("ContributorUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_OrdNg_Contributor");
+
+                    b.HasOne("JaxPower.Ipqc.Api.Domain.WorkContext", null)
+                        .WithMany()
+                        .HasForeignKey("SourceWorkContextId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_OrdNg_Source");
+
+                    b.HasOne("JaxPower.Ipqc.Api.Domain.SharedDraft", null)
+                        .WithMany()
+                        .HasForeignKey("TaskId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_OrdNg_Draft");
+
+                    b.HasOne("JaxPower.Ipqc.Api.Domain.InspectionAttempt", null)
+                        .WithMany()
+                        .HasForeignKey("InspectionAttemptId", "TaskItemId")
+                        .HasPrincipalKey("Id", "PatrolTaskItemId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_OrdNg_Attempt");
+
+                    b.HasOne("JaxPower.Ipqc.Api.Domain.AcceptedBatchReceipt", null)
+                        .WithMany()
+                        .HasForeignKey("TaskId", "BatchId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_OrdNg_Batch");
+
+                    b.HasOne("JaxPower.Ipqc.Api.Domain.OrdinaryNgDetailsOperation", null)
+                        .WithMany()
+                        .HasForeignKey("TaskId", "PredecessorOperationId", "TaskItemId", "InspectionAttemptId", "PredecessorHash")
+                        .HasPrincipalKey("TaskId", "OperationId", "TaskItemId", "InspectionAttemptId", "ContentHash")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("FK_OrdNg_Predecessor");
                 });
 
             modelBuilder.Entity("JaxPower.Ipqc.Api.Domain.PatrolPlan", b =>
