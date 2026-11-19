@@ -76,6 +76,21 @@ class OfflineClockTest {
         for (sample in anomalies) expectIssue(Issue.OFFLINE_CLOCK) { observed.observe(receipt, sample) }
     }
 
+    @Test fun sameBootChecksBothLastObservationAndAnchorAtExactTolerance() = runBlocking<Unit> {
+        val first = anchor.observe(receipt, initial.advance(10_000).copy(utcMs = initial.utcMs + 12_000))
+        val next = initial.advance(20_000)
+        assertEquals(verified.plusSeconds(20).toString(), first.observe(receipt, next).lastServerUtc)
+        expectIssue(Issue.OFFLINE_CLOCK) {
+            first.observe(receipt, next.copy(utcMs = next.utcMs - 1))
+        }
+        expectIssue(Issue.OFFLINE_CLOCK) {
+            first.observe(receipt, next.copy(utcMs = next.utcMs - 2_000))
+        }
+        expectIssue(Issue.OFFLINE_CLOCK) {
+            anchor.observe(receipt, next.copy(utcMs = next.utcMs + 2_001))
+        }
+    }
+
     @Test fun rejectsInconsistentPersistedProgressAndDeadlineSubstitution() = runBlocking<Unit> {
         val progressed = anchor.observe(receipt, initial.advance(60_000))
         for (bad in listOf(

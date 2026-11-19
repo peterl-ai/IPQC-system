@@ -9,12 +9,14 @@ import com.jaxpower.ipqc.patrol.api.OfflineAccessReceipt
 import com.jaxpower.ipqc.patrol.api.PagedLineTasks
 import com.jaxpower.ipqc.patrol.api.PatrolFailure
 import com.jaxpower.ipqc.patrol.api.ProductionLine
+import com.jaxpower.ipqc.patrol.api.hasSameFrozenVersion
 import com.jaxpower.ipqc.patrol.api.utc
 import com.jaxpower.ipqc.patrol.api.validGuid
 import com.jaxpower.ipqc.patrol.auth.Operator
 import com.jaxpower.ipqc.patrol.auth.SessionIdentity
 import com.jaxpower.ipqc.patrol.tasks.PatrolRepository
 import java.io.File
+import java.time.Duration
 import java.time.Instant
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -30,6 +32,7 @@ data class OfflineSession(
     val verifiedAt: Instant,
     val expiresAt: Instant,
     val apparentNow: Instant,
+    val elapsedDeadlineMs: Long,
 )
 
 @Serializable
@@ -52,6 +55,8 @@ class OfflineCache internal constructor(
     private var revoked = false
 
     internal suspend fun sample(): ClockSample = storage { clock.sample() }
+
+    internal fun remainingMs(session: OfflineSession): Long = session.elapsedDeadlineMs - clock.elapsedRealtimeMs()
 
     // Called only after SessionRepository verifies current authenticated authority over HTTPS.
     internal suspend fun accept(identity: SessionIdentity, operator: Operator, receipt: OfflineAccessReceipt,
@@ -109,9 +114,7 @@ class OfflineCache internal constructor(
             snapshots.page(identity, line.id, listPage)?.items?.contains(task) != true)
             throw PatrolFailure(Issue.CACHE_DETAIL_MISSING)
         val detail = snapshots.detail(identity, task)
-        if (detail == null || detail.summary.currentRevisionNo != task.currentRevisionNo ||
-            detail.summary.planningSnapshotVersion != task.planningSnapshotVersion ||
-            detail.summary.planningSnapshotStatus != task.planningSnapshotStatus)
+        if (detail == null || !detail.summary.hasSameFrozenVersion(task))
             throw PatrolFailure(Issue.CACHE_DETAIL_MISSING)
         check(matches(detail.summary, identity, line.id) && detail.summary.id == task.id &&
             !detail.canExecute && detail.items.isNotEmpty())
@@ -150,8 +153,11 @@ class OfflineCache internal constructor(
             throw if (e.issue == Issue.OFFLINE_EXPIRED) e else PatrolFailure(Issue.OFFLINE_CLOCK)
         }
         if (next != record.progress) persist(record.copy(progress = next))
+        val expiresAt = utc(record.receipt.offlineAccessUntilUtc)
+        val now = utc(next.lastServerUtc)
+        val deadline = Math.addExact(next.last.elapsedMs, Duration.between(now, expiresAt).toMillis())
         return OfflineSession(record.identity, Operator(record.displayName, false),
-            utc(record.receipt.verifiedAtUtc), utc(record.receipt.offlineAccessUntilUtc), utc(next.lastServerUtc))
+            utc(record.receipt.verifiedAtUtc), expiresAt, now, deadline)
     }
 
     private fun loadAdmission(): OfflineAdmission? =

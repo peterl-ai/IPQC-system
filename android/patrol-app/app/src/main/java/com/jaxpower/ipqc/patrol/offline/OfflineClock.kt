@@ -17,12 +17,17 @@ internal data class ClockSample(val boot: Int, val elapsedMs: Long, val utcMs: L
     }
 }
 
-internal fun interface OfflineClock { fun sample(): ClockSample }
+internal fun interface OfflineClock {
+    fun sample(): ClockSample
+    fun elapsedRealtimeMs(): Long = sample().elapsedMs
+}
 
 internal class AndroidOfflineClock(private val context: Context) : OfflineClock {
+    override fun elapsedRealtimeMs(): Long = SystemClock.elapsedRealtime()
+
     override fun sample(): ClockSample {
         val boot = Settings.Global.getInt(context.contentResolver, Settings.Global.BOOT_COUNT, -1)
-        val elapsed = SystemClock.elapsedRealtime()
+        val elapsed = elapsedRealtimeMs()
         return ClockSample(boot, elapsed, System.currentTimeMillis()).also { it.check() }
     }
 }
@@ -50,7 +55,7 @@ internal data class ClockProgress(
             sample.boot < last.boot || sample.utcMs < last.utcMs) invalidClock()
 
         val next = if (sample.boot == last.boot) {
-            if (sample.elapsedMs < last.elapsedMs) invalidClock()
+            sameBootElapsed(last, sample)
             copy(last = sample, lastServerUtc = sameBoot(anchor, anchorTime, sample).toString())
         } else {
             val wallProgress = sample.utcMs - last.utcMs
@@ -69,12 +74,15 @@ internal data class ClockProgress(
 
         fun startingAt(sample: ClockSample, serverUtc: String) = ClockProgress(sample, serverUtc, sample, serverUtc)
 
-        private fun sameBoot(anchor: ClockSample, server: Instant, sample: ClockSample): Instant {
+        private fun sameBoot(anchor: ClockSample, server: Instant, sample: ClockSample): Instant =
+            server.plusMillis(sameBootElapsed(anchor, sample))
+
+        private fun sameBootElapsed(anchor: ClockSample, sample: ClockSample): Long {
             val elapsed = sample.elapsedMs - anchor.elapsedMs
             val wall = sample.utcMs - anchor.utcMs
             if (elapsed < 0 || wall < 0 || wall - elapsed !in -CLOCK_TOLERANCE_MS..CLOCK_TOLERANCE_MS)
                 invalidClock()
-            return server.plusMillis(elapsed)
+            return elapsed
         }
     }
 }

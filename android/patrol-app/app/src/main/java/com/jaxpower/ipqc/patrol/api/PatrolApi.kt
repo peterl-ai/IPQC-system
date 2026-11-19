@@ -30,6 +30,7 @@ enum class Issue(val message: String) {
     OFFLINE_EXPIRED("Offline access has expired. Connect to IPQC and verify your session."),
     OFFLINE_CLOCK("Offline access is locked. Check the tablet clock and verify your session online."),
     CACHE_STORAGE("Protected Patrol data is unavailable. Try online again or contact your administrator."),
+    TASK_DETAIL_CHANGED("Task detail changed. Return to the task list and reload it."),
     CACHE_DETAIL_MISSING("The matching frozen task detail was not downloaded. Open it online first."),
     CONNECTION("The IPQC server could not be reached. Check the network and HTTPS configuration."),
     UNAVAILABLE("IPQC is temporarily unavailable. Try again."),

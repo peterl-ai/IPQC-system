@@ -13,7 +13,6 @@ import com.jaxpower.ipqc.patrol.auth.SessionRepository
 import com.jaxpower.ipqc.patrol.offline.OfflineCache
 import com.jaxpower.ipqc.patrol.offline.OfflineSession
 import com.jaxpower.ipqc.patrol.tasks.PatrolRepository
-import java.time.Duration
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
@@ -62,6 +61,7 @@ class PatrolViewModel(
     private var networkKnown = false
     private var foreground = true
     private var recheck: Job? = null
+    private var expiryCheck: Job? = null
 
     init {
         viewModelScope.launch {
@@ -201,7 +201,8 @@ class PatrolViewModel(
 
     internal fun leaveForeground() {
         foreground = false
-        if (cache != null && !signingOut && (ui.value.offline != null || !ui.value.online)) {
+        if (cache != null && !signingOut &&
+            (ui.value.offline != null || !ui.value.online || ui.value.busy)) {
             interrupt()
             show(Screen.Login)
         }
@@ -216,8 +217,9 @@ class PatrolViewModel(
 
     private fun enterOffline(fallback: Issue? = Issue.OFFLINE) {
         interrupt()
-        val service = cache
-        if (service == null || !foreground) {
+        val service = sessions
+        val localCache = cache
+        if (service == null || localCache == null || !foreground) {
             show(Screen.Login, issue = fallback)
             return
         }
@@ -225,14 +227,16 @@ class PatrolViewModel(
         show(Screen.Login, busy = true, issue = fallback)
         pending = viewModelScope.launch {
             try {
-                val grant = service.resume()
+                val grant = service.resumeOffline()
                 if (stamp != epoch) return@launch
                 if (grant == null) {
                     show(Screen.Login, issue = fallback)
+                } else if (localCache.remainingMs(grant) <= 0) {
+                    lockOffline(Issue.OFFLINE_EXPIRED)
                 } else {
                     mutableUi.value = ui.value.copy(screen = Screen.Home(grant.operator), busy = false,
                         issue = null, message = null, offline = grant)
-                    monitorOffline(service)
+                    monitorOffline(localCache)
                 }
             } catch (failure: PatrolFailure) {
                 if (stamp == epoch) show(Screen.Login, issue = failure.issue)
@@ -241,19 +245,30 @@ class PatrolViewModel(
     }
 
     private fun monitorOffline(service: OfflineCache) {
+        expiryCheck = viewModelScope.launch {
+            while (true) {
+                val current = ui.value.offline ?: return@launch
+                val remaining = service.remainingMs(current)
+                if (remaining <= 0) {
+                    lockOffline(Issue.OFFLINE_EXPIRED)
+                    return@launch
+                }
+                delay(remaining.coerceAtMost(1_000))
+            }
+        }
         recheck = viewModelScope.launch {
             while (true) {
                 val current = ui.value.offline ?: return@launch
-                val remaining = Duration.between(current.apparentNow, current.expiresAt)
-                delay(remaining.toMillis().coerceIn(1, 1_000))
+                delay(1_000)
                 try {
                     val observed = service.resume(current.identity) ?: throw PatrolFailure(Issue.OFFLINE)
-                    if (ui.value.offline?.identity == current.identity)
-                        mutableUi.value = ui.value.copy(offline = observed)
+                    if (ui.value.offline?.identity == current.identity) {
+                        if (service.remainingMs(observed) <= 0) lockOffline(Issue.OFFLINE_EXPIRED)
+                        else mutableUi.value = ui.value.copy(offline = observed)
+                    }
                 } catch (failure: PatrolFailure) {
                     if (ui.value.offline?.identity == current.identity) {
-                        interrupt()
-                        show(Screen.Login, issue = failure.issue)
+                        lockOffline(failure.issue)
                     }
                     return@launch
                 }
@@ -299,6 +314,7 @@ class PatrolViewModel(
             (if (local == null) !ui.value.online else !readCache)) return
         val stamp = ++epoch
         show(screen, busy = true)
+        if (stamp != epoch) return
         pending = viewModelScope.launch {
             try {
                 val result = action()
@@ -328,11 +344,23 @@ class PatrolViewModel(
         pending = null
         recheck?.cancel()
         recheck = null
+        expiryCheck?.cancel()
+        expiryCheck = null
+    }
+
+    private fun lockOffline(issue: Issue) {
+        interrupt()
+        show(Screen.Login, issue = issue)
     }
 
     private fun show(screen: Screen, busy: Boolean = false, issue: Issue? = null, message: String? = null) {
+        val local = ui.value.offline.takeUnless { screen == Screen.Login }
+        if (local != null && requireNotNull(cache).remainingMs(local) <= 0) {
+            lockOffline(Issue.OFFLINE_EXPIRED)
+            return
+        }
         mutableUi.value = ui.value.copy(screen = screen, busy = busy, issue = issue, message = message,
-            offline = ui.value.offline.takeUnless { screen == Screen.Login })
+            offline = local)
     }
 
     private companion object {

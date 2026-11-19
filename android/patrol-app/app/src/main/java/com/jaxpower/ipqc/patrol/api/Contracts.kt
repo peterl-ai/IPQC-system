@@ -82,6 +82,11 @@ data class LineTaskSummary(
     val planningSnapshotStatus: String,
 )
 
+internal fun LineTaskSummary.hasSameFrozenVersion(other: LineTaskSummary): Boolean =
+    currentRevisionNo == other.currentRevisionNo &&
+        planningSnapshotVersion == other.planningSnapshotVersion &&
+        planningSnapshotStatus == other.planningSnapshotStatus
+
 @Serializable
 data class PagedLineTasks(val items: List<LineTaskSummary>, val page: Int, val pageSize: Int, val total: Int) {
     val hasNext: Boolean get() = page.toLong() * pageSize < total

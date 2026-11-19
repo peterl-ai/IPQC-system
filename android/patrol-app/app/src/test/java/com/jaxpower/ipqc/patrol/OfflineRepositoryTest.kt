@@ -1,6 +1,7 @@
 package com.jaxpower.ipqc.patrol
 
 import com.jaxpower.ipqc.patrol.api.Issue
+import com.jaxpower.ipqc.patrol.api.PatrolApi
 import com.jaxpower.ipqc.patrol.auth.SessionIdentity
 import com.jaxpower.ipqc.patrol.auth.SessionRepository
 import com.jaxpower.ipqc.patrol.offline.CacheCipher
@@ -12,7 +13,12 @@ import com.jaxpower.ipqc.patrol.offline.ReceiptStorage
 import com.jaxpower.ipqc.patrol.offline.TaskSnapshots
 import com.jaxpower.ipqc.patrol.tasks.PatrolRepository
 import java.time.Instant
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.SocketPolicy
 import org.junit.Assert.*
@@ -157,6 +163,91 @@ class OfflineRepositoryTest {
         }
     }
 
+    @Test fun cancelled401RevokesDurableAdmissionBeforeAnyRetry() = cancelledDenial(401)
+
+    @Test fun cancelled403RevokesDurableAdmissionAndReusableCredentials() = cancelledDenial(403)
+
+    private fun cancelledDenial(status: Int) = runBlocking<Unit> {
+        TestServer().use { server ->
+            val fixture = OfflineTestFixture(server)
+            val api = object : PatrolApi by server.api {
+                override suspend fun lines(bearer: String) = server.api.lines(bearer).also {
+                    check(it.code() == status)
+                    // Retrofit has delivered the denial. Cancel the caller before the
+                    // repository can acquire either durable-storage lock.
+                    currentCoroutineContext().cancel()
+                }
+            }
+            val session = SessionRepository(api, server.vault, server.origin.toString(), server.clock, fixture.cache)
+            val patrol = PatrolRepository(api, session, fixture.cache)
+            fixture.download(detail = true)
+            server.admit(Fixture.auth(refresh = "new-fixture-refresh"))
+            assertNotNull(session.restore())
+            server.enqueue("{}", status)
+            val call = launch {
+                if (status == 403) expectIssue(Issue.FORBIDDEN) { patrol.lines() }
+                else patrol.lines()
+            }
+            call.join()
+            assertTrue(call.isCancelled)
+            assertNull(session.resumeOffline())
+            assertNull(fixture.reopen().resume())
+            assertNotNull(fixture.snapshots.detail(OfflineTestFixture.SUBJECT, Fixture.selectedTask))
+            assertEquals(8, server.web.requestCount)
+            if (status == 403) assertNull(server.vault.saved)
+        }
+    }
+
+    @Test fun delayedDenialRevokesItsReceiptAfterAnUnsuccessfulConcurrentRotation() = runBlocking<Unit> {
+        TestServer().use { server ->
+            val held = CompletableDeferred<Unit>()
+            val release = CompletableDeferred<Unit>()
+            val api = object : PatrolApi by server.api {
+                override suspend fun lines(bearer: String) = server.api.lines(bearer).also {
+                    if (it.code() == 403) {
+                        held.complete(Unit)
+                        release.await()
+                    }
+                }
+            }
+            val fixture = OfflineTestFixture(server, api)
+            fixture.download(detail = true)
+            server.enqueue("{}", 403)
+            val denied = launch { expectIssue(Issue.FORBIDDEN) { fixture.patrol.lines() } }
+            try {
+                withTimeout(8_000) { held.await() }
+                fixture.advance(6 * 60 * 1_000L)
+                server.web.enqueue(MockResponse().setSocketPolicy(SocketPolicy.DISCONNECT_AFTER_REQUEST))
+                expectIssue(Issue.REAUTHENTICATE) { fixture.patrol.tasks(Fixture.line, 1) }
+                assertNull(server.vault.saved)
+                assertNotNull(fixture.reopen().resume())
+            } finally {
+                release.complete(Unit)
+                denied.join()
+            }
+            assertNull(fixture.reopen().resume())
+            assertNotNull(fixture.snapshots.detail(OfflineTestFixture.SUBJECT, Fixture.selectedTask))
+        }
+    }
+
+    @Test fun mismatchedOnlineDetailLeavesTheAcceptedFrozenDefinitionReadableOffline() = runBlocking<Unit> {
+        TestServer().use { server ->
+            val fixture = OfflineTestFixture(server)
+            fixture.download(detail = true)
+            val identity = OfflineTestFixture.SUBJECT
+            val accepted = fixture.cache.detail(identity, Fixture.line, Fixture.selectedTask, 1)
+            for (summary in listOf(
+                Fixture.summary().replace("\"currentRevisionNo\":0", "\"currentRevisionNo\":1"),
+                Fixture.summary().replace("\"planningSnapshotVersion\":1", "\"planningSnapshotVersion\":2"),
+                Fixture.summary().replace("ValidV1", "HistoricalUnadmitted"),
+            )) {
+                server.enqueue(Fixture.detail(summary))
+                expectIssue(Issue.TASK_DETAIL_CHANGED) { fixture.patrol.detail(Fixture.line, Fixture.selectedTask) }
+                assertEquals(accepted, fixture.reopen().detail(identity, Fixture.line, Fixture.selectedTask, 1))
+            }
+        }
+    }
+
     @Test fun unknownRefreshKeepsExistingDeadlineButObservedDenialRevokesEligibility() = runBlocking<Unit> {
         TestServer().use { server ->
             val fixture = OfflineTestFixture(server)
@@ -177,16 +268,19 @@ class OfflineRepositoryTest {
     }
 }
 
-internal class OfflineTestFixture(val server: TestServer) {
+internal class OfflineTestFixture(val server: TestServer, api: PatrolApi = server.api) {
     private val epoch = Instant.parse(Fixture.NOW).toEpochMilli()
     @Volatile private var sample = ClockSample(4, 60_000, epoch)
     private val clock = OfflineClock { sample }
-    private val receipt = MemoryReceipt()
+    val receipt = MemoryReceipt()
     private val rows = MemoryRows()
+    var onFrozenDetailRead: (() -> Unit)?
+        get() = rows.onFrozenDetailRead
+        set(value) { rows.onFrozenDetailRead = value }
     val snapshots = TaskSnapshots(rows, TestCipher, server.origin.toString())
     val cache = reopen()
-    val sessions = SessionRepository(server.api, server.vault, server.origin.toString(), server.clock, cache)
-    val patrol = PatrolRepository(server.api, sessions, cache)
+    val sessions = SessionRepository(api, server.vault, server.origin.toString(), server.clock, cache)
+    val patrol = PatrolRepository(api, sessions, cache)
 
     fun reopen(origin: String = server.origin.toString()) = OfflineCache(origin, clock, receipt,
         TaskSnapshots(rows, TestCipher, origin))
@@ -222,16 +316,38 @@ internal class OfflineTestFixture(val server: TestServer) {
 
     companion object { val SUBJECT = SessionIdentity(Fixture.USER, Fixture.FAMILY, "synthetic-env") }
 
-    private class MemoryReceipt : ReceiptStorage {
-        private var bytes: ByteArray? = null
-        override fun read() = bytes?.copyOf()
-        override fun replace(bytes: ByteArray) { this.bytes = bytes.copyOf() }
-        override fun revoke() { bytes = null }
+    internal class MemoryReceipt : ReceiptStorage {
+        @Volatile private var bytes: ByteArray? = null
+        @Volatile var beforeRead: (() -> Unit)? = null
+        @Volatile var beforeReplace: (() -> Unit)? = null
+        @Volatile var beforeRevoke: (() -> Unit)? = null
+
+        override fun read(): ByteArray? {
+            beforeRead?.invoke()
+            return bytes?.copyOf()
+        }
+
+        override fun replace(bytes: ByteArray) {
+            beforeReplace?.invoke()
+            this.bytes = bytes.copyOf()
+        }
+
+        override fun revoke() {
+            beforeRevoke?.invoke()
+            bytes = null
+        }
     }
 
     private class MemoryRows : CacheRows {
         private val entries = mutableMapOf<String, ByteArray>()
-        override suspend fun read(slot: String) = entries[slot]
+        @Volatile var onFrozenDetailRead: (() -> Unit)? = null
+
+        override suspend fun read(slot: String): ByteArray? {
+            val value = entries[slot]
+            val hook = onFrozenDetailRead
+            if (hook != null && value?.decodeToString()?.contains("\"kind\":\"detail\"") == true) hook()
+            return value
+        }
         override suspend fun count() = entries.size
         override suspend fun replace(slot: String, sealed: ByteArray) { entries[slot] = sealed }
     }

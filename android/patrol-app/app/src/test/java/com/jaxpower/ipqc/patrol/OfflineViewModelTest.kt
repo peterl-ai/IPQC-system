@@ -1,17 +1,21 @@
 package com.jaxpower.ipqc.patrol
 
 import com.jaxpower.ipqc.patrol.api.Issue
+import com.jaxpower.ipqc.patrol.api.PatrolFailure
 import com.jaxpower.ipqc.patrol.auth.SessionRepository
 import com.jaxpower.ipqc.patrol.tasks.PatrolRepository
 import com.jaxpower.ipqc.patrol.ui.Load
 import com.jaxpower.ipqc.patrol.ui.PatrolUi
 import com.jaxpower.ipqc.patrol.ui.PatrolViewModel
 import com.jaxpower.ipqc.patrol.ui.Screen
+import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.setMain
@@ -121,6 +125,125 @@ class OfflineViewModelTest {
                 model.leaveForeground()
             }
         }
+    }
+
+    @Test fun offlineEntryWaitsForObservedDenialAcrossNetworkLossAndBackgroundCancellation() = runBlocking<Unit> {
+        TestServer().use { server ->
+            val fixture = OfflineTestFixture(server)
+            fixture.download(detail = true)
+            server.enqueue(Fixture.receipt())
+            val network = MutableStateFlow(true)
+            val model = PatrolViewModel(fixture.sessions, fixture.patrol, network, fixture.cache)
+            val revoke = IoPause()
+            try {
+                await(model) { it.screen is Screen.Home && it.offline == null }
+                fixture.receipt.beforeRevoke = revoke::block
+                server.enqueue("{}", 403)
+                model.openPatrol()
+                withTimeout(8_000) { revoke.entered.await() }
+
+                model.leaveForeground()
+                network.value = false
+                model.returnToForeground()
+                await(model) { !it.online && it.screen == Screen.Login && it.busy }
+                assertNull(model.ui.value.offline)
+                revoke.release()
+                val denied = await(model) { !it.online && it.screen == Screen.Login && !it.busy }
+                assertNull(denied.offline)
+                assertNull(fixture.reopen().resume())
+                assertNull(server.vault.saved)
+                assertNotNull(fixture.snapshots.detail(OfflineTestFixture.SUBJECT, Fixture.selectedTask))
+                assertEquals(7, server.web.requestCount)
+            } finally {
+                revoke.release()
+                fixture.receipt.beforeRevoke = null
+                model.leaveForeground()
+            }
+        }
+    }
+
+    @Test fun visibleFrozenDetailClosesAtExpiryWhileReceiptIoIsBlocked() = runBlocking<Unit> {
+        TestServer().use { server ->
+            val fixture = OfflineTestFixture(server)
+            fixture.download(detail = true)
+            val model = PatrolViewModel(fixture.sessions, fixture.patrol, MutableStateFlow(false), fixture.cache)
+            val io = IoPause()
+            try {
+                openCachedTaskList(model)
+                model.openTask(Fixture.selectedTask)
+                await(model) { (it.screen as? Screen.Detail)?.load is Load.Data }
+                fixture.receipt.beforeRead = io::block
+                val reader = launch {
+                    try {
+                        assertNull(fixture.cache.resume())
+                    } catch (failure: PatrolFailure) {
+                        assertEquals(Issue.OFFLINE_EXPIRED, failure.issue)
+                    }
+                }
+                try {
+                    withTimeout(8_000) { io.entered.await() }
+                    fixture.advance(72 * 3600 * 1_000L)
+                    await(model) { it.screen == Screen.Login && it.issue == Issue.OFFLINE_EXPIRED }
+                    assertFalse(reader.isCompleted)
+                } finally {
+                    io.release()
+                    reader.join()
+                }
+                assertEquals(5, server.web.requestCount)
+            } finally {
+                io.release()
+                fixture.receipt.beforeRead = null
+                model.leaveForeground()
+            }
+        }
+    }
+
+    @Test fun detailFinishedAfterItsLastSuccessfulStorageClockCheckCannotPublishAtExpiry() = runBlocking<Unit> {
+        TestServer().use { server ->
+            val fixture = OfflineTestFixture(server)
+            fixture.download(detail = true)
+            val model = PatrolViewModel(fixture.sessions, fixture.patrol, MutableStateFlow(false), fixture.cache)
+            val io = IoPause()
+            try {
+                openCachedTaskList(model)
+                fixture.onFrozenDetailRead = { fixture.advance(1) }
+                fixture.receipt.beforeReplace = io::block
+                model.openTask(Fixture.selectedTask)
+                withTimeout(8_000) { io.entered.await() }
+                assertEquals(Load.Loading, (model.ui.value.screen as Screen.Detail).load)
+                fixture.advance(72 * 3600 * 1_000L - 1)
+                io.release()
+                val firstFinished = await(model) { !it.busy }
+                assertEquals(Screen.Login, firstFinished.screen)
+                assertEquals(Issue.OFFLINE_EXPIRED, firstFinished.issue)
+                assertEquals(5, server.web.requestCount)
+            } finally {
+                io.release()
+                fixture.onFrozenDetailRead = null
+                fixture.receipt.beforeReplace = null
+                model.leaveForeground()
+            }
+        }
+    }
+
+    private suspend fun openCachedTaskList(model: PatrolViewModel) {
+        await(model) { it.screen is Screen.Home && it.offline != null }
+        model.openPatrol()
+        await(model) { (it.screen as? Screen.Lines)?.load is Load.Data }
+        model.select(Fixture.line)
+        await(model) { (it.screen as? Screen.Tasks)?.load is Load.Data }
+    }
+
+    private class IoPause {
+        val entered = CompletableDeferred<Unit>()
+        private val release = CountDownLatch(1)
+
+        fun block() {
+            entered.complete(Unit)
+            check(release.await(15, TimeUnit.SECONDS))
+        }
+
+        fun release() = release.countDown()
     }
 
     private suspend fun await(model: PatrolViewModel, predicate: (PatrolUi) -> Boolean) =

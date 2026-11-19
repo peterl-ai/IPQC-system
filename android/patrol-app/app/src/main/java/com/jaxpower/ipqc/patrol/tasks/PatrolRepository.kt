@@ -8,6 +8,7 @@ import com.jaxpower.ipqc.patrol.api.PatrolApi
 import com.jaxpower.ipqc.patrol.api.PatrolFailure
 import com.jaxpower.ipqc.patrol.api.ProductionLine
 import com.jaxpower.ipqc.patrol.api.ensureResponse
+import com.jaxpower.ipqc.patrol.api.hasSameFrozenVersion
 import com.jaxpower.ipqc.patrol.api.responseBody
 import com.jaxpower.ipqc.patrol.api.utc
 import com.jaxpower.ipqc.patrol.api.validGuid
@@ -54,6 +55,7 @@ class PatrolRepository(
         if (result.summary.readFoundationStatus !in setOf("FoundationOnly", "DraftFoundation") ||
             result.summary.planningSnapshotStatus !in setOf("ValidV1", "HistoricalUnadmitted"))
             throw PatrolFailure(Issue.UNSUPPORTED_TASK)
+        if (!result.summary.hasSameFrozenVersion(task)) throw PatrolFailure(Issue.TASK_DETAIL_CHANGED)
         utc(result.sourceStandardUpdatedAtUtc)
         ensureResponse(result.items.isNotEmpty() &&
             result.items.map { it.sequenceNo }.distinct().size == result.items.size &&

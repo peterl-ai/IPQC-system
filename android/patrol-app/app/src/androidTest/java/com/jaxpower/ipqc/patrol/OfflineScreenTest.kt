@@ -74,7 +74,7 @@ class OfflineScreenTest {
         }
     }
 
-    @Test fun activityRecreationKeepsValidAdmissionAndARecreatedProcessRejectsExpiry() {
+    @Test fun activityRecreationKeepsValidAdmissionAndReopenedCacheRejectsExpiry() {
         OfflineDeviceFixture().use { device ->
             runBlocking { device.download() }
             fun factory(cache: OfflineCache) = viewModelFactory {

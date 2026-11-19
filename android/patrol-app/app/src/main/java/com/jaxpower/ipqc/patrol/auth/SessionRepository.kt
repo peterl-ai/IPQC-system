@@ -16,6 +16,7 @@ import com.jaxpower.ipqc.patrol.api.validGuid
 import com.jaxpower.ipqc.patrol.offline.ClockProgress
 import com.jaxpower.ipqc.patrol.offline.ClockSample
 import com.jaxpower.ipqc.patrol.offline.OfflineCache
+import com.jaxpower.ipqc.patrol.offline.OfflineSession
 import java.time.Clock
 import java.time.Instant
 import java.time.temporal.ChronoUnit
@@ -23,6 +24,8 @@ import java.util.concurrent.atomic.AtomicLong
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -42,6 +45,9 @@ class SessionRepository(
     private val mutex = Mutex()
     private val generation = AtomicLong()
     private var active: Credentials? = null
+    // Refresh consumes the live credential before network IO. Retain the owning
+    // credential for the offline receipt until verification replaces it or it is revoked.
+    private var offlineAuthority: Any? = null
 
     private class Credentials(
         val generation: Long,
@@ -53,6 +59,13 @@ class SessionRepository(
         var familyExpiry: Instant,
     ) {
         val bearer: String get() = "Bearer $access"
+        val authorityId = Any()
+        var rejected = false // Guarded by the session mutex.
+    }
+
+    // Share the lock used to revoke online authority before reading its durable receipt.
+    internal suspend fun resumeOffline(expected: SessionIdentity? = null): OfflineSession? = mutex.withLock {
+        offline?.resume(expected)
     }
 
     suspend fun restore(): Operator? {
@@ -164,10 +177,9 @@ class SessionRepository(
             return admittedRead(first, accepted, request)
         } catch (e: PatrolFailure) {
             if (e.issue == Issue.FORBIDDEN) invalidate(first)
-            if (e.issue != Issue.UNAUTHENTICATED || generation.get() != first.generation) throw e
-            mutex.withLock {
-                if (active === first && generation.get() == first.generation) offline?.revoke()
-            }
+            if (e.issue != Issue.UNAUTHENTICATED) throw e
+            reject(first, allowRefresh = true)
+            currentCoroutineContext().ensureActive()
         }
         val renewed = authorize(first)
         return try {
@@ -187,7 +199,7 @@ class SessionRepository(
         val result = request(auth)
         return mutex.withLock {
             val current = current()
-            if (current.identity != auth.identity || current.generation != auth.generation)
+            if (auth.rejected || current.identity != auth.identity || current.generation != auth.generation)
                 throw PatrolFailure(Issue.UNAUTHENTICATED)
             accepted(current, result)
             checkGeneration(auth.generation)
@@ -195,8 +207,25 @@ class SessionRepository(
         }
     }
 
-    private suspend fun invalidate(rejected: Credentials) = mutex.withLock {
-        if (active === rejected && generation.get() == rejected.generation) endSession()
+    private suspend fun invalidate(rejected: Credentials) = reject(rejected, allowRefresh = false)
+
+    private suspend fun reject(rejected: Credentials, allowRefresh: Boolean) = withContext(NonCancellable) {
+        mutex.withLock {
+            // Match the exact bearer and generation. An unsuccessful rotation can
+            // leave its predecessor's receipt active after consuming the refresh token.
+            rejected.rejected = true
+            if (active !== rejected && offlineAuthority !== rejected.authorityId) return@withLock
+            if (allowRefresh) {
+                try {
+                    revokeOffline()
+                } catch (failure: PatrolFailure) {
+                    endSession()
+                    throw failure
+                }
+            } else {
+                endSession()
+            }
+        }
     }
 
     private fun current(): Credentials {
@@ -210,7 +239,7 @@ class SessionRepository(
         if (auth.operator.mustChangePassword) throw PatrolFailure(Issue.FORBIDDEN)
         if (rejected != null && (auth.generation != rejected.generation || auth.identity != rejected.identity))
             throw PatrolFailure(Issue.UNAUTHENTICATED)
-        if (auth === rejected || !auth.accessExpiry.isAfter(clock.instant().plusSeconds(15)))
+        if (auth === rejected || auth.rejected || !auth.accessExpiry.isAfter(clock.instant().plusSeconds(15)))
             rotate(stored(auth), auth.familyExpiry, auth.generation)
         else auth
     }
@@ -221,7 +250,7 @@ class SessionRepository(
         discard()
         checkGeneration(stamp)
         if (!expiry.isAfter(clock.instant())) {
-            offline?.revoke()
+            revokeOffline()
             throw PatrolFailure(Issue.UNAUTHENTICATED)
         }
         val next = try {
@@ -232,7 +261,8 @@ class SessionRepository(
                 verifyAndPersist(it)
             }
         } catch (e: PatrolFailure) {
-            if (!e.canUseOffline && e.issue != Issue.RATE_LIMITED) offline?.revoke()
+            if (!e.canUseOffline && e.issue != Issue.RATE_LIMITED)
+                revokeOffline()
             throw if (e.issue in setOf(Issue.UNAUTHENTICATED, Issue.FORBIDDEN, Issue.STORAGE, Issue.CACHE_STORAGE, Issue.OFFLINE_CLOCK)) e
                 else PatrolFailure(Issue.REAUTHENTICATE, canUseOffline = e.canUseOffline)
         }
@@ -279,14 +309,15 @@ class SessionRepository(
             auth.familyExpiry = validateReceipt(verification.receipt, auth)
             val anchor = verification.anchor
             if (anchor == null) {
-                offline?.revoke()
+                revokeOffline()
             } else {
                 try {
                     offline?.accept(auth.identity, auth.operator, verification.receipt, anchor)
+                    offlineAuthority = auth.authorityId
                 } catch (e: PatrolFailure) {
                     if (e.issue != Issue.OFFLINE_CLOCK && e.issue != Issue.OFFLINE_EXPIRED) throw e
                     // A valid current server check still permits live browsing.
-                    offline?.revoke()
+                    revokeOffline()
                 }
             }
         } catch (failure: PatrolFailure) {
@@ -327,13 +358,19 @@ class SessionRepository(
         if (generation.get() != expected) throw PatrolFailure(Issue.UNAUTHENTICATED)
     }
 
-    private suspend fun endSession() {
+    // Callers hold the session mutex through both durable operations.
+    private suspend fun endSession() = withContext(NonCancellable) {
         active = null
         try {
-            offline?.revoke()
+            revokeOffline()
         } finally {
             storage { vault.clear() }
         }
+    }
+
+    private suspend fun revokeOffline() = withContext(NonCancellable) {
+        offlineAuthority = null
+        offline?.revoke()
     }
 
     private suspend fun discard() {
