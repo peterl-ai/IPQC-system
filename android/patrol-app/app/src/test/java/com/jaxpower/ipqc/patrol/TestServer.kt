@@ -4,12 +4,14 @@ import com.jaxpower.ipqc.patrol.api.Issue
 import com.jaxpower.ipqc.patrol.api.LineTaskSummary
 import com.jaxpower.ipqc.patrol.api.PatrolFailure
 import com.jaxpower.ipqc.patrol.api.ProductionLine
-import com.jaxpower.ipqc.patrol.api.createPatrolApi
+import com.jaxpower.ipqc.patrol.api.PatrolApi
+import com.jaxpower.ipqc.patrol.api.patrolRetrofit
 import com.jaxpower.ipqc.patrol.api.patrolHttpClient
 import com.jaxpower.ipqc.patrol.auth.CredentialVault
 import com.jaxpower.ipqc.patrol.auth.SessionRepository
 import com.jaxpower.ipqc.patrol.auth.StoredRefresh
 import com.jaxpower.ipqc.patrol.tasks.PatrolRepository
+import com.jaxpower.ipqc.patrol.work.WorkContextApi
 import java.net.InetAddress
 import java.net.Proxy
 import java.time.Clock
@@ -42,7 +44,8 @@ internal class TestServer : AutoCloseable {
     val web = MockWebServer()
     val clock = TestClock()
     val vault = MemoryVault()
-    val api: com.jaxpower.ipqc.patrol.api.PatrolApi
+    val api: PatrolApi
+    val workApi: WorkContextApi
     val origin: okhttp3.HttpUrl
     val session: SessionRepository
     val patrol: PatrolRepository
@@ -56,8 +59,10 @@ internal class TestServer : AutoCloseable {
         // Bind an explicit IP so the TLS fixture is independent of host DNS and proxies.
         web.start(InetAddress.getByName(loopbackHost), 0)
         origin = web.url("/").newBuilder().host(loopbackHost).build()
-        api = createPatrolApi(origin, patrolHttpClient(OkHttpClient.Builder().proxy(Proxy.NO_PROXY)
+        val retrofit = patrolRetrofit(origin, patrolHttpClient(OkHttpClient.Builder().proxy(Proxy.NO_PROXY)
             .sslSocketFactory(clientTls.sslSocketFactory(), clientTls.trustManager)))
+        api = retrofit.create(PatrolApi::class.java)
+        workApi = retrofit.create(WorkContextApi::class.java)
         session = newRepository()
         patrol = PatrolRepository(api, session)
     }

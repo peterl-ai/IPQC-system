@@ -27,6 +27,12 @@ internal data class OperationEntry(
 )
 
 @Serializable
+internal data class WorkIssuanceState(val contextId: String? = null, val pendingId: String? = null)
+
+@Serializable
+private data class WorkSourceStatus(val revoked: Boolean)
+
+@Serializable
 private data class WorkspaceTask(val origin: String, val workspaceId: String, val task: WorkTask)
 
 @Serializable
@@ -117,6 +123,12 @@ internal class WorkTransaction(
     }
 
     suspend fun save(source: StoredWorkSource) = write("source", source.source.contextId, source)
+
+    suspend fun issuance(userId: String): WorkIssuanceState = read("issuance", userId) ?: WorkIssuanceState()
+    suspend fun saveIssuance(userId: String, state: WorkIssuanceState) = write("issuance", userId, state)
+
+    suspend fun sourceRevoked(contextId: String): Boolean = read<WorkSourceStatus>("source-revoked", contextId)?.revoked == true
+    suspend fun rememberSourceRevoked(contextId: String) = write("source-revoked", contextId, WorkSourceStatus(true))
 
     private fun slot(kind: String, id: String) = "work-v1:" + workHash("$namespace:$kind:$id")
 

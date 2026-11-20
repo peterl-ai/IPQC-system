@@ -124,4 +124,4 @@ data class LineTaskDetail(
 )
 
 @Serializable
-internal data class ProblemCode(val code: String? = null)
+internal data class ProblemCode(val code: String? = null, val sourceContextIds: List<String>? = null)

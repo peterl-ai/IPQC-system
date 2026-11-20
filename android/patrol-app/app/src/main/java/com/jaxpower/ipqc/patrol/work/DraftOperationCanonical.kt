@@ -70,7 +70,7 @@ internal object DraftOperationCanonical {
         }
     }
 
-    private fun decimalText(text: String): String {
+    fun decimalText(text: String): String {
         require(text.length <= 64 && decimal.matches(text))
         val parsed = requireNotNull(text.toBigDecimalOrNull())
         if (parsed.signum() == 0) return "0"

@@ -13,29 +13,52 @@ import androidx.activity.viewModels
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
-import com.jaxpower.ipqc.patrol.api.createPatrolApi
+import com.jaxpower.ipqc.patrol.api.PatrolApi
 import com.jaxpower.ipqc.patrol.api.httpsOrigin
+import com.jaxpower.ipqc.patrol.api.patrolRetrofit
 import com.jaxpower.ipqc.patrol.auth.KeystoreCredentialVault
 import com.jaxpower.ipqc.patrol.auth.SessionRepository
 import com.jaxpower.ipqc.patrol.offline.OfflineCache
+import com.jaxpower.ipqc.patrol.offline.RoomCacheRows
+import com.jaxpower.ipqc.patrol.offline.TaskCacheDatabase
 import com.jaxpower.ipqc.patrol.tasks.PatrolRepository
 import com.jaxpower.ipqc.patrol.ui.PatrolApp
 import com.jaxpower.ipqc.patrol.ui.PatrolViewModel
+import com.jaxpower.ipqc.patrol.work.OnlineWorkCoordinator
+import com.jaxpower.ipqc.patrol.work.ProtectedWorkRows
+import com.jaxpower.ipqc.patrol.work.SharedWorkStore
+import com.jaxpower.ipqc.patrol.work.WorkContextApi
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.callbackFlow
+import okhttp3.HttpUrl
 
 class PatrolApplication : Application() {
+    private val connection by lazy { httpsOrigin(BuildConfig.SERVER_URL)?.let { PatrolConnection(this, it) } }
+
+    internal val onlineWorkCoordinator get() = connection?.onlineWork
+
     val patrolViewModelFactory: ViewModelProvider.Factory by lazy {
-        val origin = httpsOrigin(BuildConfig.SERVER_URL)
-        val api = origin?.let { createPatrolApi(it) }
-        val offline = origin?.let { OfflineCache.open(this, it.toString()) }
-        val sessions = api?.let {
-            SessionRepository(it, KeystoreCredentialVault(this), requireNotNull(origin).toString(), offline = offline)
-        }
-        val patrol = api?.let { PatrolRepository(it, requireNotNull(sessions), offline) }
+        val configured = connection
         viewModelFactory {
-            initializer { PatrolViewModel(sessions, patrol, networkAvailability(this@PatrolApplication), offline) }
+            initializer {
+                PatrolViewModel(configured?.sessions, configured?.patrol,
+                    networkAvailability(this@PatrolApplication), configured?.offline)
+            }
         }
+    }
+}
+
+private class PatrolConnection(context: Context, url: HttpUrl) {
+    private val origin = url.toString()
+    private val retrofit = patrolRetrofit(url)
+    private val api = retrofit.create(PatrolApi::class.java)
+    private val database = TaskCacheDatabase.openWorkspace(context)
+    val offline = OfflineCache.open(context, origin, database)
+    val sessions = SessionRepository(api, KeystoreCredentialVault(context), origin, offline = offline)
+    val patrol = PatrolRepository(api, sessions, offline)
+    val onlineWork by lazy {
+        val store = SharedWorkStore(ProtectedWorkRows(RoomCacheRows(database), origin), sessions)
+        OnlineWorkCoordinator(origin, patrol, retrofit.create(WorkContextApi::class.java), sessions, store)
     }
 }
 

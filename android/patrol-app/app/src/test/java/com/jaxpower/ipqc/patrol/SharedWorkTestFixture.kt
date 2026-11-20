@@ -42,8 +42,8 @@ internal class SharedWorkTestFixture(val server: TestServer) {
         WorkSource(scope, id, identity.userId, identity.familyId, server.clock.instant().toString(),
             server.clock.instant().plusSeconds(60).toString(), Fixture.FAMILY_EXPIRY, 1)
 
-    suspend fun login(identity: SessionIdentity = a) {
-        server.admit(auth(identity), receipt(identity))
+    suspend fun login(identity: SessionIdentity = a, access: String = Fixture.ACCESS) {
+        server.admit(auth(identity, access = access), receipt(identity))
         sessions.login("synthetic", "test-only")
     }
 

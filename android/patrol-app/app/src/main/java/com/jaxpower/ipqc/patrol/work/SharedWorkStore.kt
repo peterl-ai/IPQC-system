@@ -4,6 +4,7 @@ import com.jaxpower.ipqc.patrol.api.PatrolFailure
 import com.jaxpower.ipqc.patrol.auth.SessionRepository
 import java.time.Instant
 import java.util.Base64
+import java.util.UUID
 
 // Internal substrate. A03-01 has no production producer of WorkAccess, source proof, or receipt evidence.
 internal class SharedWorkStore(private val rows: ProtectedWorkRows, private val sessions: SessionRepository) {
@@ -18,10 +19,69 @@ internal class SharedWorkStore(private val rows: ProtectedWorkRows, private val 
         }
     }
 
+    internal class IssuanceSnapshot(val state: WorkIssuanceState, val source: StoredWorkSource?, val revoked: Boolean)
+
+    suspend fun issuanceSnapshot(access: WorkAccess): IssuanceSnapshot {
+        val found = transact(access) {
+            val state = issuance(access.session.identity.userId)
+            workCheck(state.pendingId == null, WorkProblem.IssuanceUncertain)
+            val stored = state.contextId?.let { requireSource(it, access.task) }
+            if (stored != null) workCheck(stored.source.contributorUserId == access.session.identity.userId &&
+                validProof(stored.proof), WorkProblem.SourceUnavailable)
+            IssuanceSnapshot(state, stored, stored != null && sourceRevoked(stored.source.contextId))
+        }
+        return found ?: IssuanceSnapshot(WorkIssuanceState(), null, false)
+    }
+
+    suspend fun reserveIssuance(access: WorkAccess, expected: WorkIssuanceState): String =
+        requireNotNull(transact(access, create = true) {
+            val user = access.session.identity.userId
+            val state = issuance(user)
+            workCheck(state.pendingId == null, WorkProblem.IssuanceUncertain)
+            workCheck(state == expected, WorkProblem.StaleGrant)
+            val reservation = UUID.randomUUID().toString()
+            saveIssuance(user, state.copy(pendingId = reservation))
+            reservation
+        })
+
+    suspend fun finishIssuance(access: WorkAccess, reservation: String, source: StoredWorkSource) {
+        workCheck(source.source.task == access.task && access.owns(source.source) &&
+            validProof(source.proof), WorkProblem.SourceUnavailable)
+        workCheck(transact(access) {
+            val user = access.session.identity.userId
+            val state = issuance(user)
+            workCheck(state.pendingId == reservation, WorkProblem.IssuanceUncertain)
+            workCheck(this.source(source.source.contextId) == null && !sourceRevoked(source.source.contextId),
+                WorkProblem.OperationIdentityConflict)
+            save(source)
+            saveIssuance(user, WorkIssuanceState(contextId = source.source.contextId))
+            true
+        } == true, WorkProblem.StorageUnavailable)
+    }
+
+    // A definite no-send or negative HTTP result can retire only this exact reservation.
+    // Cleanup can run after HTTP auth rejection has already revoked the old session.
+    suspend fun releaseUnsentIssuance(task: WorkTask, userId: String, reservation: String) {
+        rows.transaction(task) {
+            val state = issuance(userId)
+            if (state.pendingId == reservation) saveIssuance(userId, state.copy(pendingId = null))
+        }
+    }
+
+    suspend fun recordSourceRevoked(access: WorkAccess, contextId: String) {
+        workCheck(transact(access) {
+            requireSource(contextId, access.task)
+            rememberSourceRevoked(contextId)
+            true
+        } == true, WorkProblem.StorageUnavailable)
+    }
+
     suspend fun enqueue(access: WorkAccess, input: SampleOperation): WorkOperation {
         val op = DraftOperationCanonical.normalize(input)
         return sessions.withWorkCaptureClock(access.session, rows.origin) { captureTime ->
+            access.requireCurrent()
             requireNotNull(rows.transaction(access.task, create = true) {
+                access.requireCurrent()
                 val context = requireSource(op.sourceWorkContextId, access.task)
                 workCheck(access.owns(context.source), WorkProblem.SourceUnavailable)
                 val old = operation(op.operationId)
@@ -30,19 +90,22 @@ internal class SharedWorkStore(private val rows: ProtectedWorkRows, private val 
                     workCheck(original.source == context.source &&
                         original.canonicalPayload == DraftOperationCanonical.operation(context.source, op, original.originLocalEditVersion),
                         WorkProblem.OperationIdentityConflict)
-                    return@transaction describe(old)
+                    return@transaction describe(old).also { access.requireCurrent() }
                 }
 
                 workCheck(op.attempt in access.currentAttempts && op.baseDraftVersion == access.serverDraftVersion,
                     WorkProblem.ScopeMismatch)
-                workCheck(context.source.contextId !in access.securityRevokedSources, WorkProblem.SourceUnavailable)
-                requireCaptureTime(context.source, captureTime)
+                workCheck(context.source.contextId !in access.securityRevokedSources &&
+                    !sourceRevoked(context.source.contextId), WorkProblem.SourceUnavailable)
+                if (access.requiresCaptureGrant)
+                    workCheck(access.captureGrant?.contextId == context.source.contextId, WorkProblem.SourceUnavailable)
+                requireCaptureTime(context.source, access.captureGrant, captureTime)
                 val catalog = catalog()
                 for (ref in op.dependencies) {
                     val prior = requireOperation(ref.operationId)
                     val previous = prior.envelope.operation
                     val state = describe(prior).state
-                    workCheck(state == WorkState.Accepted || access.mayRead(prior.envelope.source), WorkProblem.SourceUnavailable)
+                    workCheck(state == WorkState.Accepted || mayRead(access, prior.envelope.source), WorkProblem.SourceUnavailable)
                     workCheck(prior.envelope.reference() == ref && previous.attempt == op.attempt &&
                         previous.clientSampleId == op.clientSampleId && previous.kind != SampleKind.RemoveSample &&
                         state !in setOf(WorkState.Conflict, WorkState.Quarantined),
@@ -56,20 +119,24 @@ internal class SharedWorkStore(private val rows: ProtectedWorkRows, private val 
                 save(entry)
                 save(catalog.copy(localEditVersion = next, operationIds = catalog.operationIds + op.operationId))
                 val result = describe(entry)
-                requireCaptureTime(context.source, captureTime)
+                requireCaptureTime(context.source, access.captureGrant, captureTime)
+                access.requireCurrent()
                 result
             })
         }
     }
 
-    private suspend fun requireCaptureTime(source: WorkSource, captureTime: suspend () -> Instant?) {
+    private suspend fun requireCaptureTime(source: WorkSource, grant: CaptureGrant?,
+                                           captureTime: suspend () -> Instant?) {
         val now = try {
             captureTime()
         } catch (_: PatrolFailure) {
             null
         } ?: throw WorkFailure(WorkProblem.CaptureTimeUnavailable)
         workCheck(!now.isBefore(Instant.parse(source.issuedAtUtc)), WorkProblem.CaptureTimeUnavailable)
-        workCheck(now.isBefore(Instant.parse(source.captureUntilUtc)), WorkProblem.CaptureWindowClosed)
+        val original = Instant.parse(source.captureUntilUtc)
+        val deadline = grant?.let { minOf(original, it.until) } ?: original
+        workCheck(now.isBefore(deadline), WorkProblem.CaptureWindowClosed)
     }
 
     suspend fun operation(access: WorkAccess, id: String): WorkOperation? = transact(access) {
@@ -83,15 +150,15 @@ internal class SharedWorkStore(private val rows: ProtectedWorkRows, private val 
 
     // A trusted coordinator uses this narrow path to bootstrap source preflight.
     // Ordinary operation projections never carry a proof, and A03-01 performs no request.
-    suspend fun withSourceForPreflight(access: WorkAccess, operationId: String, use: (StoredWorkSource) -> Unit) {
+    suspend fun <T : Any> withSourceForPreflight(access: WorkAccess, operationId: String, use: (StoredWorkSource) -> T): T =
         transact(access) {
             val entry = requireOperation(operationId)
             workCheck(describe(entry).state == WorkState.Queued, WorkProblem.InvalidState)
             val stored = requireSource(entry.envelope.source.contextId, access.task)
-            workCheck(stored.source == entry.envelope.source, WorkProblem.SourceUnavailable)
+            workCheck(stored.source == entry.envelope.source && validProof(stored.proof) &&
+                !sourceRevoked(stored.source.contextId), WorkProblem.SourceUnavailable)
             use(stored)
-        }
-    }
+        } ?: throw WorkFailure(WorkProblem.SourceUnavailable)
 
     suspend fun prepareBatch(access: WorkAccess, id: String, operationIds: List<String>): BatchRecord {
         val ids = operationIds.sorted()
@@ -105,7 +172,7 @@ internal class SharedWorkStore(private val rows: ProtectedWorkRows, private val 
 
             val entries = ids.map { requireOperation(it) }
             workCheck(entries.all { it.batchId == null && it.quarantine == null }, WorkProblem.BatchIdentityConflict)
-            workCheck(entries.all { access.mayRead(it.envelope.source) }, WorkProblem.SourceUnavailable)
+            workCheck(entries.all { mayRead(access, it.envelope.source) }, WorkProblem.SourceUnavailable)
             val expected = entries.first().envelope.operation.baseDraftVersion
             workCheck(entries.all { it.envelope.operation.baseDraftVersion == expected }, WorkProblem.ScopeMismatch)
             val dependencies = entries.flatMap { it.envelope.operation.dependencies }.distinct()
@@ -140,7 +207,7 @@ internal class SharedWorkStore(private val rows: ProtectedWorkRows, private val 
             workCheck(batch.operations.all { ref ->
                 val op = requireOperation(ref.operationId).envelope
                 workCheck(op.operation.attempt in access.currentAttempts, WorkProblem.ScopeMismatch)
-                access.approves(op.source)
+                !sourceRevoked(op.source.contextId) && access.approves(op.source)
             }, WorkProblem.SourceUnavailable)
             batch.copy(state = WorkState.InFlight)
         }
@@ -265,7 +332,7 @@ internal class SharedWorkStore(private val rows: ProtectedWorkRows, private val 
 
     private suspend fun WorkTransaction.ensureBatchRead(access: WorkAccess, record: BatchRecord) {
         if (record.state == WorkState.Accepted) return
-        workCheck(record.operations.all { access.mayRead(requireOperation(it.operationId).envelope.source) },
+        workCheck(record.operations.all { mayRead(access, requireOperation(it.operationId).envelope.source) },
             WorkProblem.SourceUnavailable)
     }
 
@@ -278,7 +345,7 @@ internal class SharedWorkStore(private val rows: ProtectedWorkRows, private val 
 
     private suspend fun WorkTransaction.visible(access: WorkAccess, entry: OperationEntry): WorkOperation? {
         val result = describe(entry)
-        return result.takeIf { it.state == WorkState.Accepted || access.mayRead(entry.envelope.source) }
+        return result.takeIf { it.state == WorkState.Accepted || mayRead(access, entry.envelope.source) }
     }
 
     private suspend fun WorkTransaction.requireSource(id: String, task: WorkTask): StoredWorkSource =
@@ -292,7 +359,13 @@ internal class SharedWorkStore(private val rows: ProtectedWorkRows, private val 
 
     private suspend fun <T> transact(access: WorkAccess, create: Boolean = false,
                                      action: suspend WorkTransaction.() -> T): T? =
-        sessions.withWorkSession(access.session, rows.origin) { rows.transaction(access.task, create, action) }
+        sessions.withWorkSession(access.session, rows.origin) {
+            access.requireCurrent()
+            rows.transaction(access.task, create) {
+                access.requireCurrent()
+                action().also { access.requireCurrent() }
+            }
+        }
 
     private fun WorkAccess.owns(source: WorkSource) = session.identity.userId == source.contributorUserId &&
         session.identity.familyId == source.originPersonalSessionId
@@ -303,7 +376,8 @@ internal class SharedWorkStore(private val rows: ProtectedWorkRows, private val 
                 Instant.parse(it.captureUntilUtc) == Instant.parse(source.captureUntilUtc)
         }
 
-    private fun WorkAccess.mayRead(source: WorkSource) = owns(source) || approves(source)
+    private suspend fun WorkTransaction.mayRead(access: WorkAccess, source: WorkSource) =
+        access.owns(source) || (!sourceRevoked(source.contextId) && access.approves(source))
 
     private fun WorkConflict.isSourceRejection() =
         this == WorkConflict.SourceSecurityRevoked || this == WorkConflict.SourceProvenanceConflict
