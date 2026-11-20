@@ -211,9 +211,11 @@ class OfflineCache internal constructor(
     companion object {
         private const val FORMAT = 1
 
-        fun open(context: Context, origin: String): OfflineCache {
+        fun open(context: Context, origin: String): OfflineCache =
+            open(context, origin, TaskCacheDatabase.openWorkspace(context))
+
+        internal fun open(context: Context, origin: String, database: TaskCacheDatabase): OfflineCache {
             val directory = context.noBackupFilesDir
-            val database = TaskCacheDatabase.openWorkspace(context)
             val receipt = ProtectedReceipt(File(directory, "offline-admission.v1"), KeystoreBox("ipqc.offline-admission.v1"))
             val snapshots = TaskSnapshots(RoomCacheRows(database), KeystoreBox(TaskCacheDatabase.WORK_KEY_ALIAS), origin)
             return OfflineCache(origin, AndroidOfflineClock(context.applicationContext), receipt, snapshots)

@@ -11,7 +11,7 @@ internal const val CANONICAL_VERSION = 1
 internal enum class WorkProblem {
     ScopeMismatch, SourceUnavailable, OperationIdentityConflict, BatchIdentityConflict,
     DependencyMismatch, InvalidState, ReceiptMismatch, StorageUnavailable,
-    CaptureTimeUnavailable, CaptureWindowClosed,
+    CaptureTimeUnavailable, CaptureWindowClosed, StaleGrant, IssuanceUncertain,
 }
 
 internal class WorkFailure(val problem: WorkProblem) : Exception(problem.name)
@@ -44,7 +44,12 @@ internal class WorkAccess(
     currentAttempts: Set<WorkAttempt>,
     validatedSources: Set<ValidatedWorkSource> = emptySet(),
     securityRevokedSources: Set<String> = emptySet(),
+    val requiresCaptureGrant: Boolean = false,
+    val captureGrant: CaptureGrant? = null,
+    private val current: () -> Boolean = { true },
 ) {
+    fun requireCurrent() = workCheck(current(), WorkProblem.StaleGrant)
+
     val currentAttempts = currentAttempts.toSet()
     val validatedSources = validatedSources.toSet()
     val securityRevokedSources = securityRevokedSources.toSet()
@@ -54,6 +59,8 @@ internal class WorkAccess(
         require(serverDraftVersion >= 0 && this.currentAttempts.map { it.taskItemId }.distinct().size == this.currentAttempts.size)
     }
 }
+
+internal class CaptureGrant(val contextId: String, val until: Instant)
 
 internal data class ValidatedWorkSource(val contextId: String, val contributorUserId: String, val captureUntilUtc: String) {
     init { require(isWorkId(contextId) && isWorkId(contributorUserId)) }
@@ -82,7 +89,10 @@ internal data class WorkSource(
 
 // This type is confined to the protected store and a coordinator preflight callback.
 @Serializable
-internal class StoredWorkSource(val source: WorkSource, val proof: String)
+internal class StoredWorkSource(
+    val source: WorkSource, val proof: String,
+    val issuedAuthVersion: Int? = null, val issuedRevision: Long? = null,
+)
 
 @Serializable
 internal data class OperationReference(val operationId: String, val contentHash: String) {

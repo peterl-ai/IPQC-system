@@ -136,14 +136,16 @@ fun patrolHttpClient(builder: OkHttpClient.Builder = OkHttpClient.Builder()): Ok
     }
     .build()
 
-fun createPatrolApi(origin: HttpUrl, client: OkHttpClient = patrolHttpClient()): PatrolApi {
+fun createPatrolApi(origin: HttpUrl, client: OkHttpClient = patrolHttpClient()): PatrolApi =
+    patrolRetrofit(origin, client).create(PatrolApi::class.java)
+
+internal fun patrolRetrofit(origin: HttpUrl, client: OkHttpClient = patrolHttpClient()): Retrofit {
     require(origin.isHttps && origin == httpsOrigin(origin.toString()))
     return Retrofit.Builder()
         .baseUrl(origin)
         .client(client)
         .addConverterFactory(wireJson.asConverterFactory("application/json".toMediaType()))
         .build()
-        .create(PatrolApi::class.java)
 }
 
 suspend fun <T : Any> responseBody(call: suspend () -> Response<T>): T =
@@ -163,23 +165,24 @@ private suspend fun <T> response(call: suspend () -> Response<T>): Response<T> =
     throw PatrolFailure(Issue.CONNECTION)
 }
 
+// Read only bounded machine-readable fields. Titles and raw errors never leave transport.
+internal fun Response<*>.problemCode(): ProblemCode? = errorBody()?.use { body ->
+    try {
+        val source = body.source()
+        source.request(4097)
+        if (source.buffer.size <= 4096) wireJson.decodeFromString<ProblemCode>(source.buffer.readUtf8()) else null
+    } catch (_: IOException) {
+        null
+    } catch (_: SerializationException) {
+        null
+    }
+}
+
 private fun Response<*>.toIssue(): Issue {
     // HTTP authentication denial takes precedence over an optional application problem code.
     if (code() == 401) return Issue.UNAUTHENTICATED
     if (code() == 403) return Issue.FORBIDDEN
-    val code = errorBody()?.use { body ->
-        // Read only the bounded machine code, never surface server error titles or bodies.
-        try {
-            val source = body.source()
-            source.request(4097)
-            if (source.buffer.size <= 4096) wireJson.decodeFromString<ProblemCode>(source.buffer.readUtf8()).code else null
-        } catch (_: IOException) {
-            null
-        } catch (_: SerializationException) {
-            null
-        }
-    }
-    return when (code) {
+    return when (problemCode()?.code) {
         "LineConfigurationUnavailable" -> Issue.LINE_CONFIGURATION
         "PersonalAccessConfigurationUnavailable" -> Issue.CONFIGURATION
         "TaskLineMismatch" -> Issue.LINE_MISMATCH

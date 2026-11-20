@@ -47,9 +47,15 @@ class PatrolRepository(
     suspend fun detail(line: ProductionLine, task: LineTaskSummary): LineTaskDetail = sessions.read(
         accepted = { identity, detail -> offline?.cacheDetail(identity, detail) },
     ) { bearer, identity ->
-        ensureResponse(validGuid(task.id) && validGuid(line.id) && task.lineId == line.id)
-        val result = responseBody { api.detail(bearer, task.id, line.id) }
-        validate(result.summary, line.id, identity)
+        onlineDetail(bearer, identity, line.id, task)
+    }
+
+    // Optional coordinator reads use this validator without replacing an accepted A02 snapshot.
+    internal suspend fun onlineDetail(bearer: String, identity: SessionIdentity, lineId: String,
+                                      task: LineTaskSummary): LineTaskDetail {
+        ensureResponse(validGuid(task.id) && validGuid(lineId) && task.lineId == lineId)
+        val result = responseBody { api.detail(bearer, task.id, lineId) }
+        validate(result.summary, lineId, identity)
         ensureResponse(result.summary.id == task.id && !result.canExecute &&
             validGuid(result.patrolPlanId) && validGuid(result.patrolStandardId))
         if (result.summary.readFoundationStatus !in setOf("FoundationOnly", "DraftFoundation") ||
@@ -61,7 +67,7 @@ class PatrolRepository(
             result.items.map { it.sequenceNo }.distinct().size == result.items.size &&
             result.items.map { it.id }.distinct().size == result.items.size &&
             result.items.all { validGuid(it.id) && validGuid(it.sourcePatrolStandardItemId) && it.sequenceNo > 0 })
-        result
+        return result
     }
 
     private fun validate(task: LineTaskSummary, line: String, authority: SessionIdentity) {
