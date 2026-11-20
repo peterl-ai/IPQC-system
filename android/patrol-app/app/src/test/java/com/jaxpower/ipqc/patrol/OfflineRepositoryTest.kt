@@ -339,6 +339,8 @@ internal class OfflineTestFixture(val server: TestServer, api: PatrolApi = serve
     }
 
     private class MemoryRows : CacheRows {
+        override suspend fun <T> transaction(block: suspend () -> T): T = block()
+
         private val entries = mutableMapOf<String, ByteArray>()
         @Volatile var onFrozenDetailRead: (() -> Unit)? = null
 

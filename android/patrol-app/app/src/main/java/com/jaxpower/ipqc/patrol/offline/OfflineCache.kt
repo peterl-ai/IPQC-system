@@ -207,9 +207,9 @@ class OfflineCache internal constructor(
 
         fun open(context: Context, origin: String): OfflineCache {
             val directory = context.noBackupFilesDir
-            val database = TaskCacheDatabase.open(context, File(directory, "patrol-task-cache.db"))
+            val database = TaskCacheDatabase.openWorkspace(context)
             val receipt = ProtectedReceipt(File(directory, "offline-admission.v1"), KeystoreBox("ipqc.offline-admission.v1"))
-            val snapshots = TaskSnapshots(RoomCacheRows(database.entries()), KeystoreBox("ipqc.shared-task-cache.v1"), origin)
+            val snapshots = TaskSnapshots(RoomCacheRows(database), KeystoreBox(TaskCacheDatabase.WORK_KEY_ALIAS), origin)
             return OfflineCache(origin, AndroidOfflineClock(context.applicationContext), receipt, snapshots)
         }
     }
