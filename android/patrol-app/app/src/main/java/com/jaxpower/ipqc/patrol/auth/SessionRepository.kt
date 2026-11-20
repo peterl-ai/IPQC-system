@@ -85,6 +85,21 @@ class SessionRepository(
         result
     }
 
+    internal suspend fun <T> withWorkCaptureClock(session: WorkSession, expectedOrigin: String,
+                                                  action: suspend (suspend () -> Instant?) -> T): T =
+        withWorkSession(session, expectedOrigin) {
+            val cache = offline
+            if (cache == null) action { null }
+            else cache.withCaptureClock(session.identity) { observe ->
+                action {
+                    eligibleWorkSession()
+                    val now = observe()
+                    eligibleWorkSession()
+                    now
+                }
+            }
+        }
+
     private fun eligibleWorkSession(): Credentials {
         val auth = current()
         val now = clock.instant()

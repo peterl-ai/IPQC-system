@@ -24,6 +24,9 @@ internal abstract class CacheDao {
     @Query("SELECT COUNT(*) FROM cache_chunk")
     abstract suspend fun count(): Int
 
+    @Query("SELECT DISTINCT slot FROM cache_chunk WHERE slot GLOB 'work-v1:*' ORDER BY slot")
+    abstract suspend fun legacyWorkSlots(): List<String>
+
     @Query("DELETE FROM cache_chunk WHERE slot = :slot")
     abstract suspend fun delete(slot: String)
 
@@ -55,6 +58,7 @@ internal interface CacheRows {
     suspend fun <T> transaction(block: suspend () -> T): T
     suspend fun read(slot: String): ByteArray?
     suspend fun count(): Int
+    suspend fun legacyWorkSlots(): List<String>
     suspend fun replace(slot: String, sealed: ByteArray)
 }
 
@@ -82,6 +86,8 @@ internal class RoomCacheRows(private val database: TaskCacheDatabase) : CacheRow
     }
 
     override suspend fun count() = dao.count()
+
+    override suspend fun legacyWorkSlots() = dao.legacyWorkSlots()
 
     override suspend fun replace(slot: String, sealed: ByteArray) {
         // A full frozen definition may exceed Android's per-row CursorWindow limit.

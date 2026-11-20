@@ -7,6 +7,143 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class SharedWorkStoreTest {
+    @Test fun captureRequiresTimeStrictlyBeforeDeadlineButExactReplaySurvivesIt() = runBlocking<Unit> {
+        TestServer().use { server ->
+            val f = SharedWorkTestFixture(server)
+            val access = f.preparedSource()
+            f.offline.advance(59_999)
+            val saved = f.store.enqueue(access, f.capture()).envelope
+            f.offline.advance(1)
+            expectWork(WorkProblem.CaptureWindowClosed) { f.store.enqueue(access, f.capture(11)) }
+            f.offline.advance(1)
+            expectWork(WorkProblem.CaptureWindowClosed) { f.store.enqueue(access, f.capture(12)) }
+            val replay = f.reopen().enqueue(access, f.capture()).envelope
+            assertEquals(saved.canonicalPayload, replay.canonicalPayload)
+            assertEquals(saved.contentHash, replay.contentHash)
+            assertEquals(saved.originLocalEditVersion, replay.originLocalEditVersion)
+            expectWork(WorkProblem.OperationIdentityConflict) { f.store.enqueue(access, f.capture(sample = testId(42))) }
+            assertEquals(1, f.store.operations(access).size)
+        }
+    }
+
+    @Test fun refreshedPersonalAuthorityDoesNotExtendSourceButNewContextCanCapture() = runBlocking<Unit> {
+        TestServer().use { server ->
+            val f = SharedWorkTestFixture(server)
+            val before = f.preparedSource()
+            f.offline.advance(300_000)
+            f.rotate(restart = false)
+            val after = f.access()
+            assertNotSame(before.session.authorityId, after.session.authorityId)
+            expectIssue(Issue.UNAUTHENTICATED) { f.store.enqueue(before, f.capture()) }
+            expectWork(WorkProblem.CaptureWindowClosed) { f.store.enqueue(after, f.capture()) }
+            val fresh = f.sourceFor(f.a, testId(8))
+            f.store.storeSource(after, fresh, f.proof)
+            val saved = f.store.enqueue(after, f.capture(context = fresh)).envelope
+            assertEquals(fresh.contextId, saved.source.contextId)
+            assertEquals(1L, saved.originLocalEditVersion)
+        }
+    }
+
+    @Test fun repositoryReopenNewAccessAndLineSwitchCannotRenewAContextAcrossReboot() = runBlocking<Unit> {
+        TestServer().use { server ->
+            val f = SharedWorkTestFixture(server)
+            val original = f.preparedSource()
+            val secondTask = f.task.copy(taskId = testId(41), lineId = Fixture.SECOND_LINE)
+            val secondContext = f.sourceFor(f.a, testId(8), secondTask)
+            f.store.storeSource(f.access(secondTask), secondContext, f.proof)
+            val saved = f.store.enqueue(original, f.capture()).envelope
+            f.offline.advance(60_000)
+            f.offline.rebootAt(60_000)
+            expectWork(WorkProblem.CaptureWindowClosed) { f.reopen().enqueue(f.access(), f.capture(11)) }
+            expectWork(WorkProblem.CaptureWindowClosed) {
+                f.reopen().enqueue(f.access(secondTask), f.capture(11, secondContext))
+            }
+
+            f.rotate(restart = true)
+            val restored = f.access()
+            expectWork(WorkProblem.CaptureWindowClosed) { f.store.enqueue(restored, f.capture(11)) }
+            assertEquals(saved.contentHash, f.store.enqueue(restored, f.capture()).envelope.contentHash)
+        }
+    }
+
+    @Test fun rollbackMissingAndCorruptClockEvidenceFailClosedForNewCapture() = runBlocking<Unit> {
+        TestServer().use { server ->
+            val f = SharedWorkTestFixture(server)
+            val access = f.preparedSource()
+            f.offline.advance(1_000)
+            val saved = f.store.enqueue(access, f.capture()).envelope
+            f.offline.rollbackWallClock(1)
+            expectWork(WorkProblem.CaptureTimeUnavailable) { f.store.enqueue(access, f.capture(11)) }
+            expectWork(WorkProblem.CaptureTimeUnavailable) { f.reopen().enqueue(f.access(), f.capture(11)) }
+            assertEquals(saved.contentHash, f.store.enqueue(access, f.capture()).envelope.contentHash)
+        }
+
+        TestServer().use { server ->
+            val f = SharedWorkTestFixture(server)
+            val access = f.preparedSource()
+            f.offline.receipt.replace("invalid protected clock record".encodeToByteArray())
+            expectWork(WorkProblem.CaptureTimeUnavailable) { f.store.enqueue(access, f.capture()) }
+            assertNull(f.store.operation(access, f.capture().operationId))
+        }
+    }
+
+    @Test fun knownSecurityRevocationBlocksCaptureAndTransportWithoutErasingReplay() = runBlocking<Unit> {
+        TestServer().use { server ->
+            val f = SharedWorkTestFixture(server)
+            val access = f.preparedSource()
+            val saved = f.store.enqueue(access, f.capture())
+            val batch = f.store.prepareBatch(access, testId(20), listOf(saved.envelope.operation.operationId))
+            val revoked = f.access(revoked = setOf(f.source.contextId))
+            expectWork(WorkProblem.SourceUnavailable) { f.store.enqueue(revoked, f.capture(11)) }
+            expectWork(WorkProblem.SourceUnavailable) { f.store.startAttempt(revoked, batch.batchId) }
+            assertEquals(WorkState.Queued, f.store.enqueue(revoked, f.capture()).state)
+        }
+    }
+
+    @Test fun operationIdIsExclusiveAcrossTasksLinesAndSourceContexts() = runBlocking<Unit> {
+        TestServer().use { server ->
+            val f = SharedWorkTestFixture(server)
+            val firstTaskAccess = f.preparedSource()
+            val saved = f.store.enqueue(firstTaskAccess, f.capture()).envelope
+            val secondContext = f.sourceFor(f.a, testId(8))
+            f.store.storeSource(firstTaskAccess, secondContext, f.proof)
+            expectWork(WorkProblem.OperationIdentityConflict) {
+                f.store.enqueue(firstTaskAccess, f.capture(context = secondContext))
+            }
+
+            val sameLine = f.task.copy(taskId = testId(42))
+            val otherLine = f.task.copy(taskId = testId(43), lineId = Fixture.SECOND_LINE)
+            for (scope in listOf(sameLine, otherLine)) {
+                val access = f.access(scope)
+                val source = f.sourceFor(f.a, testId(9), scope)
+                val reopened = f.reopen()
+                reopened.storeSource(access, source, f.proof)
+                expectWork(WorkProblem.OperationIdentityConflict) { reopened.enqueue(access, f.capture(context = source)) }
+                assertTrue(reopened.operations(access).isEmpty())
+            }
+            assertEquals(saved.contentHash, f.reopen().enqueue(firstTaskAccess, f.capture()).envelope.contentHash)
+        }
+    }
+
+    @Test fun operationIdAlsoConflictsAcrossEnvironmentsWithinTheInstallation() = runBlocking<Unit> {
+        TestServer().use { server ->
+            val f = SharedWorkTestFixture(server)
+            val first = f.preparedSource()
+            val original = f.store.enqueue(first, f.capture()).envelope
+            f.sessions.logout(attemptRemote = false)
+            val identity = f.a.copy(environment = "synthetic-second-env")
+            f.login(identity)
+            val scope = f.task.copy(environmentId = identity.environment)
+            val access = f.access(scope)
+            val context = f.sourceFor(identity, testId(8), scope)
+            f.store.storeSource(access, context, f.proof)
+            expectWork(WorkProblem.OperationIdentityConflict) { f.store.enqueue(access, f.capture(context = context)) }
+            assertTrue(f.store.operations(access).isEmpty())
+            val other = f.store.enqueue(access, f.capture(11, context)).envelope
+            assertEquals(original.workspaceId, other.workspaceId)
+        }
+    }
+
     @Test fun operationIdCanonicalBytesAndLocalEditSurviveRetry() = runBlocking<Unit> {
         TestServer().use { server ->
             val f = SharedWorkTestFixture(server)
@@ -163,10 +300,11 @@ class SharedWorkStoreTest {
     @Test fun sessionBoundTaskAndSourceAuthorizationPreserveAUnderB() = runBlocking<Unit> {
         TestServer().use { server ->
             val f = SharedWorkTestFixture(server)
-            expectIssue(Issue.UNAUTHENTICATED) { server.session.bindWorkSession() }
+            expectIssue(Issue.UNAUTHENTICATED) { f.sessions.bindWorkSession() }
             val a = f.preparedSource()
             val original = f.store.enqueue(a, f.capture()).envelope
-            server.session.logout(attemptRemote = false)
+            f.offline.advance(60_001)
+            f.sessions.logout(attemptRemote = false)
             assertNull(server.vault.saved)
             f.login(f.b)
             expectIssue(Issue.UNAUTHENTICATED) { f.reopen().operation(a, original.operation.operationId) }
@@ -175,6 +313,13 @@ class SharedWorkStoreTest {
             expectWork(WorkProblem.SourceUnavailable) { f.store.enqueue(bBeforePreflight, f.capture(11)) }
             expectWork(WorkProblem.SourceUnavailable) { f.store.storeSource(bBeforePreflight, f.source, f.proof) }
             val b = f.access()
+            f.reopen().withSourceForPreflight(bBeforePreflight, original.operation.operationId) {
+                assertEquals(original.source, it.source)
+                assertEquals(f.proof, it.proof)
+            }
+            val historicalBatch = f.reopen().prepareBatch(b, testId(27), listOf(original.operation.operationId))
+            f.reopen().startAttempt(b, historicalBatch.batchId)
+            assertEquals(WorkState.InFlight, f.reopen().batch(b, historicalBatch.batchId)?.state)
             assertThrows(IllegalArgumentException::class.java) { f.task.copy(workflowVersion = 1) }
             expectWork(WorkProblem.ScopeMismatch) { f.access(identity = f.task.copy(environmentId = "other-env")) }
             expectIssue(Issue.UNAUTHENTICATED) {

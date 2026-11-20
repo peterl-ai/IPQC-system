@@ -9,6 +9,8 @@ import com.jaxpower.ipqc.patrol.offline.workspaceId
 import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.decodeFromJsonElement
+import kotlinx.serialization.json.jsonObject
 
 @Serializable
 internal data class WorkCatalog(
@@ -26,6 +28,9 @@ internal data class OperationEntry(
 
 @Serializable
 private data class WorkspaceTask(val origin: String, val workspaceId: String, val task: WorkTask)
+
+@Serializable
+private data class OperationIdClaim(val operationSlot: String?)
 
 internal class ProtectedWorkRows(
     private val rows: CacheRows,
@@ -65,6 +70,42 @@ internal class WorkTransaction(
 
     suspend fun save(entry: OperationEntry) = write("operation", entry.envelope.operation.operationId, entry)
 
+    // A new operation and its cross-task claim share the caller's Room transaction.
+    suspend fun reserveOperationId(id: String) {
+        val marker = registrySlot("ready")
+        when (readSealed<Int>(marker)) {
+            null -> {
+                indexLegacyOperations()
+                writeSealed(marker, 1)
+            }
+            1 -> Unit
+            else -> throw WorkFailure(WorkProblem.StorageUnavailable)
+        }
+        val claim = registrySlot(id)
+        workCheck(readSealed<OperationIdClaim>(claim) == null, WorkProblem.OperationIdentityConflict)
+        writeSealed(claim, OperationIdClaim(slot("operation", id)))
+    }
+
+    private suspend fun indexLegacyOperations() {
+        for (legacySlot in rows.legacyWorkSlots()) {
+            val sealed = checkNotNull(rows.read(legacySlot))
+            val entry = decode(cipher.open(legacySlot, sealed)) { text ->
+                val record = Json.parseToJsonElement(text).jsonObject
+                if ("envelope" in record) Json.decodeFromJsonElement<OperationEntry>(record) else null
+            } ?: continue
+            val envelope = entry.envelope
+            val id = envelope.operation.operationId
+            workCheck(envelope.workspaceId == workspaceId && isWorkId(id), WorkProblem.StorageUnavailable)
+            val claim = registrySlot(id)
+            val owner = readSealed<OperationIdClaim>(claim)
+            // If a pre-repair build already duplicated an ID, preserve both records and block new claims.
+            if (owner == null) writeSealed(claim, OperationIdClaim(legacySlot))
+            else if (owner.operationSlot != legacySlot) writeSealed(claim, OperationIdClaim(null))
+        }
+    }
+
+    private fun registrySlot(id: String) = "work-id-v1:" + workHash("$workspaceId:$id")
+
     suspend fun batch(id: String): BatchRecord? = read<BatchRecord>("batch", id)?.also {
         workCheck(it.batchId == id, WorkProblem.StorageUnavailable)
     }
@@ -79,14 +120,17 @@ internal class WorkTransaction(
 
     private fun slot(kind: String, id: String) = "work-v1:" + workHash("$namespace:$kind:$id")
 
-    private suspend inline fun <reified T> read(kind: String, id: String = ""): T? {
-        val slot = slot(kind, id)
+    private suspend inline fun <reified T> read(kind: String, id: String = ""): T? = readSealed(slot(kind, id))
+
+    private suspend inline fun <reified T> readSealed(slot: String): T? {
         val sealed = rows.read(slot) ?: return null
         return decode(cipher.open(slot, sealed)) { Json.decodeFromString<T>(it) }
     }
 
-    private suspend inline fun <reified T> write(kind: String, id: String = "", value: T) {
-        val slot = slot(kind, id)
+    private suspend inline fun <reified T> write(kind: String, id: String = "", value: T) =
+        writeSealed(slot(kind, id), value)
+
+    private suspend inline fun <reified T> writeSealed(slot: String, value: T) {
         val bytes = Json.encodeToString(value).encodeToByteArray()
         try {
             rows.replace(slot, cipher.seal(slot, bytes))

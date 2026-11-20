@@ -81,6 +81,12 @@ class OfflineCache internal constructor(
 
     suspend fun resume(expected: SessionIdentity? = null): OfflineSession? = locked { observe(expected) }
 
+    // Acquire this lock before the work transaction. Snapshot reads take the same lock before Room.
+    internal suspend fun <T> withCaptureClock(identity: SessionIdentity,
+                                              action: suspend (suspend () -> Instant?) -> T): T = mutex.withLock {
+        action { storage { observe(identity)?.apparentNow } }
+    }
+
     internal suspend fun cacheLines(identity: SessionIdentity, lines: List<ProductionLine>) = locked {
         snapshots.storeDirectory(identity, LineDirectory(lines), downloadedTime())
     }

@@ -11,6 +11,7 @@ internal const val CANONICAL_VERSION = 1
 internal enum class WorkProblem {
     ScopeMismatch, SourceUnavailable, OperationIdentityConflict, BatchIdentityConflict,
     DependencyMismatch, InvalidState, ReceiptMismatch, StorageUnavailable,
+    CaptureTimeUnavailable, CaptureWindowClosed,
 }
 
 internal class WorkFailure(val problem: WorkProblem) : Exception(problem.name)
@@ -42,9 +43,11 @@ internal class WorkAccess(
     val serverDraftVersion: Long,
     currentAttempts: Set<WorkAttempt>,
     validatedSources: Set<ValidatedWorkSource> = emptySet(),
+    securityRevokedSources: Set<String> = emptySet(),
 ) {
     val currentAttempts = currentAttempts.toSet()
     val validatedSources = validatedSources.toSet()
+    val securityRevokedSources = securityRevokedSources.toSet()
 
     init {
         workCheck(task.environmentId == session.identity.environment, WorkProblem.ScopeMismatch)

@@ -1,6 +1,7 @@
 package com.jaxpower.ipqc.patrol
 
 import com.jaxpower.ipqc.patrol.auth.SessionIdentity
+import com.jaxpower.ipqc.patrol.auth.SessionRepository
 import com.jaxpower.ipqc.patrol.offline.CacheCipher
 import com.jaxpower.ipqc.patrol.offline.CacheRows
 import com.jaxpower.ipqc.patrol.work.*
@@ -29,24 +30,47 @@ internal class SharedWorkTestFixture(val server: TestServer) {
     val source = sourceFor(a, testId(7))
     val proof = Base64.getUrlEncoder().withoutPadding().encodeToString(ByteArray(32) { 73 })
     private val rows = MemoryCacheRows()
-    val store = reopen()
+    val offline = OfflineTestFixture(server)
+    var sessions = offline.sessions
+        private set
+    val store get() = reopen()
 
     fun reopen(origin: String = server.origin.toString()) =
-        SharedWorkStore(ProtectedWorkRows(rows, origin, TestWorkCipher), server.session)
+        SharedWorkStore(ProtectedWorkRows(rows, origin, TestWorkCipher), sessions)
 
-    fun sourceFor(identity: SessionIdentity, id: String) = WorkSource(task, id, identity.userId, identity.familyId,
-        Fixture.NOW, "2026-11-22T14:00:00Z", Fixture.FAMILY_EXPIRY, 1)
+    fun sourceFor(identity: SessionIdentity, id: String, scope: WorkTask = task) =
+        WorkSource(scope, id, identity.userId, identity.familyId, server.clock.instant().toString(),
+            server.clock.instant().plusSeconds(60).toString(), Fixture.FAMILY_EXPIRY, 1)
 
     suspend fun login(identity: SessionIdentity = a) {
-        server.admit(Fixture.auth(user = identity.userId, family = identity.familyId),
-            Fixture.receipt(user = identity.userId, family = identity.familyId))
-        server.session.login("synthetic", "test-only")
+        server.admit(auth(identity), receipt(identity))
+        sessions.login("synthetic", "test-only")
     }
 
+    suspend fun rotate(restart: Boolean) {
+        server.admit(auth(a, "synthetic-access-rotated", "synthetic-refresh-rotated"), receipt(a))
+        if (restart) {
+            sessions = SessionRepository(server.api, server.vault, server.origin.toString(), server.clock, offline.reopen())
+            requireNotNull(sessions.restore())
+        } else {
+            sessions.read { _, _ -> Unit }
+        }
+    }
+
+    private fun auth(identity: SessionIdentity, access: String = Fixture.ACCESS, refresh: String = Fixture.REFRESH) =
+        Fixture.auth(user = identity.userId, family = identity.familyId, access = access, refresh = refresh,
+            expires = server.clock.instant().plusSeconds(300).toString()).replace(a.environment, identity.environment)
+
+    private fun receipt(identity: SessionIdentity) = Fixture.receipt(user = identity.userId, family = identity.familyId)
+        .replace(a.environment, identity.environment)
+        .replace(Fixture.NOW, server.clock.instant().toString())
+        .replace("2026-11-22T14:00:00Z", server.clock.instant().plusSeconds(72 * 3600L).toString())
+
     suspend fun access(identity: WorkTask = task, version: Long = 7, checked: List<WorkSource> = listOf(source),
-                       attempts: Set<WorkAttempt> = setOf(attempt)): WorkAccess = WorkAccess(
-        server.session.bindWorkSession(), identity, version, attempts,
+                       attempts: Set<WorkAttempt> = setOf(attempt), revoked: Set<String> = emptySet()): WorkAccess = WorkAccess(
+        sessions.bindWorkSession(), identity, version, attempts,
         checked.map { ValidatedWorkSource(it.contextId, it.contributorUserId, it.captureUntilUtc) }.toSet(),
+        revoked,
     )
 
     suspend fun preparedSource(): WorkAccess {
@@ -94,6 +118,7 @@ internal class SharedWorkTestFixture(val server: TestServer) {
 
         override suspend fun read(slot: String) = records[slot]?.copyOf()
         override suspend fun count() = records.size
+        override suspend fun legacyWorkSlots() = records.keys.filter { it.startsWith("work-v1:") }
         override suspend fun replace(slot: String, sealed: ByteArray) { records[slot] = sealed.copyOf() }
     }
 

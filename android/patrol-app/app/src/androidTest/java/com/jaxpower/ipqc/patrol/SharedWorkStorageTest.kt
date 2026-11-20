@@ -5,6 +5,7 @@ import com.jaxpower.ipqc.patrol.OfflineDeviceFixture.Companion.IDENTITY
 import com.jaxpower.ipqc.patrol.OfflineDeviceFixture.Companion.LINE
 import com.jaxpower.ipqc.patrol.OfflineDeviceFixture.Companion.NOW
 import com.jaxpower.ipqc.patrol.OfflineDeviceFixture.Companion.ORIGIN
+import com.jaxpower.ipqc.patrol.OfflineDeviceFixture.Companion.SECOND_LINE
 import com.jaxpower.ipqc.patrol.OfflineDeviceFixture.Companion.TASK
 import com.jaxpower.ipqc.patrol.api.*
 import com.jaxpower.ipqc.patrol.auth.SessionIdentity
@@ -117,13 +118,15 @@ class SharedWorkStorageTest {
             val access = access(device.sessions, true)
             val base = store(device, device.sessions)
             base.storeSource(access, source, proof)
+            val before = device.rows.count()
             val failing = object : CacheRows by device.rows {
                 override suspend fun replace(slot: String, sealed: ByteArray) {
                     device.rows.replace(slot, sealed)
-                    error("Synthetic interruption after first SQL write")
+                    if (slot.startsWith("work-v1:")) error("Synthetic interruption after task record SQL write")
                 }
             }
             expect(WorkProblem.StorageUnavailable) { store(device, device.sessions, failing).enqueue(access, input) }
+            assertEquals(before, device.rows.count())
             assertNull(base.operation(access, input.operationId))
             val saved = base.enqueue(access, input)
             assertEquals(1L, saved.envelope.originLocalEditVersion)
@@ -147,6 +150,77 @@ class SharedWorkStorageTest {
                 store.recoverInterrupted(access)
                 store.recordOutcomeUnknown(access, batchId)
                 assertEquals(WorkState.OutcomeUnknown, store.batch(access, batchId)?.state)
+            } finally {
+                reopened.close()
+            }
+        }
+    }
+
+    @Test fun deadlineReachedDuringRoomWriteRollsBackOperationAndIdentityClaim() = runBlocking<Unit>(Dispatchers.IO) {
+        OfflineDeviceFixture().use { device ->
+            device.download()
+            val access = access(device.sessions, true)
+            val base = store(device, device.sessions)
+            val short = source.copy(captureUntilUtc = Instant.parse(NOW).plusSeconds(1).toString())
+            base.storeSource(access, short, proof)
+            val before = device.rows.count()
+            val crossing = object : CacheRows by device.rows {
+                override suspend fun replace(slot: String, sealed: ByteArray) {
+                    device.rows.replace(slot, sealed)
+                    if (slot.startsWith("work-v1:")) {
+                        device.sample = device.sample.copy(elapsedMs = 21_000, utcMs = Instant.parse(NOW).toEpochMilli() + 1_000)
+                    }
+                }
+            }
+            expect(WorkProblem.CaptureWindowClosed) { store(device, device.sessions, crossing).enqueue(access, input) }
+            assertEquals(before, device.rows.count())
+            assertNull(base.operation(access, input.operationId))
+
+            val fresh = source.copy(contextId = id(9))
+            base.storeSource(access, fresh, proof)
+            val accepted = base.enqueue(access, input.copy(sourceWorkContextId = fresh.contextId))
+            assertEquals(1L, accepted.envelope.originLocalEditVersion)
+            assertEquals(fresh, accepted.envelope.source)
+            assertEncrypted(device.databaseFile)
+        }
+    }
+
+    @Test fun populatedLegacyV1IndexesAcrossLinesWithoutRewritingTaskRows() = runBlocking<Unit>(Dispatchers.IO) {
+        OfflineDeviceFixture().use { device ->
+            device.download()
+            val access = access(device.sessions, true)
+            val store = store(device, device.sessions)
+            store.storeSource(access, source, proof)
+            val original = requireNotNull(ProtectedWorkRows(device.rows, ORIGIN, device.workKey).transaction(task) {
+                val payload = DraftOperationCanonical.operation(source, input, 1)
+                val envelope = OperationEnvelope(workspaceId, input, source, 1, CANONICAL_VERSION, payload, workHash(payload))
+                save(OperationEntry(envelope))
+                save(WorkCatalog(1, listOf(input.operationId)))
+                envelope
+            })
+            val otherTask = task.copy(taskId = id(29), lineId = SECOND_LINE.id)
+            val other = WorkAccess(access.session, otherTask, 5, setOf(attempt))
+            val otherSource = source.copy(task = otherTask, contextId = id(8))
+            store.storeSource(other, otherSource, proof)
+            val taskRecords = device.rows.legacyWorkSlots().associateWith { device.rows.read(it) }
+            val cached = device.snapshots.page(IDENTITY, LINE.id, 1)
+            device.database.close()
+
+            val reopened = TaskCacheDatabase.open(device.context, device.databaseFile)
+            try {
+                assertEquals(1, reopened.openHelper.readableDatabase.version)
+                val rows = RoomCacheRows(reopened)
+                val ledger = store(device, device.sessions, rows)
+                val foreign = input.copy(sourceWorkContextId = otherSource.contextId)
+                expect(WorkProblem.OperationIdentityConflict) { ledger.enqueue(other, foreign) }
+                assertNull(ledger.operation(other, foreign.operationId))
+                val different = ledger.enqueue(other, foreign.copy(operationId = id(30)))
+                assertEquals(original.workspaceId, different.envelope.workspaceId)
+                assertEquals(1L, different.envelope.originLocalEditVersion)
+                assertEquals(original.contentHash, ledger.enqueue(access, input).envelope.contentHash)
+                assertEquals(cached, TaskSnapshots(rows, device.workKey, ORIGIN).page(IDENTITY, LINE.id, 1))
+                for ((slot, ciphertext) in taskRecords) assertArrayEquals(ciphertext, rows.read(slot))
+                assertEncrypted(device.databaseFile)
             } finally {
                 reopened.close()
             }

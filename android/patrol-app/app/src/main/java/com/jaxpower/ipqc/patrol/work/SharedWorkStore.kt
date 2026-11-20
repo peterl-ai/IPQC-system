@@ -1,5 +1,6 @@
 package com.jaxpower.ipqc.patrol.work
 
+import com.jaxpower.ipqc.patrol.api.PatrolFailure
 import com.jaxpower.ipqc.patrol.auth.SessionRepository
 import java.time.Instant
 import java.util.Base64
@@ -19,39 +20,56 @@ internal class SharedWorkStore(private val rows: ProtectedWorkRows, private val 
 
     suspend fun enqueue(access: WorkAccess, input: SampleOperation): WorkOperation {
         val op = DraftOperationCanonical.normalize(input)
-        return requireNotNull(transact(access, create = true) {
-            val context = requireSource(op.sourceWorkContextId, access.task)
-            workCheck(access.owns(context.source), WorkProblem.SourceUnavailable)
-            val catalog = catalog()
-            val old = operation(op.operationId)
-            if (old != null) {
-                val original = old.envelope
-                workCheck(original.source == context.source &&
-                    original.canonicalPayload == DraftOperationCanonical.operation(context.source, op, original.originLocalEditVersion),
-                    WorkProblem.OperationIdentityConflict)
-                return@transact describe(old)
-            }
+        return sessions.withWorkCaptureClock(access.session, rows.origin) { captureTime ->
+            requireNotNull(rows.transaction(access.task, create = true) {
+                val context = requireSource(op.sourceWorkContextId, access.task)
+                workCheck(access.owns(context.source), WorkProblem.SourceUnavailable)
+                val old = operation(op.operationId)
+                if (old != null) {
+                    val original = old.envelope
+                    workCheck(original.source == context.source &&
+                        original.canonicalPayload == DraftOperationCanonical.operation(context.source, op, original.originLocalEditVersion),
+                        WorkProblem.OperationIdentityConflict)
+                    return@transaction describe(old)
+                }
 
-            workCheck(op.attempt in access.currentAttempts && op.baseDraftVersion == access.serverDraftVersion,
-                WorkProblem.ScopeMismatch)
-            for (ref in op.dependencies) {
-                val prior = requireOperation(ref.operationId)
-                val previous = prior.envelope.operation
-                val state = describe(prior).state
-                workCheck(state == WorkState.Accepted || access.mayRead(prior.envelope.source), WorkProblem.SourceUnavailable)
-                workCheck(prior.envelope.reference() == ref && previous.attempt == op.attempt &&
-                    previous.clientSampleId == op.clientSampleId && previous.kind != SampleKind.RemoveSample &&
-                    state !in setOf(WorkState.Conflict, WorkState.Quarantined),
-                    WorkProblem.DependencyMismatch)
-            }
-            val next = Math.addExact(catalog.localEditVersion, 1L)
-            val payload = DraftOperationCanonical.operation(context.source, op, next)
-            val entry = OperationEntry(OperationEnvelope(workspaceId, op, context.source, next,
-                CANONICAL_VERSION, payload, workHash(payload)))
-            save(entry)
-            save(catalog.copy(localEditVersion = next, operationIds = catalog.operationIds + op.operationId))
-            describe(entry)
-        })
+                workCheck(op.attempt in access.currentAttempts && op.baseDraftVersion == access.serverDraftVersion,
+                    WorkProblem.ScopeMismatch)
+                workCheck(context.source.contextId !in access.securityRevokedSources, WorkProblem.SourceUnavailable)
+                requireCaptureTime(context.source, captureTime)
+                val catalog = catalog()
+                for (ref in op.dependencies) {
+                    val prior = requireOperation(ref.operationId)
+                    val previous = prior.envelope.operation
+                    val state = describe(prior).state
+                    workCheck(state == WorkState.Accepted || access.mayRead(prior.envelope.source), WorkProblem.SourceUnavailable)
+                    workCheck(prior.envelope.reference() == ref && previous.attempt == op.attempt &&
+                        previous.clientSampleId == op.clientSampleId && previous.kind != SampleKind.RemoveSample &&
+                        state !in setOf(WorkState.Conflict, WorkState.Quarantined),
+                        WorkProblem.DependencyMismatch)
+                }
+                val next = Math.addExact(catalog.localEditVersion, 1L)
+                val payload = DraftOperationCanonical.operation(context.source, op, next)
+                val entry = OperationEntry(OperationEnvelope(workspaceId, op, context.source, next,
+                    CANONICAL_VERSION, payload, workHash(payload)))
+                reserveOperationId(op.operationId)
+                save(entry)
+                save(catalog.copy(localEditVersion = next, operationIds = catalog.operationIds + op.operationId))
+                val result = describe(entry)
+                requireCaptureTime(context.source, captureTime)
+                result
+            })
+        }
+    }
+
+    private suspend fun requireCaptureTime(source: WorkSource, captureTime: suspend () -> Instant?) {
+        val now = try {
+            captureTime()
+        } catch (_: PatrolFailure) {
+            null
+        } ?: throw WorkFailure(WorkProblem.CaptureTimeUnavailable)
+        workCheck(!now.isBefore(Instant.parse(source.issuedAtUtc)), WorkProblem.CaptureTimeUnavailable)
+        workCheck(now.isBefore(Instant.parse(source.captureUntilUtc)), WorkProblem.CaptureWindowClosed)
     }
 
     suspend fun operation(access: WorkAccess, id: String): WorkOperation? = transact(access) {
@@ -279,10 +297,11 @@ internal class SharedWorkStore(private val rows: ProtectedWorkRows, private val 
     private fun WorkAccess.owns(source: WorkSource) = session.identity.userId == source.contributorUserId &&
         session.identity.familyId == source.originPersonalSessionId
 
-    private fun WorkAccess.approves(source: WorkSource) = validatedSources.any {
-        it.contextId == source.contextId && it.contributorUserId == source.contributorUserId &&
-            Instant.parse(it.captureUntilUtc) == Instant.parse(source.captureUntilUtc)
-    }
+    private fun WorkAccess.approves(source: WorkSource) =
+        source.contextId !in securityRevokedSources && validatedSources.any {
+            it.contextId == source.contextId && it.contributorUserId == source.contributorUserId &&
+                Instant.parse(it.captureUntilUtc) == Instant.parse(source.captureUntilUtc)
+        }
 
     private fun WorkAccess.mayRead(source: WorkSource) = owns(source) || approves(source)
 
