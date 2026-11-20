@@ -81,6 +81,12 @@ class OfflineCache internal constructor(
 
     suspend fun resume(expected: SessionIdentity? = null): OfflineSession? = locked { observe(expected) }
 
+    // Acquire this lock before the work transaction. Snapshot reads take the same lock before Room.
+    internal suspend fun <T> withCaptureClock(identity: SessionIdentity,
+                                              action: suspend (suspend () -> Instant?) -> T): T = mutex.withLock {
+        action { storage { observe(identity)?.apparentNow } }
+    }
+
     internal suspend fun cacheLines(identity: SessionIdentity, lines: List<ProductionLine>) = locked {
         snapshots.storeDirectory(identity, LineDirectory(lines), downloadedTime())
     }
@@ -207,9 +213,9 @@ class OfflineCache internal constructor(
 
         fun open(context: Context, origin: String): OfflineCache {
             val directory = context.noBackupFilesDir
-            val database = TaskCacheDatabase.open(context, File(directory, "patrol-task-cache.db"))
+            val database = TaskCacheDatabase.openWorkspace(context)
             val receipt = ProtectedReceipt(File(directory, "offline-admission.v1"), KeystoreBox("ipqc.offline-admission.v1"))
-            val snapshots = TaskSnapshots(RoomCacheRows(database.entries()), KeystoreBox("ipqc.shared-task-cache.v1"), origin)
+            val snapshots = TaskSnapshots(RoomCacheRows(database), KeystoreBox(TaskCacheDatabase.WORK_KEY_ALIAS), origin)
             return OfflineCache(origin, AndroidOfflineClock(context.applicationContext), receipt, snapshots)
         }
     }

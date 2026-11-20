@@ -1,15 +1,12 @@
 package com.jaxpower.ipqc.patrol.offline
 
-import com.jaxpower.ipqc.patrol.api.Issue
 import com.jaxpower.ipqc.patrol.api.LineDirectory
 import com.jaxpower.ipqc.patrol.api.LineTaskDetail
 import com.jaxpower.ipqc.patrol.api.LineTaskSummary
 import com.jaxpower.ipqc.patrol.api.PagedLineTasks
-import com.jaxpower.ipqc.patrol.api.PatrolFailure
 import com.jaxpower.ipqc.patrol.api.utc
 import com.jaxpower.ipqc.patrol.auth.SessionIdentity
 import java.security.MessageDigest
-import java.util.UUID
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
@@ -60,21 +57,8 @@ internal class TaskSnapshots(
     private suspend fun scope(
         identity: SessionIdentity, kind: String, line: String = "", task: String = "", workflow: Int = 0,
         page: Int = 0, create: Boolean = false,
-    ): SnapshotScope? = workspaceId(create)?.let {
+    ): SnapshotScope? = rows.transaction { workspaceId(rows, cipher, create) }?.let {
         SnapshotScope(FORMAT, it, origin, identity, kind, line, task, workflow, page)
-    }
-
-    private suspend fun workspaceId(create: Boolean): String? {
-        val bytes = rows.read(WORKSPACE_SLOT)
-        if (bytes != null) {
-            return decode(cipher.open(WORKSPACE_SLOT, bytes)) { UUID.fromString(it).toString() }
-        }
-        // A missing workspace marker in a populated store cannot create a different namespace.
-        if (rows.count() != 0) throw PatrolFailure(Issue.CACHE_STORAGE)
-        if (!create) return null
-        val id = UUID.randomUUID().toString()
-        rows.replace(WORKSPACE_SLOT, cipher.seal(WORKSPACE_SLOT, id.encodeToByteArray(), allowNewKey = true))
-        return id
     }
 
     private suspend fun <T> read(scope: SnapshotScope?, serializer: KSerializer<T>): T? {
@@ -107,7 +91,6 @@ internal class TaskSnapshots(
 
     private companion object {
         const val FORMAT = 1
-        const val WORKSPACE_SLOT = "workspace-v1"
     }
 }
 

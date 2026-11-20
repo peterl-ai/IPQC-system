@@ -25,7 +25,7 @@ internal class OfflineDeviceFixture : AutoCloseable {
     val workKey = KeystoreBox("$stem.work")
     val vault = KeystoreCredentialVault(context, "$stem.credential", "$stem.credential")
     val database = TaskCacheDatabase.open(context, databaseFile)
-    val rows = RoomCacheRows(database.entries())
+    val rows = RoomCacheRows(database)
     val snapshots = TaskSnapshots(rows, workKey, ORIGIN)
     val api = FixtureApi()
     @Volatile var sample = ClockSample(8, 20_000, Instant.parse(NOW).toEpochMilli())
@@ -35,7 +35,7 @@ internal class OfflineDeviceFixture : AutoCloseable {
 
     fun openCache(db: TaskCacheDatabase = database) = OfflineCache(
         ORIGIN, OfflineClock { sample }, ProtectedReceipt(receiptFile, receiptKey),
-        TaskSnapshots(RoomCacheRows(db.entries()), workKey, ORIGIN),
+        TaskSnapshots(RoomCacheRows(db), workKey, ORIGIN),
     )
 
     suspend fun download() {

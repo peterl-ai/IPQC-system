@@ -68,6 +68,46 @@ class SessionRepository(
         offline?.resume(expected)
     }
 
+    internal class WorkSession(val identity: SessionIdentity, internal val authorityId: Any)
+
+    internal suspend fun bindWorkSession(): WorkSession = mutex.withLock {
+        val auth = eligibleWorkSession()
+        WorkSession(auth.identity, auth.authorityId)
+    }
+
+    internal suspend fun <T> withWorkSession(session: WorkSession, expectedOrigin: String,
+                                            block: suspend () -> T): T = mutex.withLock {
+        val auth = eligibleWorkSession()
+        if (origin != expectedOrigin || auth.authorityId !== session.authorityId || auth.identity != session.identity)
+            throw PatrolFailure(Issue.UNAUTHENTICATED)
+        val result = block()
+        eligibleWorkSession()
+        result
+    }
+
+    internal suspend fun <T> withWorkCaptureClock(session: WorkSession, expectedOrigin: String,
+                                                  action: suspend (suspend () -> Instant?) -> T): T =
+        withWorkSession(session, expectedOrigin) {
+            val cache = offline
+            if (cache == null) action { null }
+            else cache.withCaptureClock(session.identity) { observe ->
+                action {
+                    eligibleWorkSession()
+                    val now = observe()
+                    eligibleWorkSession()
+                    now
+                }
+            }
+        }
+
+    private fun eligibleWorkSession(): Credentials {
+        val auth = current()
+        val now = clock.instant()
+        if (auth.rejected || auth.operator.mustChangePassword || !now.isBefore(auth.accessExpiry) ||
+            !now.isBefore(auth.familyExpiry)) throw PatrolFailure(Issue.UNAUTHENTICATED)
+        return auth
+    }
+
     suspend fun restore(): Operator? {
         if (mutex.withLock { active?.operator?.mustChangePassword == false }) return verifyOnline()
         val stamp = generation.get()

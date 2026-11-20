@@ -292,6 +292,8 @@ internal class OfflineTestFixture(val server: TestServer, api: PatrolApi = serve
 
     fun invalidateOfflineClock() { sample = sample.copy(boot = -1) }
 
+    fun rollbackWallClock(millis: Long) { sample = sample.copy(utcMs = sample.utcMs - millis) }
+
     fun rebootAt(millisFromVerification: Long) {
         sample = ClockSample(sample.boot + 1, 4_000, epoch + millisFromVerification)
     }
@@ -339,6 +341,8 @@ internal class OfflineTestFixture(val server: TestServer, api: PatrolApi = serve
     }
 
     private class MemoryRows : CacheRows {
+        override suspend fun <T> transaction(block: suspend () -> T): T = block()
+
         private val entries = mutableMapOf<String, ByteArray>()
         @Volatile var onFrozenDetailRead: (() -> Unit)? = null
 
@@ -349,6 +353,7 @@ internal class OfflineTestFixture(val server: TestServer, api: PatrolApi = serve
             return value
         }
         override suspend fun count() = entries.size
+        override suspend fun legacyWorkSlots() = entries.keys.filter { it.startsWith("work-v1:") }
         override suspend fun replace(slot: String, sealed: ByteArray) { entries[slot] = sealed }
     }
 
