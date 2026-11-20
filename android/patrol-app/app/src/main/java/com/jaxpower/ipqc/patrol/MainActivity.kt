@@ -5,6 +5,7 @@ import android.content.Context
 import android.net.ConnectivityManager
 import android.net.Network
 import android.os.Bundle
+import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -16,6 +17,7 @@ import com.jaxpower.ipqc.patrol.api.createPatrolApi
 import com.jaxpower.ipqc.patrol.api.httpsOrigin
 import com.jaxpower.ipqc.patrol.auth.KeystoreCredentialVault
 import com.jaxpower.ipqc.patrol.auth.SessionRepository
+import com.jaxpower.ipqc.patrol.offline.OfflineCache
 import com.jaxpower.ipqc.patrol.tasks.PatrolRepository
 import com.jaxpower.ipqc.patrol.ui.PatrolApp
 import com.jaxpower.ipqc.patrol.ui.PatrolViewModel
@@ -26,11 +28,14 @@ class PatrolApplication : Application() {
     val patrolViewModelFactory: ViewModelProvider.Factory by lazy {
         val origin = httpsOrigin(BuildConfig.SERVER_URL)
         val api = origin?.let { createPatrolApi(it) }
+        val offline = origin?.let { OfflineCache.open(this, it.toString()) }
         val sessions = api?.let {
-            SessionRepository(it, KeystoreCredentialVault(this), requireNotNull(origin).toString())
+            SessionRepository(it, KeystoreCredentialVault(this), requireNotNull(origin).toString(), offline = offline)
         }
-        val patrol = api?.let { PatrolRepository(it, requireNotNull(sessions)) }
-        viewModelFactory { initializer { PatrolViewModel(sessions, patrol, networkAvailability(this@PatrolApplication)) } }
+        val patrol = api?.let { PatrolRepository(it, requireNotNull(sessions), offline) }
+        viewModelFactory {
+            initializer { PatrolViewModel(sessions, patrol, networkAvailability(this@PatrolApplication), offline) }
+        }
     }
 }
 
@@ -39,8 +44,19 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
         enableEdgeToEdge()
         setContent { PatrolApp(viewModel) }
+    }
+
+    override fun onStart() {
+        super.onStart()
+        viewModel.returnToForeground()
+    }
+
+    override fun onStop() {
+        viewModel.leaveForeground()
+        super.onStop()
     }
 }
 

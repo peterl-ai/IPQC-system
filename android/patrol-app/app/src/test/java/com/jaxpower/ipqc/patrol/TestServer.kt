@@ -42,8 +42,8 @@ internal class TestServer : AutoCloseable {
     val web = MockWebServer()
     val clock = TestClock()
     val vault = MemoryVault()
-    private val api: com.jaxpower.ipqc.patrol.api.PatrolApi
-    private val origin: okhttp3.HttpUrl
+    val api: com.jaxpower.ipqc.patrol.api.PatrolApi
+    val origin: okhttp3.HttpUrl
     val session: SessionRepository
     val patrol: PatrolRepository
 

@@ -29,6 +29,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
+import java.time.Duration
 
 private val PatrolColors = lightColorScheme(
     primary = Color(0xFF075D61),
@@ -63,6 +64,20 @@ fun PatrolApp(viewModel: PatrolViewModel) {
         Surface(color = MaterialTheme.colorScheme.background, modifier = Modifier.fillMaxSize()) {
             Column(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing)) {
                 PatrolBar(ui, viewModel)
+                ui.offline?.let { access ->
+                    val ageMinutes = Duration.between(access.verifiedAt, access.apparentNow).toMinutes()
+                    val age = if (ageMinutes < 60) "${ageMinutes}m ago" else "${ageMinutes / 60}h ${ageMinutes % 60}m ago"
+                    Surface(color = MaterialTheme.colorScheme.primaryContainer) {
+                        Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp)) {
+                            Text("Offline · Cached data · Read only", style = MaterialTheme.typography.titleSmall)
+                            Text("Last online verification ${access.verifiedAt} ($age)")
+                            Text("Offline access expires ${access.expiresAt}")
+                            if (ui.online) TextButton(onClick = viewModel::reconnect, enabled = !ui.busy) {
+                                Text("Retry online verification")
+                            }
+                        }
+                    }
+                }
                 LaunchedEffect(route) {
                     if (navigation.currentDestination?.route != route.name) {
                         navigation.navigate(route.name) {

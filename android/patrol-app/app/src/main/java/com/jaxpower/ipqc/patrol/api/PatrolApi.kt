@@ -27,6 +27,11 @@ enum class Issue(val message: String) {
     CONFIGURATION("A valid IPQC HTTPS server must be configured."),
     LINE_CONFIGURATION("Two valid production lines must be configured on the server."),
     OFFLINE("Network unavailable. Connect to the plant network to use Patrol."),
+    OFFLINE_EXPIRED("Offline access has expired. Connect to IPQC and verify your session."),
+    OFFLINE_CLOCK("Offline access is locked. Check the tablet clock and verify your session online."),
+    CACHE_STORAGE("Protected Patrol data is unavailable. Try online again or contact your administrator."),
+    TASK_DETAIL_CHANGED("Task detail changed. Return to the task list and reload it."),
+    CACHE_DETAIL_MISSING("The matching frozen task detail was not downloaded. Open it online first."),
     CONNECTION("The IPQC server could not be reached. Check the network and HTTPS configuration."),
     UNAVAILABLE("IPQC is temporarily unavailable. Try again."),
     RATE_LIMITED("Too many requests. Wait before trying again."),
@@ -44,7 +49,10 @@ enum class Issue(val message: String) {
     RESPONSE("The IPQC server returned an unexpected response."),
 }
 
-class PatrolFailure(val issue: Issue) : Exception(issue.message)
+class PatrolFailure(
+    val issue: Issue,
+    val canUseOffline: Boolean = issue == Issue.CONNECTION || issue == Issue.UNAVAILABLE,
+) : Exception(issue.message)
 
 fun ensureResponse(valid: Boolean) {
     if (!valid) throw PatrolFailure(Issue.RESPONSE)
@@ -156,6 +164,9 @@ private suspend fun <T> response(call: suspend () -> Response<T>): Response<T> =
 }
 
 private fun Response<*>.toIssue(): Issue {
+    // HTTP authentication denial takes precedence over an optional application problem code.
+    if (code() == 401) return Issue.UNAUTHENTICATED
+    if (code() == 403) return Issue.FORBIDDEN
     val code = errorBody()?.use { body ->
         // Read only the bounded machine code, never surface server error titles or bodies.
         try {
@@ -175,8 +186,6 @@ private fun Response<*>.toIssue(): Issue {
         "TaskSnapshotUnavailable", "TaskReadContractUnavailable" -> Issue.UNSUPPORTED_TASK
         else -> when (code()) {
             400 -> Issue.BAD_REQUEST
-            401 -> Issue.UNAUTHENTICATED
-            403 -> Issue.FORBIDDEN
             404 -> Issue.NOT_FOUND
             409 -> Issue.CONFLICT
             429 -> Issue.RATE_LIMITED

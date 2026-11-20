@@ -60,9 +60,10 @@ internal fun PatrolPage(ui: PatrolUi, model: PatrolViewModel) {
         Screen.Login -> CredentialsPage(ui, change = false, submit = model::login, resume = model::resume, forget = model::logout)
         is Screen.ChangePassword -> CredentialsPage(ui, change = true, submit = model::changePassword, resume = {}, forget = {})
         is Screen.Home -> HomePage(screen.operator.displayName, model::openPatrol)
-        is Screen.Lines -> LinesPage(screen.load, model::select, model::refresh)
-        is Screen.Tasks -> TasksPage(screen, ui.busy, model::refresh, model::switchLine, model::previousPage, model::nextPage, model::openTask)
-        is Screen.Detail -> DetailPage(screen, ui.busy, model::refresh, model::switchLine)
+        is Screen.Lines -> LinesPage(screen.load, ui.offline != null, model::select, model::refresh)
+        is Screen.Tasks -> TasksPage(screen, ui.busy, model::refresh, model::switchLine,
+            model::previousPage, model::nextPage, model::openTask, cached = ui.offline != null)
+        is Screen.Detail -> DetailPage(screen, ui.busy, model::refresh, model::switchLine, cached = ui.offline != null)
     }
 }
 
@@ -106,7 +107,7 @@ internal fun CredentialsPage(ui: PatrolUi, change: Boolean, submit: (String, Str
                 enabled = canSend && first.isNotBlank() && second.isNotEmpty(),
                 modifier = Modifier.fillMaxWidth().defaultMinSize(minHeight = 52.dp),
             ) { Text(if (change) "Save new password" else "Sign in") }
-            if (ui.busy) Loading("Contacting IPQC")
+            if (ui.busy) Loading(if (ui.online) "Contacting IPQC" else "Checking saved access")
             if (!change) {
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     TextButton(onClick = resume, enabled = canSend) { Text("Resume saved session") }
@@ -142,24 +143,30 @@ internal fun HomePage(name: String, openPatrol: () -> Unit) = PageScroll {
 }
 
 @Composable
-private fun LinesPage(load: Load<List<ProductionLine>>, select: (ProductionLine) -> Unit, refresh: () -> Unit) = PageScroll {
+private fun LinesPage(
+    load: Load<List<ProductionLine>>, cached: Boolean, select: (ProductionLine) -> Unit, refresh: () -> Unit,
+) = PageScroll {
     Text("Select a production line", style = MaterialTheme.typography.headlineMedium)
     when (load) {
         Load.Loading -> Loading("Loading production lines")
         is Load.Failed -> Failure(load.issue, refresh)
-        is Load.Data -> AdaptivePair(
-            main = { LineCard(load.value[0], select) },
-            secondary = { LineCard(load.value[1], select) },
-        )
+        is Load.Data -> {
+            if (load.value.isEmpty()) Notice("No production lines downloaded. Open Patrol online first.")
+            else AdaptivePair(
+                main = { LineCard(load.value[0], cached, select) },
+                secondary = { LineCard(load.value[1], cached, select) },
+            )
+        }
     }
 }
 
 @Composable
-private fun LineCard(line: ProductionLine, select: (ProductionLine) -> Unit) {
+private fun LineCard(line: ProductionLine, cached: Boolean, select: (ProductionLine) -> Unit) {
     Card(onClick = { select(line) }, modifier = Modifier.fillMaxWidth().defaultMinSize(minHeight = 104.dp)) {
         Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Text(line.name, style = MaterialTheme.typography.titleLarge)
             Text(line.code, style = MaterialTheme.typography.bodyMedium)
+            if (cached) Text(line.id, style = MaterialTheme.typography.labelMedium)
         }
     }
 }
@@ -168,19 +175,23 @@ private fun LineCard(line: ProductionLine, select: (ProductionLine) -> Unit) {
 internal fun TasksPage(
     screen: Screen.Tasks, busy: Boolean, refresh: () -> Unit, switchLine: () -> Unit,
     previous: () -> Unit, next: () -> Unit, select: (LineTaskSummary) -> Unit,
+    cached: Boolean = false,
 ) {
     LazyColumn(Modifier.fillMaxSize().padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        item { TaskHeading("Patrol tasks", screen.line, busy, refresh, switchLine) }
+        item { TaskHeading("Patrol tasks", screen.line, busy, refresh, switchLine, cached) }
         when (val load = screen.load) {
             Load.Loading -> item { Loading("Loading patrol tasks") }
             is Load.Failed -> item { Failure(load.issue, refresh) }
             is Load.Data -> {
-                if (load.value.items.isEmpty()) item { Notice("No patrol tasks on this page.") }
+                if (load.value.items.isEmpty()) item {
+                    Notice(if (cached) "No downloaded tasks on this page for this line." else "No patrol tasks on this page.")
+                }
                 items(load.value.items, key = { it.id }) { task ->
                     Card(onClick = { select(task) }, modifier = Modifier.fillMaxWidth().defaultMinSize(minHeight = 80.dp)) {
                         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                             Text(task.taskNo, style = MaterialTheme.typography.titleLarge)
-                            Text(task.status)
+                            Text(if (cached) "${task.status} · Cached" else task.status)
+                            if (cached) Text("Last validated ${task.validatedAccess.validatedAtUtc}")
                             Text(plantTime(task.scheduledOccurrenceUtc))
                             task.standardNameSnapshot?.let { Text(it) }
                             Text(task.readFoundationStatus, style = MaterialTheme.typography.labelMedium)
@@ -194,7 +205,8 @@ internal fun TasksPage(
                     ) {
                         OutlinedButton(onClick = previous, enabled = !busy && screen.page > 1) { Text("Previous") }
                         OutlinedButton(onClick = next, enabled = !busy && load.value.hasNext) { Text("Next") }
-                        Text("Page ${screen.page} · ${load.value.total} total", Modifier.padding(top = 14.dp))
+                        val label = if (cached) "Cached page ${screen.page}" else "Page ${screen.page} · ${load.value.total} total"
+                        Text(label, Modifier.padding(top = 14.dp))
                     }
                 }
             }
@@ -203,14 +215,19 @@ internal fun TasksPage(
 }
 
 @Composable
-private fun DetailPage(screen: Screen.Detail, busy: Boolean, refresh: () -> Unit, switchLine: () -> Unit) {
+internal fun DetailPage(
+    screen: Screen.Detail, busy: Boolean, refresh: () -> Unit, switchLine: () -> Unit, cached: Boolean = false,
+) {
     LazyColumn(Modifier.fillMaxSize().padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        item { TaskHeading("Task ${screen.task.taskNo}", screen.line, busy, refresh, switchLine) }
+        item { TaskHeading("Task ${screen.task.taskNo}", screen.line, busy, refresh, switchLine, cached) }
         when (val load = screen.load) {
             Load.Loading -> item { Loading("Loading task details") }
             is Load.Failed -> item { Failure(load.issue, refresh) }
             is Load.Data -> {
-                item { DetailSummary(load.value) }
+                item {
+                    if (cached) Text("Last validated ${load.value.summary.validatedAccess.validatedAtUtc}")
+                    DetailSummary(load.value)
+                }
                 item { Text("Frozen inspection items", style = MaterialTheme.typography.titleLarge) }
                 items(load.value.items, key = { it.id }) { Definition(it) }
                 item { Box(Modifier.padding(bottom = 16.dp)) }
@@ -275,12 +292,15 @@ internal fun Definition(item: LineTaskDefinition) {
 }
 
 @Composable
-private fun TaskHeading(title: String, line: ProductionLine, busy: Boolean, refresh: () -> Unit, switchLine: () -> Unit) {
+private fun TaskHeading(
+    title: String, line: ProductionLine, busy: Boolean, refresh: () -> Unit, switchLine: () -> Unit, cached: Boolean,
+) {
     Column(Modifier.padding(top = 20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text(title, style = MaterialTheme.typography.headlineMedium)
         Text("${line.name} · ${line.code}", style = MaterialTheme.typography.titleMedium)
+        if (cached) Text(line.id, style = MaterialTheme.typography.labelMedium)
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlinedButton(onClick = refresh, enabled = !busy) { Text("Refresh") }
+            OutlinedButton(onClick = refresh, enabled = !busy) { Text(if (cached) "Reload cache" else "Refresh") }
             TextButton(onClick = switchLine, enabled = !busy) { Text("Switch line") }
         }
     }
