@@ -7,12 +7,6 @@ import java.util.concurrent.TimeUnit.SECONDS
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.runBlocking
-import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.JsonArray
-import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.JsonPrimitive
-import kotlinx.serialization.json.encodeToJsonElement
-import kotlinx.serialization.json.jsonObject
 import okhttp3.mockwebserver.MockResponse
 import org.junit.Assert.*
 import org.junit.Test
@@ -338,17 +332,4 @@ class ReceiptRecoveryTest {
             }
     }
 
-    private fun ServerBatchReceipt.wire(): String {
-        val json = Json.encodeToJsonElement(this).jsonObject
-        return JsonObject(json + ("operations" to JsonArray(operations.map { it.wireObject() }))).toString()
-    }
-
-    private fun ServerOperationReceipt.wire() = wireObject().toString()
-
-    private fun ServerOperationReceipt.wireObject(): JsonObject {
-        val json = Json.encodeToJsonElement(this).jsonObject
-        val decimal = value?.inspectionValue?.toBigDecimal() ?: return json
-        val fields = json.getValue("value").jsonObject
-        return JsonObject(json + ("value" to JsonObject(fields + ("inspectionValue" to JsonPrimitive(decimal)))))
-    }
 }

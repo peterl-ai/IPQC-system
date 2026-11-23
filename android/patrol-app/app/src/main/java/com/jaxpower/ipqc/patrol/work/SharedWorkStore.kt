@@ -5,8 +5,14 @@ import com.jaxpower.ipqc.patrol.auth.SessionRepository
 import java.time.Instant
 import java.util.Base64
 import java.util.UUID
+import okhttp3.RequestBody
 
-// Internal substrate. A03-01 has no production producer of WorkAccess, source proof, or receipt evidence.
+internal class UploadCandidate(
+    val target: ReceiptTarget,
+    val batch: BatchRecord,
+    val members: List<OperationEnvelope>,
+    val sources: List<StoredWorkSource>,
+)
 internal class SharedWorkStore(private val rows: ProtectedWorkRows, private val sessions: SessionRepository) {
     suspend fun storeSource(access: WorkAccess, source: WorkSource, proof: String) {
         workCheck(source.task == access.task, WorkProblem.ScopeMismatch)
@@ -255,6 +261,99 @@ internal class SharedWorkStore(private val rows: ProtectedWorkRows, private val 
         }
     }
 
+    suspend fun inspectUpload(access: WorkAccess, id: String): UploadCandidate =
+        transact(access) { uploadCandidate(access, id) } ?: throw WorkFailure(WorkProblem.InvalidState)
+
+    suspend fun beginUpload(access: WorkAccess, candidate: UploadCandidate): RequestBody =
+        transact(access) {
+            val latest = uploadCandidate(access, candidate.target.batchId)
+            workCheck(latest.target == candidate.target &&
+                latest.sources.map { it.source to it.proof } == candidate.sources.map { it.source to it.proof },
+                WorkProblem.StaleGrant)
+            workCheck(latest.sources.all { access.approves(it.source) }, WorkProblem.SourceUnavailable)
+            val encoded = latest.encodeBatch()
+            save(latest.batch.copy(state = WorkState.InFlight))
+            encoded
+        } ?: throw WorkFailure(WorkProblem.StorageUnavailable)
+
+    // This only makes a committed attempt query-only. It can run after logout
+    // and cannot replace accepted or rejected evidence from another exchange.
+    suspend fun leaveUploadUncertain(target: ReceiptTarget) {
+        rows.transaction(target.task) {
+            val batch = batch(target.batchId)
+            if (workspaceId == target.workspaceId && batch?.fingerprint == target.fingerprint &&
+                batch.state == WorkState.InFlight) save(batch.copy(state = WorkState.OutcomeUnknown))
+        }
+    }
+
+    suspend fun applyUploadRejection(access: WorkAccess, candidate: UploadCandidate, rejection: UploadRejection,
+                                     preflight: Boolean): Boolean = transact(access) {
+        val target = candidate.target
+        val batch = requireBatch(target.batchId)
+        val state = if (preflight) WorkState.Queued else WorkState.InFlight
+        if (workspaceId != target.workspaceId || batch.fingerprint != target.fingerprint || batch.state != state)
+            return@transact false
+        val reason = rejection.reason
+        if (reason.isSourceRejection()) {
+            val known = candidate.sources.map { it.source.contextId }.toSet()
+            if (rejection.contexts.isEmpty() || !known.containsAll(rejection.contexts)) return@transact false
+            if (!preflight && affectedOperations(candidate.members, rejection.contexts) != rejection.operations)
+                return@transact false
+            if (reason == WorkConflict.SourceSecurityRevoked)
+                for (context in rejection.contexts) rememberSourceRevoked(context)
+        } else if (preflight) return@transact false
+        val next = if (reason.isSourceRejection()) WorkState.Quarantined else WorkState.Conflict
+        save(batch.copy(state = next, conflict = ConflictEvidence(reason, access.serverDraftVersion)))
+        true
+    } == true
+
+    private fun affectedOperations(members: List<OperationEnvelope>, sourceIds: Set<String>): Set<String> {
+        val affected = mutableSetOf<String>()
+        for (entry in members.sortedBy { it.originLocalEditVersion }) {
+            if (entry.source.contextId in sourceIds || entry.operation.dependencies.any { it.operationId in affected })
+                affected += entry.operation.operationId
+        }
+        return affected
+    }
+
+    private suspend fun WorkTransaction.uploadCandidate(access: WorkAccess, id: String): UploadCandidate {
+        val batch = requireBatch(id)
+        workCheck(batch.state == WorkState.Queued && catalog().batchIds.none { other ->
+            other != id && requireBatch(other).state in setOf(WorkState.InFlight, WorkState.OutcomeUnknown)
+        }, WorkProblem.InvalidState)
+        workCheck(access.serverDraftVersion == batch.expectedDraftVersion, WorkProblem.ScopeMismatch)
+        val members = sealedMembers(access.task, batch)
+        for (entry in members) {
+            val op = entry.operation
+            workCheck(op.attempt in access.currentAttempts, WorkProblem.ScopeMismatch)
+            workCheck(op == DraftOperationCanonical.normalize(op), WorkProblem.StorageUnavailable)
+            for (ref in op.dependencies) {
+                val previous = checkedEntry(access.task, ref).envelope
+                workCheck(previous.originLocalEditVersion < entry.originLocalEditVersion &&
+                    previous.operation.attempt == op.attempt && previous.operation.clientSampleId == op.clientSampleId &&
+                    previous.operation.kind != SampleKind.RemoveSample, WorkProblem.DependencyMismatch)
+            }
+        }
+        for (ref in batch.acceptedReferences) {
+            val entry = checkedEntry(access.task, ref)
+            val receipt = acceptedOperation(entry) ?: throw WorkFailure(WorkProblem.DependencyMismatch)
+            verifyOperationReceipt(access.task, entry.envelope, receipt)
+            workCheck(entry.envelope.operation.attempt in access.currentAttempts &&
+                receipt.draftVersion <= batch.expectedDraftVersion, WorkProblem.DependencyMismatch)
+        }
+        val sources = members.map { entry ->
+            val original = entry.source
+            val stored = requireSource(original.contextId, access.task)
+            workCheck(stored.source == original && validProof(stored.proof) &&
+                original.contextId !in access.securityRevokedSources && !sourceRevoked(original.contextId),
+                WorkProblem.SourceUnavailable)
+            stored
+        }.distinctBy { it.source.contextId }.sortedBy { it.source.contextId }
+        val lookup = ReceiptLookup(ReceiptKind.Batch, id)
+        return UploadCandidate(ReceiptTarget(lookup, access.task, workspaceId, id, batch.fingerprint),
+            batch, members, sources)
+    }
+
     suspend fun locateReceipt(access: WorkAccess, lookup: ReceiptLookup): ReceiptTarget? =
         transact(access) { locateReceipt(access.task, lookup) }
 
@@ -299,30 +398,38 @@ internal class SharedWorkStore(private val rows: ProtectedWorkRows, private val 
         }
         val batch = batch(id) ?: return null
         if (batch.state !in receiptStates) return null
+        val members = sealedMembers(task, batch)
+        workCheck(lookup.kind != ReceiptKind.Operation || members.any { it.operation.operationId == lookup.id },
+            WorkProblem.StorageUnavailable)
+        return ReceiptTarget(lookup, task, workspaceId, id, batch.fingerprint)
+    }
+
+    private suspend fun WorkTransaction.sealedMembers(task: WorkTask, batch: BatchRecord): List<OperationEnvelope> {
+        val id = batch.batchId
         workCheck(isWorkId(id) && batch.canonicalizationVersion == CANONICAL_VERSION &&
             batch.expectedDraftVersion in 0 until Long.MAX_VALUE && batch.operations.size in 1..50 &&
             batch.acceptedReferences.size <= 100 && (batch.receipt != null) == (batch.state == WorkState.Accepted),
             WorkProblem.StorageUnavailable)
-        val members = batch.operations.map { it.operationId }.toSet()
-        workCheck(members.size == batch.operations.size &&
-            (lookup.kind != ReceiptKind.Operation || lookup.id in members), WorkProblem.StorageUnavailable)
-        val dependencies = batch.operations.flatMap { ref ->
+        val ids = batch.operations.map { it.operationId }.toSet()
+        workCheck(ids.size == batch.operations.size, WorkProblem.StorageUnavailable)
+        val members = batch.operations.map { ref ->
             val entry = checkedEntry(task, ref)
             workCheck(entry.batchId == id && entry.envelope.operation.baseDraftVersion == batch.expectedDraftVersion,
                 WorkProblem.StorageUnavailable)
-            entry.envelope.operation.dependencies
+            entry.envelope
         }
-        val frontier = dependencies.filter { it.operationId !in members }.distinct().sortedBy { it.operationId }
+        val dependencies = members.flatMap { it.operation.dependencies }.distinct()
+        val frontier = dependencies.filter { it.operationId !in ids }.sortedBy { it.operationId }
         workCheck(frontier == batch.acceptedReferences &&
             batch.fingerprint == DraftOperationCanonical.batch(task, id, batch.expectedDraftVersion,
                 batch.operations, batch.acceptedReferences), WorkProblem.StorageUnavailable)
-        for (dependency in dependencies.distinct()) {
+        for (dependency in dependencies) {
             val entry = checkedEntry(task, dependency)
-            if (dependency.operationId !in members) {
+            if (dependency.operationId !in ids) {
                 workCheck(acceptedOperation(entry) != null, WorkProblem.StorageUnavailable)
             }
         }
-        return ReceiptTarget(lookup, task, workspaceId, id, batch.fingerprint)
+        return members
     }
 
     private suspend fun WorkTransaction.checkedEntry(task: WorkTask, ref: OperationReference): OperationEntry {

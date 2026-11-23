@@ -1,8 +1,10 @@
 package com.jaxpower.ipqc.patrol.work
 
+import com.jaxpower.ipqc.patrol.api.GuardedSampleExchange
 import com.jaxpower.ipqc.patrol.api.OfflineAccessReceipt
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonPrimitive
+import okhttp3.RequestBody
 import okhttp3.ResponseBody
 import retrofit2.Response
 import retrofit2.http.Body
@@ -11,8 +13,20 @@ import retrofit2.http.Header
 import retrofit2.http.POST
 import retrofit2.http.Path
 import retrofit2.http.Streaming
+import retrofit2.http.Tag
 
 internal interface WorkContextApi {
+    @Streaming
+    @POST("api/line-patrol/tasks/{taskId}/operation-batches")
+    suspend fun uploadSampleBatch(@Header("Authorization") bearer: String, @Path("taskId") taskId: String,
+                                  @Body input: RequestBody, @Tag guard: GuardedSampleExchange): Response<ResponseBody>
+
+    @Streaming
+    @POST("api/line-patrol/tasks/{taskId}/work-contexts/validate-sources")
+    suspend fun preflightSampleBatch(@Header("Authorization") bearer: String, @Path("taskId") taskId: String,
+                                     @Body input: WorkContextPreflightInputWire,
+                                     @Tag guard: GuardedSampleExchange): Response<ResponseBody>
+
     @Streaming
     @GET("api/line-patrol/tasks/{taskId}/operation-batches/{batchId}/receipt")
     suspend fun batchReceipt(@Header("Authorization") bearer: String, @Path("taskId") taskId: String,

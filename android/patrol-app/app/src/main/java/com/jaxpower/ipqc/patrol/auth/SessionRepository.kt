@@ -44,7 +44,7 @@ class SessionRepository(
 ) {
     private val mutex = Mutex()
     private val generation = AtomicLong()
-    private var active: Credentials? = null
+    @Volatile private var active: Credentials? = null
     // Refresh consumes the live credential before network IO. Retain the owning
     // credential for the offline receipt until verification replaces it or it is revoked.
     private var offlineAuthority: Any? = null
@@ -56,11 +56,12 @@ class SessionRepository(
         val access: String,
         val refresh: String,
         val accessExpiry: Instant,
-        var familyExpiry: Instant,
+        @Volatile var familyExpiry: Instant,
+        val canContribute: Boolean,
     ) {
         val bearer: String get() = "Bearer $access"
         val authorityId = Any()
-        var rejected = false // Guarded by the session mutex.
+        @Volatile var rejected = false // The session mutex serializes writes.
     }
 
     // Share the lock used to revoke online authority before reading its durable receipt.
@@ -68,7 +69,8 @@ class SessionRepository(
         offline?.resume(expected)
     }
 
-    internal class WorkSession(val identity: SessionIdentity, internal val authorityId: Any, val familyExpiry: Instant)
+    internal class WorkSession(val identity: SessionIdentity, internal val authorityId: Any, val familyExpiry: Instant,
+                               val canContribute: Boolean)
 
     internal suspend fun bindWorkSession(): WorkSession = mutex.withLock { eligibleWorkSession().workSession() }
 
@@ -113,7 +115,18 @@ class SessionRepository(
         result
     }
 
-    private fun Credentials.workSession() = WorkSession(identity, authorityId, familyExpiry)
+    private fun Credentials.workSession() = WorkSession(identity, authorityId, familyExpiry, canContribute)
+
+    // Called immediately before the guarded request writes HTTP headers. Do not
+    // wait for the session mutex on an OkHttp thread during login or refresh.
+    internal fun maySendContribution(session: WorkSession, expectedOrigin: String): Boolean {
+        val auth = try {
+            requireWorkSession(session, expectedOrigin)
+        } catch (_: PatrolFailure) {
+            return false
+        }
+        return auth.canContribute && !auth.rejected && active === auth && generation.get() == auth.generation
+    }
 
     private fun requireWorkSession(session: WorkSession, expectedOrigin: String): Credentials {
         val auth = eligibleWorkSession()
@@ -366,7 +379,8 @@ class SessionRepository(
         val familyExpiry = utc(expiry)
         ensureResponse(accessExpiry.isAfter(clock.instant()) && familyExpiry.isAfter(clock.instant()))
         return Credentials(stamp, Operator(auth.user.displayName, auth.user.mustChangePassword),
-            SessionIdentity(auth.user.id, family, environment), auth.accessToken, requireNotNull(refresh), accessExpiry, familyExpiry)
+            SessionIdentity(auth.user.id, family, environment), auth.accessToken, requireNotNull(refresh), accessExpiry,
+            familyExpiry, "LinePatrol.ContributeDraft" in auth.user.permissions)
     }
 
     private data class Verification(val receipt: OfflineAccessReceipt, val anchor: ClockSample?, val operator: Operator)

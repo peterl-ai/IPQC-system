@@ -12,6 +12,7 @@ import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.RequestBody
+import okhttp3.ResponseBody.Companion.toResponseBody
 import okio.BufferedSink
 import retrofit2.Response
 import retrofit2.Retrofit
@@ -108,6 +109,9 @@ interface PatrolApi {
 
 private val wireJson = Json { ignoreUnknownKeys = true }
 
+internal class GuardedSampleExchange(val maySend: () -> Boolean)
+internal const val MAX_SAMPLE_ERROR_BYTES = 16L * 1024
+
 fun patrolHttpClient(builder: OkHttpClient.Builder = OkHttpClient.Builder()): OkHttpClient = builder
     .cookieJar(CookieJar.NO_COOKIES)
     .retryOnConnectionFailure(false)
@@ -122,19 +126,43 @@ fun patrolHttpClient(builder: OkHttpClient.Builder = OkHttpClient.Builder()): Ok
         // OkHttp may follow some HTTP retry responses independently of transport retry.
         // Mark payloads one-shot so rotating credentials and passwords cannot be resent.
         val body = request.body
-        if (request.method == "POST" && body != null) {
+        val outbound = if (request.method == "POST" && body != null) {
             val once = object : RequestBody() {
                 override fun contentType() = body.contentType()
                 override fun contentLength() = body.contentLength()
                 override fun isOneShot() = true
                 override fun writeTo(sink: BufferedSink) = body.writeTo(sink)
             }
-            chain.proceed(request.newBuilder().method(request.method, once).build())
-        } else {
-            chain.proceed(request)
-        }
+            request.newBuilder().method(request.method, once).build()
+        } else request
+        val reply = chain.proceed(outbound)
+        if (outbound.tag(GuardedSampleExchange::class.java) != null && !reply.isSuccessful)
+            reply.boundedSampleError()
+        else reply
+    }
+    .addNetworkInterceptor { chain ->
+        val request = chain.request()
+        if (request.tag(GuardedSampleExchange::class.java)?.maySend?.invoke() == false)
+            throw IOException("Sample exchange authority changed")
+        chain.proceed(request)
     }
     .build()
+
+// Retrofit buffers error bodies even with @Streaming. Bound them after OkHttp
+// decodes HTTP content and before Retrofit can allocate the whole body.
+private fun okhttp3.Response.boundedSampleError(): okhttp3.Response {
+    val type = body?.contentType()
+    val bytes = try {
+        body?.use {
+            if (code == 401 || code == 403) return@use null
+            val source = it.source()
+            if (source.request(MAX_SAMPLE_ERROR_BYTES + 1)) null else source.readByteArray()
+        }
+    } catch (_: IOException) {
+        null
+    } ?: ByteArray(0)
+    return newBuilder().removeHeader("Content-Length").body(bytes.toResponseBody(type)).build()
+}
 
 fun createPatrolApi(origin: HttpUrl, client: OkHttpClient = patrolHttpClient()): PatrolApi =
     patrolRetrofit(origin, client).create(PatrolApi::class.java)

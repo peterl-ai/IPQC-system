@@ -9,6 +9,12 @@ import java.time.Instant
 import java.util.Base64
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.encodeToJsonElement
+import kotlinx.serialization.json.jsonObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.fail
 
@@ -23,7 +29,7 @@ internal suspend fun expectWork(problem: WorkProblem, action: suspend () -> Any?
     }
 }
 
-internal class SharedWorkTestFixture(val server: TestServer) {
+internal class SharedWorkTestFixture(val server: TestServer, private val canContribute: Boolean = false) {
     val a = SessionIdentity(Fixture.USER, Fixture.FAMILY, "synthetic-env")
     val b = SessionIdentity(Fixture.OTHER_USER, Fixture.OTHER_FAMILY, a.environment)
     val task = WorkTask(a.environment, Fixture.TASK, Fixture.FIRST_LINE, 2)
@@ -38,6 +44,10 @@ internal class SharedWorkTestFixture(val server: TestServer) {
 
     fun reopen(origin: String = server.origin.toString()) =
         SharedWorkStore(ProtectedWorkRows(rows, origin, TestWorkCipher), sessions)
+
+    suspend fun rewriteFixture(block: suspend WorkTransaction.() -> Unit) {
+        ProtectedWorkRows(rows, server.origin.toString(), TestWorkCipher).transaction(task, action = block)
+    }
 
     fun sourceFor(identity: SessionIdentity, id: String, scope: WorkTask = task) =
         WorkSource(scope, id, identity.userId, identity.familyId, server.clock.instant().toString(),
@@ -65,7 +75,9 @@ internal class SharedWorkTestFixture(val server: TestServer) {
     private fun auth(identity: SessionIdentity, access: String = Fixture.ACCESS, refresh: String = Fixture.REFRESH,
                      at: Instant = server.clock.instant()) =
         Fixture.auth(user = identity.userId, family = identity.familyId, access = access, refresh = refresh,
-            expires = at.plusSeconds(300).toString()).replace(a.environment, identity.environment)
+            expires = at.plusSeconds(300).toString()).replace(a.environment, identity.environment).let {
+            if (canContribute) it.replace("\"LinePatrol.Read\"", "\"LinePatrol.Read\",\"LinePatrol.ContributeDraft\"") else it
+        }
 
     private fun receipt(identity: SessionIdentity, at: Instant = server.clock.instant()) =
         Fixture.receipt(user = identity.userId, family = identity.familyId)
@@ -133,4 +145,18 @@ internal class SharedWorkTestFixture(val server: TestServer) {
         override fun seal(slot: String, plaintext: ByteArray, allowNewKey: Boolean) = plaintext.copyOf()
         override fun open(slot: String, sealed: ByteArray) = sealed.copyOf()
     }
+}
+
+internal fun ServerBatchReceipt.wire(): String {
+    val json = Json.encodeToJsonElement(this).jsonObject
+    return JsonObject(json + ("operations" to JsonArray(operations.map { it.wireObject() }))).toString()
+}
+
+internal fun ServerOperationReceipt.wire() = wireObject().toString()
+
+private fun ServerOperationReceipt.wireObject(): JsonObject {
+    val json = Json.encodeToJsonElement(this).jsonObject
+    val decimal = value?.inspectionValue?.toBigDecimal() ?: return json
+    val fields = json.getValue("value").jsonObject
+    return JsonObject(json + ("value" to JsonObject(fields + ("inspectionValue" to JsonPrimitive(decimal)))))
 }

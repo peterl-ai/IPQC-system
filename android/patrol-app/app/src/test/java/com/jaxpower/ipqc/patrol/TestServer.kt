@@ -42,7 +42,7 @@ internal class TestClock(var current: Instant = Instant.parse(Fixture.NOW)) : Cl
     override fun instant() = current
 }
 
-internal class TestServer : AutoCloseable {
+internal class TestServer(beforeNetwork: ((okhttp3.Request) -> Unit)? = null) : AutoCloseable {
     val web = MockWebServer()
     val clock = TestClock()
     val vault = MemoryVault()
@@ -61,8 +61,13 @@ internal class TestServer : AutoCloseable {
         // Bind an explicit IP so the TLS fixture is independent of host DNS and proxies.
         web.start(InetAddress.getByName(loopbackHost), 0)
         origin = web.url("/").newBuilder().host(loopbackHost).build()
-        val retrofit = patrolRetrofit(origin, patrolHttpClient(OkHttpClient.Builder().proxy(Proxy.NO_PROXY)
-            .sslSocketFactory(clientTls.sslSocketFactory(), clientTls.trustManager)))
+        val client = OkHttpClient.Builder().proxy(Proxy.NO_PROXY)
+            .sslSocketFactory(clientTls.sslSocketFactory(), clientTls.trustManager)
+        if (beforeNetwork != null) client.addNetworkInterceptor { chain ->
+            beforeNetwork(chain.request())
+            chain.proceed(chain.request())
+        }
+        val retrofit = patrolRetrofit(origin, patrolHttpClient(client))
         api = retrofit.create(PatrolApi::class.java)
         workApi = retrofit.create(WorkContextApi::class.java)
         session = newRepository()
