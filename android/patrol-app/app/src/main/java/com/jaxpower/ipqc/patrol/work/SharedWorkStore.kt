@@ -255,17 +255,128 @@ internal class SharedWorkStore(private val rows: ProtectedWorkRows, private val 
         }
     }
 
-    suspend fun recordReceipt(access: WorkAccess, response: ServerBatchReceipt) {
-        val receipt = response.copy(operations = response.operations.sortedBy { it.operationId })
-        transition(access, receipt.batchId) { batch ->
-            if (batch.state == WorkState.Accepted) {
-                workCheck(batch.receipt == receipt, WorkProblem.ReceiptMismatch)
-                return@transition batch
+    suspend fun locateReceipt(access: WorkAccess, lookup: ReceiptLookup): ReceiptTarget? =
+        transact(access) { locateReceipt(access.task, lookup) }
+
+    suspend fun reconcileReceipt(access: WorkAccess, target: ReceiptTarget, reply: ReceiptReply): ReceiptRecovery {
+        return transact(access) {
+            workCheck(locateReceipt(access.task, target.lookup) == target, WorkProblem.StaleGrant)
+            val batch = requireBatch(target.batchId)
+            try {
+                when (reply) {
+                    is ReceiptReply.Batch -> {
+                        workCheck(target.lookup.kind == ReceiptKind.Batch, WorkProblem.ReceiptMismatch)
+                        val accepted = verifyAcceptance(access.task, batch, reply.receipt)
+                        if (accepted != batch) save(accepted)
+                        ReceiptRecovery.BatchConfirmed(requireNotNull(accepted.receipt))
+                    }
+                    is ReceiptReply.Operation -> {
+                        workCheck(target.lookup.kind == ReceiptKind.Operation, WorkProblem.ReceiptMismatch)
+                        reconcileOperation(access.task, target.lookup.id, reply.receipt)
+                    }
+                    ReceiptReply.Missing -> ReceiptRecovery.Unresolved(ReceiptUncertainty.NotObserved)
+                    ReceiptReply.Conflict -> recordReceiptConflict(target.lookup, ReceiptConflictReason.QueryConflict)
+                    is ReceiptReply.Unavailable -> ReceiptRecovery.TransientFailure(reply.issue)
+                }
+            } catch (failure: WorkFailure) {
+                if (failure.problem != WorkProblem.ReceiptMismatch) throw failure
+                recordReceiptConflict(target.lookup, ReceiptConflictReason.ResponseMismatch)
             }
-            workCheck(batch.state in setOf(WorkState.InFlight, WorkState.OutcomeUnknown), WorkProblem.InvalidState)
-            verifyBatchReceipt(access.task, batch, receipt)
-            batch.copy(state = WorkState.Accepted, receipt = receipt)
+        } ?: throw WorkFailure(WorkProblem.StorageUnavailable)
+    }
+
+    private suspend fun WorkTransaction.recordReceiptConflict(lookup: ReceiptLookup, reason: ReceiptConflictReason):
+        ReceiptRecovery.Conflict {
+        rememberReceiptConflict(lookup, reason)
+        return ReceiptRecovery.Conflict(reason)
+    }
+
+    private suspend fun WorkTransaction.locateReceipt(task: WorkTask, lookup: ReceiptLookup): ReceiptTarget? {
+        if (!isWorkId(lookup.id)) return null
+        val id = when (lookup.kind) {
+            ReceiptKind.Batch -> lookup.id
+            ReceiptKind.Operation -> operation(lookup.id)?.batchId ?: return null
         }
+        val batch = batch(id) ?: return null
+        if (batch.state !in receiptStates) return null
+        workCheck(isWorkId(id) && batch.canonicalizationVersion == CANONICAL_VERSION &&
+            batch.expectedDraftVersion in 0 until Long.MAX_VALUE && batch.operations.size in 1..50 &&
+            batch.acceptedReferences.size <= 100 && (batch.receipt != null) == (batch.state == WorkState.Accepted),
+            WorkProblem.StorageUnavailable)
+        val members = batch.operations.map { it.operationId }.toSet()
+        workCheck(members.size == batch.operations.size &&
+            (lookup.kind != ReceiptKind.Operation || lookup.id in members), WorkProblem.StorageUnavailable)
+        val dependencies = batch.operations.flatMap { ref ->
+            val entry = checkedEntry(task, ref)
+            workCheck(entry.batchId == id && entry.envelope.operation.baseDraftVersion == batch.expectedDraftVersion,
+                WorkProblem.StorageUnavailable)
+            entry.envelope.operation.dependencies
+        }
+        val frontier = dependencies.filter { it.operationId !in members }.distinct().sortedBy { it.operationId }
+        workCheck(frontier == batch.acceptedReferences &&
+            batch.fingerprint == DraftOperationCanonical.batch(task, id, batch.expectedDraftVersion,
+                batch.operations, batch.acceptedReferences), WorkProblem.StorageUnavailable)
+        for (dependency in dependencies.distinct()) {
+            val entry = checkedEntry(task, dependency)
+            if (dependency.operationId !in members) {
+                workCheck(acceptedOperation(entry) != null, WorkProblem.StorageUnavailable)
+            }
+        }
+        return ReceiptTarget(lookup, task, workspaceId, id, batch.fingerprint)
+    }
+
+    private suspend fun WorkTransaction.checkedEntry(task: WorkTask, ref: OperationReference): OperationEntry {
+        val entry = requireOperation(ref.operationId)
+        val envelope = entry.envelope
+        val op = envelope.operation
+        workCheck(envelope.source.task == task && envelope.source.contextId == op.sourceWorkContextId &&
+            envelope.canonicalizationVersion == CANONICAL_VERSION && envelope.originLocalEditVersion > 0 &&
+            envelope.canonicalPayload == DraftOperationCanonical.operation(envelope.source, op, envelope.originLocalEditVersion) &&
+            workHash(envelope.canonicalPayload) == ref.contentHash && envelope.contentHash == ref.contentHash,
+            WorkProblem.StorageUnavailable)
+        return entry
+    }
+
+    private suspend fun WorkTransaction.reconcileOperation(task: WorkTask, id: String,
+                                                            receipt: ServerOperationReceipt): ReceiptRecovery {
+        val entry = requireOperation(id)
+        verifyOperationReceipt(task, entry.envelope, receipt)
+        val saved = individualReceipt(id)
+        val accepted = acceptedOperation(entry)
+        workCheck((accepted == null || accepted == receipt) && (saved == null || saved == receipt),
+            WorkProblem.ReceiptMismatch)
+        val dependency = entry.envelope.operation.dependencies.singleOrNull()
+        if (dependency != null) {
+            val prior = checkedEntry(task, dependency)
+            val predecessor = acceptedOperation(prior) ?: individualReceipt(dependency.operationId)
+                ?: return ReceiptRecovery.Unresolved(ReceiptUncertainty.MissingPredecessor)
+            verifyPredecessor(entry.envelope, receipt, predecessor)
+        }
+        if (accepted == null && saved == null) saveIndividualReceipt(receipt)
+        return ReceiptRecovery.OperationConfirmed(accepted ?: saved ?: receipt)
+    }
+
+    private suspend fun WorkTransaction.acceptedOperation(entry: OperationEntry): ServerOperationReceipt? {
+        val batch = entry.batchId?.let { requireBatch(it) } ?: return null
+        if (batch.state != WorkState.Accepted) return null
+        return batch.receipt?.operations?.singleOrNull { it.operationId == entry.envelope.operation.operationId }
+            ?: throw WorkFailure(WorkProblem.StorageUnavailable)
+    }
+
+    suspend fun recordReceipt(access: WorkAccess, response: ServerBatchReceipt) {
+        transition(access, response.batchId) { batch -> verifyAcceptance(access.task, batch, response) }
+    }
+
+    private suspend fun WorkTransaction.verifyAcceptance(task: WorkTask, batch: BatchRecord,
+                                                          response: ServerBatchReceipt): BatchRecord {
+        workCheck(batch.state in receiptStates, WorkProblem.InvalidState)
+        val receipt = response.copy(operations = response.operations.sortedBy { it.operationId })
+        if (batch.state == WorkState.Accepted) {
+            workCheck(batch.receipt == receipt, WorkProblem.ReceiptMismatch)
+            return batch
+        }
+        verifyBatchReceipt(task, batch, receipt)
+        return batch.copy(state = WorkState.Accepted, receipt = receipt)
     }
 
     private suspend fun WorkTransaction.verifyBatchReceipt(task: WorkTask, batch: BatchRecord, receipt: ServerBatchReceipt) {
@@ -277,38 +388,67 @@ internal class SharedWorkStore(private val rows: ProtectedWorkRows, private val 
         val expected = (batch.operations + batch.acceptedReferences).map { it.operationId }.sorted()
         workCheck(receipt.operations.map { it.operationId } == expected, WorkProblem.ReceiptMismatch)
         val outcomes = receipt.operations.associateBy { it.operationId }
+        val samples = mutableMapOf<String, Pair<WorkAttempt, String>>()
+        val captures = mutableSetOf<Pair<WorkAttempt, String>>()
+        val consumedPredecessors = mutableSetOf<String>()
         for (result in receipt.operations) {
             val entry = requireOperation(result.operationId)
+            val op = entry.envelope.operation
+            val sample = op.attempt to op.clientSampleId
+            val earlier = samples.put(result.sampleId, sample)
+            workCheck((earlier == null || earlier == sample) &&
+                (op.kind != SampleKind.CaptureSample || captures.add(sample)), WorkProblem.ReceiptMismatch)
             if (batch.operations.any { it.operationId == result.operationId }) {
-                val predecessor = entry.envelope.operation.dependencies.singleOrNull()?.let { outcomes[it.operationId] }
-                verifyOperationReceipt(task, entry.envelope, receipt, result, predecessor)
+                verifyOperationReceipt(task, entry.envelope, result)
+                workCheck(result.batchId == receipt.batchId && result.draftVersion == receipt.draftVersion &&
+                    result.uploadedByUserId == receipt.uploadedByUserId &&
+                    result.uploadedPersonalSessionId == receipt.uploadedPersonalSessionId &&
+                    result.acceptedAtUtc == receipt.acceptedAtUtc, WorkProblem.ReceiptMismatch)
+                op.dependencies.singleOrNull()?.let { dependency ->
+                    workCheck(consumedPredecessors.add(dependency.operationId), WorkProblem.ReceiptMismatch)
+                    val predecessor = outcomes[dependency.operationId] ?: throw WorkFailure(WorkProblem.ReceiptMismatch)
+                    verifyPredecessor(entry.envelope, result, predecessor)
+                }
+                val saved = individualReceipt(result.operationId)
+                workCheck(saved == null || saved == result, WorkProblem.ReceiptMismatch)
             } else {
-                val prior = requireBatch(requireNotNull(entry.batchId)).receipt
-                workCheck(prior?.operations?.singleOrNull { it.operationId == result.operationId } == result,
-                    WorkProblem.ReceiptMismatch)
+                workCheck(acceptedOperation(entry) == result, WorkProblem.ReceiptMismatch)
             }
         }
     }
 
-    private fun verifyOperationReceipt(task: WorkTask, envelope: OperationEnvelope, batch: ServerBatchReceipt,
-                                       result: ServerOperationReceipt, predecessor: ServerOperationReceipt?) {
+    private fun verifyPredecessor(envelope: OperationEnvelope, result: ServerOperationReceipt,
+                                  predecessor: ServerOperationReceipt) {
+        val op = envelope.operation
+        val dependency = op.dependencies.single()
+        workCheck(predecessor.operationId == dependency.operationId && predecessor.contentHash == dependency.contentHash &&
+            !predecessor.isRemoved && predecessor.valueOperationId == predecessor.operationId &&
+            predecessor.taskItemId == op.attempt.taskItemId && predecessor.inspectionAttemptId == op.attempt.inspectionAttemptId &&
+            predecessor.clientSampleId == op.clientSampleId && predecessor.sampleId == result.sampleId &&
+            (predecessor.draftVersion < result.draftVersion ||
+                (predecessor.draftVersion == result.draftVersion && predecessor.batchId == result.batchId &&
+                    predecessor.uploadedByUserId == result.uploadedByUserId &&
+                    predecessor.uploadedPersonalSessionId == result.uploadedPersonalSessionId &&
+                    predecessor.acceptedAtUtc == result.acceptedAtUtc)) &&
+            (!result.isRemoved || result.valueOperationId == predecessor.valueOperationId), WorkProblem.ReceiptMismatch)
+    }
+
+    private fun verifyOperationReceipt(task: WorkTask, envelope: OperationEnvelope, result: ServerOperationReceipt) {
         val op = envelope.operation
         val removed = op.kind == SampleKind.RemoveSample
         workCheck(result.taskId == task.taskId && result.environmentId == task.environmentId && result.lineId == task.lineId &&
-            result.workflowVersion == task.workflowVersion && result.batchId == batch.batchId &&
+            result.workflowVersion == task.workflowVersion && result.operationId == op.operationId && isWorkId(result.batchId) &&
             result.canonicalizationVersion == envelope.canonicalizationVersion && result.contentHash == envelope.contentHash &&
             result.kind == op.kind && result.taskItemId == op.attempt.taskItemId &&
             result.inspectionAttemptId == op.attempt.inspectionAttemptId && result.clientSampleId == op.clientSampleId &&
             result.sourceWorkContextId == envelope.source.contextId && result.contributorUserId == envelope.source.contributorUserId &&
-            result.uploadedByUserId == batch.uploadedByUserId && result.uploadedPersonalSessionId == batch.uploadedPersonalSessionId &&
-            result.draftVersion == batch.draftVersion && result.acceptedAtUtc == batch.acceptedAtUtc &&
+            isWorkId(result.uploadedByUserId) && isWorkId(result.uploadedPersonalSessionId) &&
+            op.baseDraftVersion < Long.MAX_VALUE && result.draftVersion == op.baseDraftVersion + 1 &&
+            isTimestamp(result.acceptedAtUtc) &&
             result.isRemoved == removed && isWorkId(result.sampleId) && isWorkId(result.valueOperationId) &&
             (if (removed) result.value == null else result.value != null && result.valueOperationId == op.operationId),
             WorkProblem.ReceiptMismatch)
-        if (op.dependencies.isNotEmpty()) {
-            workCheck(predecessor != null && predecessor.sampleId == result.sampleId &&
-                (!removed || result.valueOperationId == predecessor.valueOperationId), WorkProblem.ReceiptMismatch)
-        }
+
         val input = op.data
         val output = result.value
         if (input != null && output != null) {
@@ -359,11 +499,15 @@ internal class SharedWorkStore(private val rows: ProtectedWorkRows, private val 
 
     private suspend fun <T> transact(access: WorkAccess, create: Boolean = false,
                                      action: suspend WorkTransaction.() -> T): T? =
-        sessions.withWorkSession(access.session, rows.origin) {
+        sessions.withWorkSession(access.session, rows.origin) { requireCurrentSession ->
             access.requireCurrent()
             rows.transaction(access.task, create) {
+                requireCurrentSession()
                 access.requireCurrent()
-                action().also { access.requireCurrent() }
+                action().also {
+                    requireCurrentSession()
+                    access.requireCurrent()
+                }
             }
         }
 
@@ -394,4 +538,8 @@ internal class SharedWorkStore(private val rows: ProtectedWorkRows, private val 
     }
 
     private fun isTimestamp(value: String) = value.endsWith("Z") && runCatching { Instant.parse(value) }.isSuccess
+
+    private companion object {
+        val receiptStates = setOf(WorkState.InFlight, WorkState.OutcomeUnknown, WorkState.Accepted)
+    }
 }

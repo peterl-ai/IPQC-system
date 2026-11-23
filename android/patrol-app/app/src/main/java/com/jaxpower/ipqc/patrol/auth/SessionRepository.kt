@@ -105,10 +105,11 @@ class SessionRepository(
     }
 
     internal suspend fun <T> withWorkSession(session: WorkSession, expectedOrigin: String,
-                                            block: suspend () -> T): T = mutex.withLock {
-        requireWorkSession(session, expectedOrigin)
-        val result = block()
-        requireWorkSession(session, expectedOrigin)
+                                            block: suspend (requireCurrent: () -> Unit) -> T): T = mutex.withLock {
+        val requireCurrent: () -> Unit = { requireWorkSession(session, expectedOrigin) }
+        requireCurrent()
+        val result = block(requireCurrent)
+        requireCurrent()
         result
     }
 

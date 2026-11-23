@@ -27,6 +27,7 @@ internal class OnlineWorkCoordinator(
     private val store: SharedWorkStore,
 ) {
     private val selection = AtomicLong()
+    private val selectionCommit = Mutex()
     private val mutex = Mutex()
     private val latestVersion = mutableMapOf<WorkTask, Long>()
     private var active: Grant? = null
@@ -41,10 +42,12 @@ internal class OnlineWorkCoordinator(
         internal fun invalidate() = live.set(false)
     }
 
-    fun clearSelection() { selection.incrementAndGet() }
+    suspend fun clearSelection() {
+        selectionCommit.withLock { selection.incrementAndGet() }
+    }
 
     suspend fun open(task: LineTaskSummary): Grant {
-        val selected = selection.incrementAndGet()
+        val selected = selectionCommit.withLock { selection.incrementAndGet() }
         return mutex.withLock {
             requireSelection(selected)
             val session = sessions.authorizeWork()
@@ -60,6 +63,31 @@ internal class OnlineWorkCoordinator(
             workCheck(draft.version >= (latestVersion[draft.task] ?: 0L), WorkProblem.StaleGrant)
             latestVersion[draft.task] = draft.version
             publish(selected, draft, session)
+        }
+    }
+
+    suspend fun recoverBatchReceipt(grant: Grant, batchId: String): ReceiptRecovery =
+        recoverReceipt(grant, ReceiptLookup(ReceiptKind.Batch, batchId))
+
+    suspend fun recoverOperationReceipt(grant: Grant, operationId: String): ReceiptRecovery =
+        recoverReceipt(grant, ReceiptLookup(ReceiptKind.Operation, operationId))
+
+    private suspend fun recoverReceipt(grant: Grant, lookup: ReceiptLookup): ReceiptRecovery = try {
+        withGrant(grant) {
+            val target = store.locateReceipt(grant.access, lookup)
+                ?: return@withGrant ReceiptRecovery.Unresolved(ReceiptUncertainty.NoLocalAttempt)
+            val reply = request(grant) { bearer -> api.readReceipt(target, bearer) }
+            // A switch can supersede an in-flight GET. A switch and the Room
+            // transaction serialize only while publishing the result.
+            selectionCommit.withLock {
+                grant.access.requireCurrent()
+                store.reconcileReceipt(grant.access, target, reply)
+            }
+        }
+    } catch (failure: PatrolFailure) {
+        when (failure.issue) {
+            Issue.UNAUTHENTICATED, Issue.FORBIDDEN -> ReceiptRecovery.AuthenticationFailure(failure.issue)
+            else -> throw failure
         }
     }
 

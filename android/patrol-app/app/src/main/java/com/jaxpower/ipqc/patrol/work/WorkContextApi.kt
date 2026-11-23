@@ -3,14 +3,26 @@ package com.jaxpower.ipqc.patrol.work
 import com.jaxpower.ipqc.patrol.api.OfflineAccessReceipt
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonPrimitive
+import okhttp3.ResponseBody
 import retrofit2.Response
 import retrofit2.http.Body
 import retrofit2.http.GET
 import retrofit2.http.Header
 import retrofit2.http.POST
 import retrofit2.http.Path
+import retrofit2.http.Streaming
 
 internal interface WorkContextApi {
+    @Streaming
+    @GET("api/line-patrol/tasks/{taskId}/operation-batches/{batchId}/receipt")
+    suspend fun batchReceipt(@Header("Authorization") bearer: String, @Path("taskId") taskId: String,
+                             @Path("batchId") batchId: String): Response<ResponseBody>
+
+    @Streaming
+    @GET("api/line-patrol/tasks/{taskId}/operations/{operationId}/receipt")
+    suspend fun operationReceipt(@Header("Authorization") bearer: String, @Path("taskId") taskId: String,
+                                  @Path("operationId") operationId: String): Response<ResponseBody>
+
     @GET("api/line-patrol/tasks/{taskId}/shared-draft")
     suspend fun sharedDraft(@Header("Authorization") bearer: String, @Path("taskId") taskId: String): Response<SharedDraftWire>
 

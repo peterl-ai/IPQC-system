@@ -18,8 +18,10 @@ import java.time.Clock
 import java.time.Instant
 import java.time.ZoneId
 import java.time.ZoneOffset
+import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import okhttp3.OkHttpClient
+import okhttp3.mockwebserver.Dispatcher
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
 import okhttp3.mockwebserver.RecordedRequest
@@ -101,6 +103,25 @@ internal suspend fun expectIssue(issue: Issue, action: suspend () -> Any?) {
         fail("Expected $issue")
     } catch (e: PatrolFailure) {
         assertEquals(issue, e.issue)
+    }
+}
+
+internal suspend fun withHeldResponse(server: TestServer, path: String, response: MockResponse,
+                                     test: suspend (release: () -> Unit) -> Unit) {
+    val latch = CountDownLatch(1)
+    val previous = server.web.dispatcher
+    server.web.dispatcher = object : Dispatcher() {
+        override fun dispatch(request: RecordedRequest): MockResponse {
+            if (request.path != path) return previous.dispatch(request)
+            check(latch.await(10, TimeUnit.SECONDS))
+            return response
+        }
+    }
+    try {
+        test { latch.countDown() }
+    } finally {
+        latch.countDown()
+        server.web.dispatcher = previous
     }
 }
 
