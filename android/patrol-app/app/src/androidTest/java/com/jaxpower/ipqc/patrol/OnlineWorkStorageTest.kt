@@ -10,6 +10,7 @@ import com.jaxpower.ipqc.patrol.api.*
 import com.jaxpower.ipqc.patrol.auth.SessionIdentity
 import com.jaxpower.ipqc.patrol.auth.SessionRepository
 import com.jaxpower.ipqc.patrol.offline.CacheRows
+import com.jaxpower.ipqc.patrol.offline.ClockSample
 import com.jaxpower.ipqc.patrol.offline.RoomCacheRows
 import com.jaxpower.ipqc.patrol.offline.TaskCacheDatabase
 import com.jaxpower.ipqc.patrol.offline.TaskSnapshots
@@ -20,8 +21,13 @@ import java.time.Clock
 import java.time.Instant
 import java.time.ZoneOffset
 import java.util.Base64
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.json.Json
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.RequestBody
@@ -200,6 +206,199 @@ class OnlineWorkStorageTest {
         }
     }
 
+    @Test fun offlineSamplesAreSerializedAndSurviveRealRoomReopenWithOriginalEncryptedProvenance() = runBlocking<Unit>(Dispatchers.IO) {
+        OfflineDeviceFixture(canContribute = true).use { device ->
+            val (source, first) = armedSamples(device)
+            val second = OfflineSampleCoordinator(ledger(device, device.sessions, device.rows))
+            val calls = device.api.calls.get()
+            val a = first.newCapture(attempt, good)
+            val b = second.newCapture(attempt, bad)
+            val both = listOf(async { first.save(source.task, a) }, async { second.save(source.task, b) }).awaitAll()
+            assertEquals(setOf(1L, 2L), both.map { it.envelope.originLocalEditVersion }.toSet())
+            assertEquals(2, both.map { it.envelope.operation.clientSampleId }.toSet().size)
+            val duplicate = second.save(source.task, a)
+            assertEquals(both.first().envelope.contentHash, duplicate.envelope.contentHash)
+            expect(WorkProblem.OperationIdentityConflict) { second.save(source.task, a.copy(input = bad)) }
+
+            val capture = first.newCapture(attempt, good)
+            val captured = capture.operation(source.contextId, 7)
+            val ref = OperationReference(captured.operationId, workHash(DraftOperationCanonical.operation(source, captured, 3)))
+            val reached = CompletableDeferred<Unit>()
+            val release = CompletableDeferred<Unit>()
+            val hooked = object : CacheRows by device.rows {
+                override suspend fun replace(slot: String, sealed: ByteArray) {
+                    device.rows.replace(slot, sealed)
+                    if (reached.complete(Unit)) release.await()
+                }
+            }
+            val held = OfflineSampleCoordinator(ledger(device, device.sessions, hooked))
+            val racedCapture = async { held.save(source.task, capture) }
+            withTimeout(30_000) { reached.await() }
+            val racedCorrection = async(start = CoroutineStart.UNDISPATCHED) {
+                second.save(source.task, OfflineSampleEdit.Correct(capture.key, bad, ref))
+            }
+            assertFalse(racedCorrection.isCompleted)
+            release.complete(Unit)
+            assertEquals(ref, racedCapture.await().envelope.reference())
+            assertEquals(4L, racedCorrection.await().envelope.originLocalEditVersion)
+
+            val prior = both.first().envelope.reference()
+            val corrected = OfflineSampleEdit.Correct(a.key, bad, prior)
+            val removed = OfflineSampleEdit.Remove(a.key, prior)
+            val competitors = listOf(
+                async { runCatching { first.save(source.task, corrected) } },
+                async { runCatching { second.save(source.task, removed) } },
+            ).awaitAll()
+            assertEquals(1, competitors.count { it.isSuccess })
+            assertEquals(WorkProblem.DependencyMismatch,
+                (competitors.single { it.isFailure }.exceptionOrNull() as WorkFailure).problem)
+            assertEquals(5L, first.draft(source.task).localEditVersion)
+            assertEquals(calls, device.api.calls.get())
+            assertSealed(device.databaseFile)
+            assertFalse(device.databaseFile.readBytes().toString(Charsets.ISO_8859_1).contains(a.operationId))
+
+            device.database.close()
+            withReopenedDatabase(device) { db ->
+                val restart = SessionRepository(device.api, device.vault, ORIGIN, clock, device.openCache(db))
+                val current = OfflineSampleCoordinator(ledger(device, restart, RoomCacheRows(db)))
+                assertEquals(1, db.openHelper.readableDatabase.version)
+                val row = requireNotNull(current.savedOperation(source.task, capture.operationId))
+                assertEquals(source, row.envelope.source)
+                assertEquals(ref, row.envelope.reference())
+                assertEquals("NG", current.draft(source.task).effective.single { it.key == capture.key }.value?.judgment)
+                device.sample = ClockSample(device.sample.boot + 1, 1_000, Instant.parse(NOW).toEpochMilli() + 9_000)
+                current.save(source.task, current.newCapture(attempt, good))
+                assertEquals(6L, current.draft(source.task).localEditVersion)
+                assertEquals(calls, device.api.calls.get())
+            }
+        }
+    }
+
+    @Test fun RoomRollbackAndLostCommitAcknowledgementResolveByExactOperationId() = runBlocking<Unit>(Dispatchers.IO) {
+        for (before in listOf(true, false)) {
+            OfflineDeviceFixture(canContribute = true).use { device ->
+                val (source, coordinator) = armedSamples(device)
+                val command = coordinator.newCapture(attempt, good)
+                // The first operation writes the registry marker, claim, envelope and catalog.
+                val fault = CommitFault(device.rows, 4, before)
+                val interrupted = OfflineSampleCoordinator(ledger(device, device.sessions, fault))
+                expect(WorkProblem.StorageUnavailable) { interrupted.save(source.task, command) }
+                device.database.close()
+                withReopenedDatabase(device) { db ->
+                    val restart = SessionRepository(device.api, device.vault, ORIGIN, clock, device.openCache(db))
+                    val restored = OfflineSampleCoordinator(ledger(device, restart, RoomCacheRows(db)))
+                    val durable = restored.savedOperation(source.task, command.operationId)
+                    assertEquals(!before, durable != null)
+                    val saved = restored.save(source.task, command)
+                    assertEquals(1L, saved.envelope.originLocalEditVersion)
+                    assertEquals(command.operationId, saved.envelope.operation.operationId)
+                    if (!before) assertEquals(durable?.envelope?.contentHash, saved.envelope.contentHash)
+                    assertEquals(1, restored.draft(source.task).history.size)
+                }
+            }
+        }
+    }
+
+    @Test fun RoomCommitRechecksCaptureDeadlineA02ExpiryAndConcurrentOperatorTransitions() = runBlocking<Unit>(Dispatchers.IO) {
+        for (case in listOf("capture", "receipt", "logout", "login")) {
+            OfflineDeviceFixture(canContribute = true).use { device ->
+                val expiry = if (case == "receipt") "2026-11-22T14:00:00Z" else CAPTURE
+                val (source, ordinary) = armedSamples(device, CoordinatorApi(expiry))
+                val edit = ordinary.newCapture(attempt, good)
+                val initial = device.rows.count()
+                val reachedWrite = CompletableDeferred<Unit>()
+                val release = CompletableDeferred<Unit>()
+                val hooked = object : CacheRows by device.rows {
+                    override suspend fun replace(slot: String, sealed: ByteArray) {
+                        device.rows.replace(slot, sealed)
+                        if (reachedWrite.complete(Unit)) release.await()
+                    }
+                }
+                val coordinator = OfflineSampleCoordinator(ledger(device, device.sessions, hooked))
+                val saving = async { runCatching { coordinator.save(source.task, edit) } }
+                withTimeout(30_000) { reachedWrite.await() }
+                val ending = when (case) {
+                    "logout" -> async(start = CoroutineStart.UNDISPATCHED) {
+                        device.sessions.logout(attemptRemote = false)
+                        Unit
+                    }
+                    "login" -> async(start = CoroutineStart.UNDISPATCHED) {
+                        device.api.loginSubject = SessionIdentity(id(70), id(71), IDENTITY.environment)
+                        device.sessions.login("second-fixture", "test-only")
+                        Unit
+                    }
+                    else -> {
+                        val delta = java.time.Duration.between(Instant.parse(NOW), Instant.parse(expiry)).toMillis()
+                        device.sample = device.sample.copy(elapsedMs = device.sample.elapsedMs + delta,
+                            utcMs = device.sample.utcMs + delta)
+                        null
+                    }
+                }
+                release.complete(Unit)
+                val error = saving.await().exceptionOrNull()
+                when (case) {
+                    "capture" -> assertEquals(WorkProblem.CaptureWindowClosed, (error as WorkFailure).problem)
+                    "receipt" -> assertEquals(Issue.OFFLINE_EXPIRED, (error as PatrolFailure).issue)
+                    "logout", "login" -> assertEquals(Issue.UNAUTHENTICATED, (error as PatrolFailure).issue)
+                }
+                ending?.await()
+                if (case == "login") assertEquals(device.api.loginSubject, device.cache.resume()?.identity)
+                assertEquals(initial, device.rows.count())
+                assertNull(ProtectedWorkRows(device.rows, ORIGIN, device.workKey).transaction(source.task) {
+                    operation(edit.operationId)
+                })
+            }
+        }
+    }
+
+    @Test fun missingWorkKeyAndCorruptedEncryptedOperationFailClosedWithoutDeletingRows() = runBlocking<Unit>(Dispatchers.IO) {
+        for (missingKey in listOf(true, false)) {
+            OfflineDeviceFixture(canContribute = true).use { device ->
+                val (source, edits) = armedSamples(device)
+                val edit = edits.newCapture(attempt, good)
+                edits.save(source.task, edit)
+                val count = device.rows.count()
+                if (missingKey) device.workKey.removeKey()
+                else {
+                    val slot = device.rows.legacyWorkSlots().single { key ->
+                        val sealed = checkNotNull(device.rows.read(key))
+                        val clear = device.workKey.open(key, sealed)
+                        try {
+                            val json = clear.decodeToString()
+                            json.contains("\"envelope\"") && json.contains(edit.operationId)
+                        } finally {
+                            clear.fill(0)
+                        }
+                    }
+                    device.rows.replace(slot, byteArrayOf(42, 3, 7))
+                }
+                expect(WorkProblem.StorageUnavailable) { edits.savedOperation(source.task, edit.operationId) }
+                expect(WorkProblem.StorageUnavailable) { edits.save(source.task, edits.newCapture(attempt, good)) }
+                assertEquals(count, device.rows.count())
+                assertNotNull(device.cache.resume(IDENTITY))
+            }
+        }
+    }
+
+    private suspend fun withReopenedDatabase(device: OfflineDeviceFixture, action: suspend (TaskCacheDatabase) -> Unit) {
+        val database = TaskCacheDatabase.open(device.context, device.databaseFile)
+        try {
+            action(database)
+        } finally {
+            database.close()
+        }
+    }
+
+    private suspend fun armedSamples(device: OfflineDeviceFixture, wire: CoordinatorApi = CoordinatorApi()):
+        Pair<WorkSource, OfflineSampleCoordinator> {
+        device.sessions.login("synthetic", "test-only")
+        val store = ledger(device, device.sessions, device.rows)
+        val online = OnlineWorkCoordinator(ORIGIN, device.patrol, wire, device.sessions, store)
+        val grant = online.issueOrReuse(online.open(TASK))
+        online.armOfflineSamples(grant)
+        return requireNotNull(grant.source) to online.offlineSamples
+    }
+
     private suspend fun prepareUpload(device: OfflineDeviceFixture): DeviceUpload {
         device.download()
         val snapshot = requireNotNull(device.snapshots.page(IDENTITY, LINE.id, 1))
@@ -274,7 +473,7 @@ class OnlineWorkStorageTest {
         }
     }
 
-    private class CoordinatorApi : WorkContextApi {
+    private class CoordinatorApi(private val captureUntil: String = CAPTURE) : WorkContextApi {
         var sampleReceipt: ServerBatchReceipt? = null
         var sampleUploads = 0
         var samplePreflights = 0
@@ -332,13 +531,13 @@ class OnlineWorkStorageTest {
             check(bearer == "Bearer fixture-access" && taskId == TASK.id && input.expectedTaskLineId == LINE.id &&
                 input.expectedWorkflowVersion == 2 && input.expectedEnvironmentId == IDENTITY.environment)
             issues++
-            return Response.success(201, WorkContextIssuedWire(metadata(), proof, receipt(IDENTITY), false))
+            return Response.success(201, WorkContextIssuedWire(metadata(captureUntil), proof, receipt(IDENTITY), false))
         }
 
         override suspend fun context(bearer: String, taskId: String, contextId: String): Response<WorkContextMetadataWire> {
             check(bearer == "Bearer fixture-access" && taskId == TASK.id && contextId == OnlineWorkStorageTest.contextId)
             metadataReads++
-            return Response.success(metadata())
+            return Response.success(metadata(captureUntil))
         }
 
         override suspend fun preflight(bearer: String, taskId: String, input: WorkContextPreflightInputWire): Response<WorkContextPreflightWire> {
@@ -383,9 +582,11 @@ class OnlineWorkStorageTest {
         val contextId = id(8)
         val attempt = WorkAttempt(OfflineDeviceFixture.DETAIL.items.single().id, id(2))
         val proof = Base64.getUrlEncoder().withoutPadding().encodeToString(ByteArray(32) { 27 })
+        val good = SampleInput.Qualitative(QualitativeJudgment.OK)
+        val bad = SampleInput.Qualitative(QualitativeJudgment.NG)
 
-        fun metadata() = WorkContextMetadataWire(contextId, 1, IDENTITY.environment, IDENTITY.userId,
-            IDENTITY.familyId, 4, TASK.id, LINE.id, 2, NOW, CAPTURE, FAMILY, revision = 1)
+        fun metadata(captureUntil: String) = WorkContextMetadataWire(contextId, 1, IDENTITY.environment, IDENTITY.userId,
+            IDENTITY.familyId, 4, TASK.id, LINE.id, 2, NOW, captureUntil, FAMILY, revision = 1)
 
         fun receipt(identity: SessionIdentity) = OfflineAccessReceipt(1, identity.userId,
             identity.familyId, identity.environment, NOW, "2026-11-22T14:00:00Z", FAMILY)

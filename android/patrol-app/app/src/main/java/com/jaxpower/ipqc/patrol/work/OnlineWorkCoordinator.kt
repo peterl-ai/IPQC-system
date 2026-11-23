@@ -32,6 +32,7 @@ internal class OnlineWorkCoordinator(
     private val mutex = Mutex()
     private val latestVersion = mutableMapOf<WorkTask, Long>()
     private var active: Grant? = null
+    internal val offlineSamples = OfflineSampleCoordinator(store)
 
     internal class Grant internal constructor(
         val draft: OnlineDraft,
@@ -59,17 +60,31 @@ internal class OnlineWorkCoordinator(
 
     private suspend fun readDraft(task: LineTaskSummary, session: SessionRepository.WorkSession,
                                   selected: Long): OnlineDraft {
-        val detail = sessions.requestWork(session, origin) { bearer ->
-            requireSelection(selected)
-            patrol.onlineDetail(bearer, session.identity, task.lineId, task)
-        }
-        val draft = sessions.requestWork(session, origin) { bearer ->
-            requireSelection(selected)
-            responseBody { api.sharedDraft(bearer, detail.summary.id) }.validate(detail, session)
+        val draft = try {
+            val detail = sessions.requestWork(session, origin) { bearer ->
+                requireSelection(selected)
+                patrol.onlineDetail(bearer, session.identity, task.lineId, task)
+            }
+            sessions.requestWork(session, origin) { bearer ->
+                requireSelection(selected)
+                responseBody { api.sharedDraft(bearer, detail.summary.id) }.validate(detail, session)
+            }
+        } catch (failure: PatrolFailure) {
+            if (failure.issue in closedSampleScopes && isWorkId(task.id) && isWorkId(task.lineId) && task.workflowVersion == 2) {
+                selectionCommit.withLock {
+                    requireSelection(selected)
+                    store.invalidateOfflineSamples(session, WorkTask(session.identity.environment, task.id, task.lineId, 2))
+                }
+            }
+            throw failure
         }
         requireSelection(selected)
         workCheck(draft.version >= (latestVersion[draft.task] ?: 0L), WorkProblem.StaleGrant)
         latestVersion[draft.task] = draft.version
+        selectionCommit.withLock {
+            requireSelection(selected)
+            store.observeOfflineSamples(session, draft.sampleBasis)
+        }
         return draft
     }
 
@@ -209,6 +224,20 @@ internal class OnlineWorkCoordinator(
             if (verified != null) return@withGrant verified
         }
         issue(grant, snapshot.state)
+    }
+
+    // Arming requires a current authenticated contribution grant and a fresh paired
+    // task/detail read. Ordinary offline browse and merely fetching a task never arm it.
+    suspend fun armOfflineSamples(grant: Grant) = withGrant(grant) {
+        val capture = grant.access.captureGrant ?: throw WorkFailure(WorkProblem.SourceUnavailable)
+        val source = grant.source ?: throw WorkFailure(WorkProblem.SourceUnavailable)
+        workCheck(grant.access.session.canContribute, WorkProblem.SourceUnavailable)
+        val draft = readDraft(grant.selectedTask, grant.access.session, grant.selection)
+        selectionCommit.withLock {
+            requireSelection(grant.selection)
+            workCheck(draft.task == grant.draft.task && draft.sampleBasis.editable, WorkProblem.ScopeMismatch)
+            store.armOfflineSamples(grant.access, source, capture, draft.sampleBasis)
+        }
     }
 
     private suspend fun reuse(grant: Grant, stored: StoredWorkSource): Grant? {
@@ -356,5 +385,6 @@ internal class OnlineWorkCoordinator(
         val uploading = mutableSetOf<Pair<String, WorkTask>>()
         val uploadableDrafts = setOf(DraftAvailability.AlreadyInitialized, DraftAvailability.SharedDraftInitialized)
         val definiteNonIssuance = setOf(400, 401, 403, 404, 409, 413, 429)
+        val closedSampleScopes = setOf(Issue.NOT_FOUND, Issue.UNSUPPORTED_TASK, Issue.TASK_DETAIL_CHANGED, Issue.LINE_MISMATCH)
     }
 }

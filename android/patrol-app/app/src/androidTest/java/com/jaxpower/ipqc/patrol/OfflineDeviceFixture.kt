@@ -16,7 +16,7 @@ import java.util.UUID
 import java.util.concurrent.atomic.AtomicInteger
 import retrofit2.Response
 
-internal class OfflineDeviceFixture : AutoCloseable {
+internal class OfflineDeviceFixture(canContribute: Boolean = false) : AutoCloseable {
     val context: Context = InstrumentationRegistry.getInstrumentation().targetContext
     private val stem = "a02-test-" + UUID.randomUUID()
     val receiptFile = File(context.noBackupFilesDir, "$stem.admission")
@@ -27,7 +27,7 @@ internal class OfflineDeviceFixture : AutoCloseable {
     val database = TaskCacheDatabase.open(context, databaseFile)
     val rows = RoomCacheRows(database)
     val snapshots = TaskSnapshots(rows, workKey, ORIGIN)
-    val api = FixtureApi()
+    val api = FixtureApi(canContribute)
     @Volatile var sample = ClockSample(8, 20_000, Instant.parse(NOW).toEpochMilli())
     val cache = openCache()
     val sessions = SessionRepository(api, vault, ORIGIN, Clock.fixed(Instant.parse(NOW), ZoneOffset.UTC), cache)
@@ -53,23 +53,24 @@ internal class OfflineDeviceFixture : AutoCloseable {
         vault.clear()
     }
 
-    class FixtureApi : PatrolApi {
+    class FixtureApi(private val canContribute: Boolean = false) : PatrolApi {
         val calls = AtomicInteger()
+        var loginSubject = IDENTITY
 
         override suspend fun login(input: NativeLogin): Response<NativeAuth> {
             calls.incrementAndGet()
             return Response.success(NativeAuth(
                 "fixture-access", "2026-11-19T14:05:00Z",
-                CurrentUser(IDENTITY.userId, "synthetic", "Fixture Inspector", "IPQA", true, false,
-                    listOf("LinePatrol.Read")),
-                "fixture-refresh", IDENTITY.familyId, IDENTITY.environment, "2026-11-26T14:00:00Z",
+                CurrentUser(loginSubject.userId, "synthetic", "Fixture Inspector", "IPQA", true, false,
+                    listOf("LinePatrol.Read") + if (canContribute) listOf("LinePatrol.ContributeDraft") else emptyList()),
+                "fixture-refresh", loginSubject.familyId, loginSubject.environment, "2026-11-26T14:00:00Z",
             ))
         }
 
         override suspend fun verify(bearer: String): Response<OfflineAccessReceipt> {
             calls.incrementAndGet()
-            return Response.success(OfflineAccessReceipt(1, IDENTITY.userId, IDENTITY.familyId,
-                IDENTITY.environment, NOW, "2026-11-22T14:00:00Z", "2026-11-26T14:00:00Z"))
+            return Response.success(OfflineAccessReceipt(1, loginSubject.userId, loginSubject.familyId,
+                loginSubject.environment, NOW, "2026-11-22T14:00:00Z", "2026-11-26T14:00:00Z"))
         }
 
         override suspend fun lines(bearer: String): Response<LineDirectory> {

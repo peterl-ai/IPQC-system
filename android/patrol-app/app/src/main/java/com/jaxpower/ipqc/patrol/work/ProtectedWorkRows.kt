@@ -25,7 +25,11 @@ internal data class OperationEntry(
     val envelope: OperationEnvelope,
     val batchId: String? = null,
     val quarantine: ConflictEvidence? = null,
+    val offlineCapture: OfflineCaptureEvidence? = null,
 )
+
+@Serializable
+internal class OfflineCaptureEvidence(val atUtc: String, val untilUtc: String)
 
 @Serializable
 internal data class WorkIssuanceState(val contextId: String? = null, val pendingId: String? = null)
@@ -146,6 +150,9 @@ internal class WorkTransaction(
     }
 
     suspend fun save(source: StoredWorkSource) = write("source", source.source.contextId, source)
+
+    suspend fun offlineProfile(userId: String): OfflineSampleProfile? = read("offline-profile", userId)
+    suspend fun saveOfflineProfile(profile: OfflineSampleProfile) = write("offline-profile", profile.owner.userId, profile)
 
     suspend fun issuance(userId: String): WorkIssuanceState = read("issuance", userId) ?: WorkIssuanceState()
     suspend fun saveIssuance(userId: String, state: WorkIssuanceState) = write("issuance", userId, state)

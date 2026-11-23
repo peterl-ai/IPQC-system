@@ -1,7 +1,11 @@
 package com.jaxpower.ipqc.patrol.work
 
 import com.jaxpower.ipqc.patrol.api.PatrolFailure
+import com.jaxpower.ipqc.patrol.auth.SessionIdentity
 import com.jaxpower.ipqc.patrol.auth.SessionRepository
+import com.jaxpower.ipqc.patrol.offline.OfflineSession
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import java.time.Instant
 import java.util.Base64
 import java.util.UUID
@@ -82,6 +86,209 @@ internal class SharedWorkStore(private val rows: ProtectedWorkRows, private val 
         } == true, WorkProblem.StorageUnavailable)
     }
 
+    suspend fun observeOfflineSamples(session: SessionRepository.WorkSession, basis: OfflineSampleBasis) {
+        sessions.withWorkSession(session, rows.origin) { requireCurrent ->
+            rows.transaction(basis.task) {
+                val profile = offlineProfile(session.identity.userId) ?: return@transaction
+                if (profile.owner != session.identity) return@transaction
+                val observed = updateBasis(profile.basis, basis.copy(editable = basis.editable && session.canContribute))
+                if (observed != profile.basis) saveOfflineProfile(profile.copy(basis = observed))
+                requireCurrent()
+            }
+        }
+    }
+
+    suspend fun invalidateOfflineSamples(session: SessionRepository.WorkSession, task: WorkTask) {
+        sessions.withWorkSession(session, rows.origin) { requireCurrent ->
+            rows.transaction(task) {
+                val profile = offlineProfile(session.identity.userId) ?: return@transaction
+                if (profile.owner != session.identity) return@transaction
+                val blocked = profile.basis.copy(editable = false,
+                    attempts = profile.basis.attempts.map { it.copy(applicable = false) },
+                    samples = profile.basis.samples.map { it.copy(current = false) })
+                if (blocked != profile.basis) saveOfflineProfile(profile.copy(basis = blocked))
+                requireCurrent()
+            }
+        }
+    }
+
+    suspend fun armOfflineSamples(access: WorkAccess, source: WorkSource, capture: CaptureGrant, basis: OfflineSampleBasis) {
+        val owner = access.session.identity
+        workCheck(access.session.canContribute && access.owns(source) && capture.contextId == source.contextId,
+            WorkProblem.SourceUnavailable)
+        workCheck(source.task == access.task && basis.task == access.task && basis.editable, WorkProblem.ScopeMismatch)
+        sessions.withWorkCaptureClock(access.session, rows.origin, requireSampleContribution = true) { now ->
+            workCheck(rows.transaction(access.task) {
+                access.requireCurrent()
+                val old = offlineProfile(owner.userId)?.takeIf { it.owner == owner }
+                val deadline = minOf(capture.until, Instant.parse(source.captureUntilUtc),
+                    old?.takeIf { it.contextId == capture.contextId }?.let { Instant.parse(it.captureUntilUtc) } ?: capture.until)
+                val latest = old?.let { updateBasis(it.basis, basis) } ?: basis
+                workCheck(latest == basis, WorkProblem.StaleGrant)
+                val profile = OfflineSampleProfile(owner, source.contextId, deadline.toString(), latest)
+                workCheck(requireOfflineSource(profile) == source, WorkProblem.SourceUnavailable)
+                requireCaptureTime(source, CaptureGrant(source.contextId, deadline), now)
+                saveOfflineProfile(profile)
+                requireCaptureTime(source, CaptureGrant(source.contextId, deadline), now)
+                access.requireCurrent()
+                true
+            } == true, WorkProblem.StorageUnavailable)
+        }
+    }
+
+    suspend fun saveOfflineSample(task: WorkTask, edit: OfflineSampleEdit): WorkOperation = offlineTransaction(task) { profile, observe ->
+        operation(edit.operationId)?.let { old ->
+            val existing = checkedEntry(task, old.envelope.reference()).envelope
+            workCheck(profile.owner.owns(existing.source) && old.offlineCapture != null &&
+                edit.operation(existing.source.contextId, existing.operation.baseDraftVersion) == existing.operation,
+                WorkProblem.OperationIdentityConflict)
+            return@offlineTransaction OfflineTransactionResult(describe(old))
+        }
+
+        val source = requireOfflineSource(profile)
+        val capture = CaptureGrant(source.contextId, Instant.parse(profile.captureUntilUtc))
+        val capturedAt = observe().apparentNow
+        requireCaptureTime(source, capture) { capturedAt }
+        val history = sampleHistory(profile)
+        requireFreshSampleBasis(profile.basis, history)
+        val op = edit.operation(source.contextId, profile.basis.draftVersion)
+        val board = sampleBoard(profile.basis, history)
+        if (op.kind == SampleKind.CaptureSample) {
+            workCheck(history.none {
+                val prior = it.operation.envelope.operation
+                prior.attempt == edit.key.attempt && prior.clientSampleId == edit.key.clientSampleId
+            }, WorkProblem.OperationIdentityConflict)
+        }
+        board.validate(edit.key, op)
+        val result = persistOperation(source, op, OfflineCaptureEvidence(capturedAt.toString(), capture.until.toString()))
+        OfflineTransactionResult(result, capture.until)
+    }
+
+    suspend fun findOfflineSample(task: WorkTask, id: String): WorkOperation? = offlineTransaction(task) { profile, _ ->
+        require(isWorkId(id))
+        val saved = operation(id)?.takeIf { it.offlineCapture != null && profile.owner.owns(it.envelope.source) }
+        OfflineTransactionResult(saved?.let { describe(checkedEntry(task, it.envelope.reference())) })
+    }
+
+    suspend fun offlineSampleDraft(task: WorkTask): LocalSampleDraft = offlineTransaction(task) { profile, _ ->
+        val history = sampleHistory(profile)
+        val board = sampleBoard(profile.basis, history)
+        OfflineTransactionResult(LocalSampleDraft(profile.basis.draftVersion, catalog().localEditVersion,
+            profile.basis.samples, board.values(), history, board.progress()))
+    }
+
+    suspend fun prepareOfflineSampleBatch(task: WorkTask, id: String, operationIds: List<String>): BatchRecord {
+        val ids = operationIds.sorted()
+        require(isWorkId(id) && ids.size in 1..50 && ids.distinct().size == ids.size)
+        return offlineTransaction(task) { profile, _ ->
+            batch(id)?.let { saved ->
+                workCheck(saved.operations.map { it.operationId } == ids, WorkProblem.BatchIdentityConflict)
+                workCheck(sealedMembers(task, saved).all { profile.owner.owns(it.source) }, WorkProblem.SourceUnavailable)
+                return@offlineTransaction OfflineTransactionResult(saved)
+            }
+            workCheck(catalog().batchIds.none {
+                requireBatch(it).state in setOf(WorkState.InFlight, WorkState.OutcomeUnknown)
+            }, WorkProblem.InvalidState)
+            val history = sampleHistory(profile)
+            requireFreshSampleBasis(profile.basis, history)
+            val entries = ids.map { requireOperation(it) }.map { checkedEntry(task, it.envelope.reference()) }
+            workCheck(entries.all { it.batchId == null && it.quarantine == null && it.offlineCapture != null },
+                WorkProblem.InvalidState)
+            workCheck(entries.all {
+                profile.owner.owns(it.envelope.source) && !sourceRevoked(it.envelope.source.contextId)
+            }, WorkProblem.SourceUnavailable)
+            workCheck(entries.all { it.envelope.operation.baseDraftVersion == profile.basis.draftVersion },
+                WorkProblem.ScopeMismatch)
+            // Validate the actual subset and dependency order, without borrowing any unselected queued edit.
+            val board = LocalSampleBoard(profile.basis, history.associateBy { it.operation.envelope.operation.operationId })
+            for (entry in entries.sortedBy { it.envelope.originLocalEditVersion }) {
+                val op = entry.envelope.operation
+                board.validate(LocalSampleKey(op.attempt, op.clientSampleId), op, checkCapacity = false)
+                board.overlay(describe(entry), suppliesPredecessor = true)
+            }
+            // The server checks its sample limit on the final atomic batch projection.
+            workCheck(board.progress().all { it.applicableSamples <= MAX_CURRENT_SAMPLES }, WorkProblem.SampleLimit)
+            OfflineTransactionResult(sealBatch(task, id, entries))
+        }
+    }
+
+    private suspend fun WorkTransaction.sampleHistory(profile: OfflineSampleProfile): List<LocalSampleHistory> {
+        val scope = profile.basis
+        val applicable = scope.attempts.filter { it.applicable }.map { it.attempt }.toSet()
+        return catalog().operationIds.mapNotNull { id ->
+            val entry = requireOperation(id)
+            val op = describe(entry)
+            val owner = profile.owner.owns(op.envelope.source)
+            if (!owner && op.state != WorkState.Accepted) return@mapNotNull null
+            checkedEntry(scope.task, entry.envelope.reference())
+            val accepted = acceptedOperation(entry)
+            val individual = individualReceipt(id)
+            workCheck(accepted == null || individual == null || accepted == individual, WorkProblem.StorageUnavailable)
+            (accepted ?: individual)?.let { verifyOperationReceipt(scope.task, entry.envelope, it) }
+            val data = entry.envelope.operation
+            val mayReferencePending = entry.offlineCapture != null && !sourceRevoked(op.envelope.source.contextId)
+            LocalSampleHistory(op, data.attempt in applicable, data.baseDraftVersion == scope.draftVersion, accepted,
+                individual, entry.offlineCapture?.atUtc, mayReferencePending)
+        }
+    }
+
+    private fun sampleBoard(basis: OfflineSampleBasis, history: List<LocalSampleHistory>): LocalSampleBoard =
+        LocalSampleBoard(basis, history.associateBy { it.operation.envelope.operation.operationId }).also { board ->
+            history.sortedBy { it.operation.envelope.originLocalEditVersion }.forEach(board::applyPending)
+        }
+
+    private fun requireFreshSampleBasis(basis: OfflineSampleBasis, history: List<LocalSampleHistory>) {
+        workCheck(basis.editable, WorkProblem.ScopeMismatch)
+        workCheck(history.none {
+            ((it.acceptedReceipt ?: it.individualEvidence)?.draftVersion ?: 0) > basis.draftVersion
+        }, WorkProblem.StaleGrant)
+    }
+
+    private fun updateBasis(old: OfflineSampleBasis, observed: OfflineSampleBasis): OfflineSampleBasis = when {
+        observed.draftVersion > old.draftVersion -> observed
+        observed.draftVersion < old.draftVersion -> old
+        observed == old -> old
+        // Equal-version disagreement may be a changed admission or inconsistent
+        // response. Retain the verified observation and deny further writes.
+        else -> observed.copy(editable = false)
+    }
+
+    private suspend fun WorkTransaction.requireOfflineSource(profile: OfflineSampleProfile): WorkSource {
+        val context = requireSource(profile.contextId, profile.basis.task)
+        val state = issuance(profile.owner.userId)
+        workCheck(profile.owner.owns(context.source) && validProof(context.proof) &&
+            context.issuedRevision == 1L && context.issuedAuthVersion != null &&
+            state.pendingId == null && state.contextId == profile.contextId && !sourceRevoked(profile.contextId),
+            WorkProblem.SourceUnavailable)
+        return context.source
+    }
+
+    private fun SessionIdentity.owns(source: WorkSource): Boolean =
+        userId == source.contributorUserId && familyId == source.originPersonalSessionId &&
+            environment == source.task.environmentId
+
+    private suspend fun <T> offlineTransaction(task: WorkTask,
+        action: suspend WorkTransaction.(OfflineSampleProfile, suspend () -> OfflineSession) -> OfflineTransactionResult<T>,
+    ): T = sessions.withOfflineSampleSession(rows.origin) { observe ->
+        val admission = observe()
+        workCheck(admission.identity.environment == task.environmentId, WorkProblem.ScopeMismatch)
+        val result = rows.transaction(task) {
+            val profile = offlineProfile(admission.identity.userId) ?: throw WorkFailure(WorkProblem.SourceUnavailable)
+            workCheck(profile.owner == admission.identity && profile.basis.task == task, WorkProblem.SourceUnavailable)
+            val result = action(profile, observe)
+            val final = observe()
+            workCheck(final.identity == profile.owner, WorkProblem.SourceUnavailable)
+            result.captureDeadline?.let {
+                workCheck(final.apparentNow < it, WorkProblem.CaptureWindowClosed)
+            }
+            currentCoroutineContext().ensureActive()
+            result
+        } ?: throw WorkFailure(WorkProblem.SourceUnavailable)
+        result.value
+    }
+
+    private class OfflineTransactionResult<T>(val value: T, val captureDeadline: Instant? = null)
+
     suspend fun enqueue(access: WorkAccess, input: SampleOperation): WorkOperation {
         val op = DraftOperationCanonical.normalize(input)
         return sessions.withWorkCaptureClock(access.session, rows.origin) { captureTime ->
@@ -106,7 +313,6 @@ internal class SharedWorkStore(private val rows: ProtectedWorkRows, private val 
                 if (access.requiresCaptureGrant)
                     workCheck(access.captureGrant?.contextId == context.source.contextId, WorkProblem.SourceUnavailable)
                 requireCaptureTime(context.source, access.captureGrant, captureTime)
-                val catalog = catalog()
                 for (ref in op.dependencies) {
                     val prior = requireOperation(ref.operationId)
                     val previous = prior.envelope.operation
@@ -117,19 +323,25 @@ internal class SharedWorkStore(private val rows: ProtectedWorkRows, private val 
                         state !in setOf(WorkState.Conflict, WorkState.Quarantined),
                         WorkProblem.DependencyMismatch)
                 }
-                val next = Math.addExact(catalog.localEditVersion, 1L)
-                val payload = DraftOperationCanonical.operation(context.source, op, next)
-                val entry = OperationEntry(OperationEnvelope(workspaceId, op, context.source, next,
-                    CANONICAL_VERSION, payload, workHash(payload)))
-                reserveOperationId(op.operationId)
-                save(entry)
-                save(catalog.copy(localEditVersion = next, operationIds = catalog.operationIds + op.operationId))
-                val result = describe(entry)
+                val result = persistOperation(context.source, op)
                 requireCaptureTime(context.source, access.captureGrant, captureTime)
                 access.requireCurrent()
                 result
             })
         }
+    }
+
+    private suspend fun WorkTransaction.persistOperation(source: WorkSource, op: SampleOperation,
+                                                         evidence: OfflineCaptureEvidence? = null): WorkOperation {
+        val catalog = catalog()
+        val next = Math.addExact(catalog.localEditVersion, 1L)
+        val payload = DraftOperationCanonical.operation(source, op, next)
+        val entry = OperationEntry(OperationEnvelope(workspaceId, op, source, next, CANONICAL_VERSION, payload,
+            workHash(payload)), offlineCapture = evidence)
+        reserveOperationId(op.operationId)
+        save(entry)
+        save(catalog.copy(localEditVersion = next, operationIds = catalog.operationIds + op.operationId))
+        return describe(entry)
     }
 
     private suspend fun requireCaptureTime(source: WorkSource, grant: CaptureGrant?,
@@ -181,21 +393,27 @@ internal class SharedWorkStore(private val rows: ProtectedWorkRows, private val 
             workCheck(entries.all { mayRead(access, it.envelope.source) }, WorkProblem.SourceUnavailable)
             val expected = entries.first().envelope.operation.baseDraftVersion
             workCheck(entries.all { it.envelope.operation.baseDraftVersion == expected }, WorkProblem.ScopeMismatch)
-            val dependencies = entries.flatMap { it.envelope.operation.dependencies }.distinct()
-            val members = entries.map { it.envelope.reference() }
-            val accepted = dependencies.filter { it.operationId !in ids }.sortedBy { it.operationId }
-            workCheck(accepted.size <= 100 && accepted.all { ref ->
-                val entry = requireOperation(ref.operationId)
-                entry.envelope.reference() == ref && describe(entry).state == WorkState.Accepted
-            }, WorkProblem.DependencyMismatch)
-            val prepared = BatchRecord(id, expected, members, accepted, CANONICAL_VERSION,
-                DraftOperationCanonical.batch(access.task, id, expected, members, accepted))
-            save(prepared)
-            entries.forEach { save(it.copy(batchId = id)) }
-            val catalog = catalog()
-            save(catalog.copy(batchIds = catalog.batchIds + id))
-            prepared
+            sealBatch(access.task, id, entries)
         }) { "Work task unavailable" }
+    }
+
+    private suspend fun WorkTransaction.sealBatch(task: WorkTask, id: String, entries: List<OperationEntry>): BatchRecord {
+        val members = entries.map { it.envelope.reference() }
+        val ids = members.map { it.operationId }.toSet()
+        val expected = entries.first().envelope.operation.baseDraftVersion
+        val accepted = entries.flatMap { it.envelope.operation.dependencies }.distinct()
+            .filter { it.operationId !in ids }.sortedBy { it.operationId }
+        workCheck(accepted.size <= 100 && accepted.all { ref ->
+            val entry = requireOperation(ref.operationId)
+            entry.envelope.reference() == ref && describe(entry).state == WorkState.Accepted
+        }, WorkProblem.DependencyMismatch)
+        val prepared = BatchRecord(id, expected, members, accepted, CANONICAL_VERSION,
+            DraftOperationCanonical.batch(task, id, expected, members, accepted))
+        save(prepared)
+        entries.forEach { save(it.copy(batchId = id)) }
+        val catalog = catalog()
+        save(catalog.copy(batchIds = catalog.batchIds + id))
+        return prepared
     }
 
     suspend fun batch(access: WorkAccess, id: String): BatchRecord? = transact(access) {
@@ -441,6 +659,12 @@ internal class SharedWorkStore(private val rows: ProtectedWorkRows, private val 
             envelope.canonicalPayload == DraftOperationCanonical.operation(envelope.source, op, envelope.originLocalEditVersion) &&
             workHash(envelope.canonicalPayload) == ref.contentHash && envelope.contentHash == ref.contentHash,
             WorkProblem.StorageUnavailable)
+        entry.offlineCapture?.let {
+            val at = Instant.parse(it.atUtc)
+            val until = Instant.parse(it.untilUtc)
+            workCheck(at >= Instant.parse(envelope.source.issuedAtUtc) && at < until &&
+                until <= Instant.parse(envelope.source.captureUntilUtc), WorkProblem.StorageUnavailable)
+        }
         return entry
     }
 
