@@ -10,8 +10,8 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonObject
 
-internal class OnlineWorkFixture(val server: TestServer) {
-    val work = SharedWorkTestFixture(server)
+internal class OnlineWorkFixture(val server: TestServer, canContribute: Boolean = false) {
+    val work = SharedWorkTestFixture(server, canContribute)
     val task = work.task
     val attempt = work.attempt
     val id = testId(80)

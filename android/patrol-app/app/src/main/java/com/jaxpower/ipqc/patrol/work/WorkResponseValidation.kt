@@ -18,6 +18,7 @@ internal class OnlineDraft(
     val version: Long,
     val availability: DraftAvailability,
     val attempts: Set<WorkAttempt>,
+    val applicableAttempts: Set<WorkAttempt>,
     val allItemsRemoved: Boolean,
     val validPlanning: Boolean,
 )
@@ -83,6 +84,7 @@ internal fun SharedDraftWire.validate(detail: LineTaskDetail, session: SessionRe
 
     return OnlineDraft(WorkTask(session.identity.environment, taskId, lineId, workflowVersion), draftVersion,
         requireNotNull(state), currentAttempts.map { WorkAttempt(it.taskItemId, it.inspectionAttemptId) }.toSet(),
+        items.orEmpty().filter { it.disposition == "Applicable" }.map { WorkAttempt(it.taskItemId, it.inspectionAttemptId) }.toSet(),
         allItemsRemoved, summary.planningSnapshotStatus == "ValidV1")
 }
 

@@ -149,7 +149,9 @@ internal class OperationEnvelope(
 internal enum class WorkState { Queued, InFlight, OutcomeUnknown, Accepted, Conflict, Quarantined }
 
 @Serializable
-internal enum class WorkConflict { DraftVersionConflict, TaskScopeConflict, SourceSecurityRevoked, SourceProvenanceConflict }
+internal enum class WorkConflict {
+    DraftVersionConflict, TaskScopeConflict, SourceSecurityRevoked, SourceProvenanceConflict, BatchInputRejected,
+}
 
 @Serializable
 internal data class ConflictEvidence(val reason: WorkConflict, val observedDraftVersion: Long)

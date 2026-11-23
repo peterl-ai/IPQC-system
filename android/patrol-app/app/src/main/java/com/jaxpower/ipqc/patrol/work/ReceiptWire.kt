@@ -10,6 +10,7 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -64,23 +65,33 @@ internal suspend fun WorkContextApi.readReceipt(target: ReceiptTarget, bearer: S
 }
 
 private fun ResponseBody.readTypedReceipt(kind: ReceiptKind): ReceiptReply {
-    val bytes = source()
-    ensureResponse(!bytes.request(MAX_RECEIPT_BYTES + 1))
-    val body = bytes.readByteArray().decodeToString(throwOnInvalidSequence = true)
-    validateObjectKeys(body)
-    val json = receiptJson.parseToJsonElement(body) as? JsonObject ?: throw PatrolFailure(Issue.RESPONSE)
+    val json = readWorkJson()
     return when (kind) {
         ReceiptKind.Operation -> ReceiptReply.Operation(receiptJson.decodeFromJsonElement(operationJson(json)))
-        ReceiptKind.Batch -> {
-            for (field in listOf("previousDraftVersion", "draftVersion")) json.requireInteger(field)
-            val operations = json["operations"] as? JsonArray ?: throw PatrolFailure(Issue.RESPONSE)
-            ensureResponse(operations.size <= 150)
-            val normalized = JsonArray(operations.map {
-                operationJson(it as? JsonObject ?: throw PatrolFailure(Issue.RESPONSE))
-            })
-            ReceiptReply.Batch(receiptJson.decodeFromJsonElement(JsonObject(json + ("operations" to normalized))))
-        }
+        ReceiptKind.Batch -> ReceiptReply.Batch(json.decodeBatchReceipt())
     }
+}
+
+internal fun ResponseBody.readWorkJson(maxBytes: Long = MAX_RECEIPT_BYTES): JsonObject {
+    val bytes = source()
+    ensureResponse(!bytes.request(maxBytes + 1))
+    val body = bytes.readByteArray().decodeToString(throwOnInvalidSequence = true)
+    validateObjectKeys(body)
+    return receiptJson.parseToJsonElement(body) as? JsonObject ?: throw PatrolFailure(Issue.RESPONSE)
+}
+
+internal fun JsonObject.decodeBatchReceipt(): ServerBatchReceipt {
+    for (field in listOf("previousDraftVersion", "draftVersion")) requireInteger(field)
+    return receiptJson.decodeFromJsonElement(JsonObject(this + ("operations" to normalizedOperations(get("operations")))))
+}
+
+internal fun decodeOperationReceipts(field: JsonElement?): List<ServerOperationReceipt> =
+    receiptJson.decodeFromJsonElement(normalizedOperations(field))
+
+private fun normalizedOperations(field: JsonElement?): JsonArray {
+    val operations = field as? JsonArray ?: throw PatrolFailure(Issue.RESPONSE)
+    ensureResponse(operations.size <= 150)
+    return JsonArray(operations.map { operationJson(it as? JsonObject ?: throw PatrolFailure(Issue.RESPONSE)) })
 }
 
 // The API sends a JSON decimal number. The encrypted local record stores its exact
