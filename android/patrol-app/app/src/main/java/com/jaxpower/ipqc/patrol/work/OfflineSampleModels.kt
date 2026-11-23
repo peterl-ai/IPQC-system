@@ -146,6 +146,7 @@ internal data class LocalSampleProgress(
     val attempt: WorkAttempt,
     val required: Int,
     val applicableSamples: Int,
+    val type: FrozenSampleType?,
 ) {
     val meetsCount: Boolean get() = applicableSamples >= required
 }
@@ -157,4 +158,5 @@ internal data class LocalSampleDraft(
     val effective: List<LocalSampleValue>,
     val history: List<LocalSampleHistory>,
     val progress: List<LocalSampleProgress>,
+    val captureProblem: WorkProblem? = null,
 )

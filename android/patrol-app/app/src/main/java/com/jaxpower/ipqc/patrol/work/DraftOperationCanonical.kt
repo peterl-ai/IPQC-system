@@ -16,14 +16,14 @@ internal object DraftOperationCanonical {
     private val maxDecimal = BigDecimal("79228162514264337593543950335")
     private val decimal = Regex("[+-]?[0-9]+(\\.[0-9]+)?([eE][+-]?[0-9]+)?")
 
-    fun normalize(op: SampleOperation): SampleOperation {
-        val data = op.data?.let {
-            require(it.barcode == null || (it.barcode.length <= 200 && it.barcode.none(Char::isISOControl)))
-            require(if (it.inspectionValue == null) (it.judgment == "OK" || it.judgment == "NG") && it.barcode == null
-                else it.judgment == null)
-            it.copy(inspectionValue = it.inspectionValue?.let(::decimalText))
-        }
-        return op.copy(data = data, dependencies = op.dependencies.toList())
+    fun normalize(op: SampleOperation): SampleOperation =
+        op.copy(data = op.data?.let(::normalizeSample), dependencies = op.dependencies.toList())
+
+    fun normalizeSample(data: SamplePayload): SamplePayload {
+        require(data.barcode == null || (data.barcode.length <= 200 && data.barcode.none(Char::isISOControl)))
+        require(if (data.inspectionValue == null) data.judgment in setOf("OK", "NG") && data.barcode == null
+            else data.judgment == null)
+        return data.copy(inspectionValue = data.inspectionValue?.let(::decimalText))
     }
 
     fun operation(source: WorkSource, op: SampleOperation, localEditVersion: Long): String = encode(buildJsonObject {

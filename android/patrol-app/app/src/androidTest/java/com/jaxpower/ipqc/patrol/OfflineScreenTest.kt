@@ -62,7 +62,7 @@ class OfflineScreenTest {
                 for (sizeOverride in listOf(DpSize(600.dp, 900.dp), DpSize(1000.dp, 600.dp))) {
                     compose.runOnIdle { size.value = sizeOverride }
                     compose.onNodeWithText("Offline · Cached data · Read only").assertIsDisplayed()
-                    for (action in listOf("Add Sample", "Remove", "Save Draft", "Submit", "Formal Submit",
+                    for (action in listOf("Open sample workbench", "Add Sample", "Remove", "Save Draft", "Submit", "Formal Submit",
                         "Capture Photo", "Approve", "Reject", "Assign PIC")) {
                         compose.onNodeWithText(action, ignoreCase = true).assertDoesNotExist()
                     }

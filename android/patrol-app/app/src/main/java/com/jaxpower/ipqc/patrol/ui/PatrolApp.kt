@@ -43,7 +43,7 @@ private val PatrolColors = lightColorScheme(
     outlineVariant = Color(0xFFD4DEE3),
 )
 
-private enum class Route { Login, Password, Home, Lines, Tasks, Detail }
+private enum class Route { Login, Password, Home, Lines, Tasks, Detail, SampleWorkbench }
 
 private fun Screen.route(): Route = when (this) {
     Screen.Login -> Route.Login
@@ -52,6 +52,7 @@ private fun Screen.route(): Route = when (this) {
     is Screen.Lines -> Route.Lines
     is Screen.Tasks -> Route.Tasks
     is Screen.Detail -> Route.Detail
+    is Screen.SampleWorkbench -> Route.SampleWorkbench
 }
 
 @Composable
@@ -69,7 +70,9 @@ fun PatrolApp(viewModel: PatrolViewModel) {
                     val age = if (ageMinutes < 60) "${ageMinutes}m ago" else "${ageMinutes / 60}h ${ageMinutes % 60}m ago"
                     Surface(color = MaterialTheme.colorScheme.primaryContainer) {
                         Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp)) {
-                            Text("Offline · Cached data · Read only", style = MaterialTheme.typography.titleSmall)
+                            val banner = if (ui.screen is Screen.SampleWorkbench) "Offline · Local draft workbench"
+                                else "Offline · Cached data · Read only"
+                            Text(banner, style = MaterialTheme.typography.titleSmall)
                             Text("Last online verification ${access.verifiedAt} ($age)")
                             Text("Offline access expires ${access.expiresAt}")
                             if (ui.online) TextButton(onClick = viewModel::reconnect, enabled = !ui.busy) {
@@ -98,7 +101,7 @@ fun PatrolApp(viewModel: PatrolViewModel) {
                         }
                     }
                 }
-                BackHandler(route in setOf(Route.Lines, Route.Tasks, Route.Detail)) { viewModel.back() }
+                BackHandler(route in setOf(Route.Lines, Route.Tasks, Route.Detail, Route.SampleWorkbench)) { viewModel.back() }
             }
         }
     }
@@ -113,7 +116,7 @@ private fun PatrolBar(ui: PatrolUi, viewModel: PatrolViewModel) {
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(4.dp),
         ) {
-            if (screen is Screen.Lines || screen is Screen.Tasks || screen is Screen.Detail) {
+            if (screen is Screen.Lines || screen is Screen.Tasks || screen is Screen.Detail || screen is Screen.SampleWorkbench) {
                 TextButton(onClick = viewModel::back, enabled = !ui.busy) { Text("Back") }
             }
             Text("IPQC Patrol", style = MaterialTheme.typography.titleLarge, modifier = Modifier.widthIn(max = 260.dp))

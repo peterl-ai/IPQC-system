@@ -23,6 +23,7 @@ import com.jaxpower.ipqc.patrol.offline.RoomCacheRows
 import com.jaxpower.ipqc.patrol.offline.TaskCacheDatabase
 import com.jaxpower.ipqc.patrol.tasks.PatrolRepository
 import com.jaxpower.ipqc.patrol.ui.PatrolApp
+import com.jaxpower.ipqc.patrol.ui.Screen
 import com.jaxpower.ipqc.patrol.ui.PatrolViewModel
 import com.jaxpower.ipqc.patrol.work.OnlineWorkCoordinator
 import com.jaxpower.ipqc.patrol.work.ProtectedWorkRows
@@ -42,7 +43,8 @@ class PatrolApplication : Application() {
         viewModelFactory {
             initializer {
                 PatrolViewModel(configured?.sessions, configured?.patrol,
-                    networkAvailability(this@PatrolApplication), configured?.offline)
+                    networkAvailability(this@PatrolApplication), configured?.offline,
+                    if (BuildConfig.DEBUG && BuildConfig.IPQC_ENABLE_SAMPLE_WORKBENCH) configured?.onlineWork else null)
             }
         }
     }
@@ -78,7 +80,9 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onStop() {
-        viewModel.leaveForeground()
+        if (!isChangingConfigurations || viewModel.ui.value.screen !is Screen.SampleWorkbench) {
+            viewModel.leaveForeground()
+        }
         super.onStop()
     }
 }
