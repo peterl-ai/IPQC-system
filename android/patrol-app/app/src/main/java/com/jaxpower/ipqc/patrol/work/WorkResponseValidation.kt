@@ -21,6 +21,7 @@ internal class OnlineDraft(
     val applicableAttempts: Set<WorkAttempt>,
     val allItemsRemoved: Boolean,
     val validPlanning: Boolean,
+    val sampleBasis: OfflineSampleBasis,
 )
 
 internal fun SharedDraftWire.validate(detail: LineTaskDetail, session: SessionRepository.WorkSession): OnlineDraft {
@@ -82,10 +83,31 @@ internal fun SharedDraftWire.validate(detail: LineTaskDetail, session: SessionRe
                 }
         })
 
-    return OnlineDraft(WorkTask(session.identity.environment, taskId, lineId, workflowVersion), draftVersion,
-        requireNotNull(state), currentAttempts.map { WorkAttempt(it.taskItemId, it.inspectionAttemptId) }.toSet(),
-        items.orEmpty().filter { it.disposition == "Applicable" }.map { WorkAttempt(it.taskItemId, it.inspectionAttemptId) }.toSet(),
-        allItemsRemoved, summary.planningSnapshotStatus == "ValidV1")
+    val task = WorkTask(session.identity.environment, taskId, lineId, workflowVersion)
+    val frozen = currentAttempts.map { pair ->
+        val attempt = WorkAttempt(pair.taskItemId, pair.inspectionAttemptId)
+        val type = FrozenSampleType.fromDefinition(definitions.getValue(pair.taskItemId).inspectionType)
+        FrozenSampleAttempt(attempt, pair.minimumSampleCount, type,
+            dispositions?.get(pair.taskItemId)?.disposition == "Applicable")
+    }.sortedBy { it.attempt.taskItemId }
+    val observed = samples.map { sample ->
+        val key = LocalSampleKey(WorkAttempt(sample.taskItemId, sample.inspectionAttemptId), sample.clientSampleId)
+        val value = sample.value
+        ObservedSample(sample.sampleId, key, ServerSampleValue(value.inspectionType,
+            value.inspectionValue?.content?.let(DraftOperationCanonical::decimalText), value.judgment, value.barcode),
+            sample.valueContributorUserId, sample.valueOperationId, sample.lastOperationId,
+            sample.isRemoved, sample.isCurrentApplicable)
+    }.sortedWith(compareBy({ it.key.attempt.taskItemId }, { it.key.attempt.inspectionAttemptId }, { it.key.clientSampleId }))
+    val validPlanning = summary.planningSnapshotStatus == "ValidV1"
+    val applicable = frozen.filter { it.applicable }.associateBy { it.attempt }
+    val editable = firstAttemptScope && validPlanning && draftVersion < Long.MAX_VALUE &&
+        items != null && applicable.isNotEmpty() &&
+        applicable.values.all { it.type != null } &&
+        observed.filter { it.current && !it.removed }.groupBy { it.key.attempt }.all { (attempt, records) ->
+            records.size <= MAX_CURRENT_SAMPLES && records.all { it.value.inspectionType == applicable[attempt]?.type?.name }
+        }
+    return OnlineDraft(task, draftVersion, requireNotNull(state), frozen.map { it.attempt }.toSet(),
+        applicable.keys, allItemsRemoved, validPlanning, OfflineSampleBasis(task, draftVersion, editable, frozen, observed))
 }
 
 internal fun WorkContextMetadataWire.validatedSource(task: WorkTask): WorkSource {

@@ -58,12 +58,18 @@ internal class SharedWorkTestFixture(val server: TestServer, private val canCont
         sessions.login("synthetic", "test-only")
     }
 
-    fun stageRotation(at: Instant = server.clock.instant()) {
-        server.admit(auth(a, "synthetic-access-rotated", "synthetic-refresh-rotated", at), receipt(a, at))
+    fun stageRotation(at: Instant = server.clock.instant(), contribution: Boolean = canContribute) {
+        val response = auth(a, "synthetic-access-rotated", "synthetic-refresh-rotated", at)
+        val effective = if (contribution) response else response.replace(""","LinePatrol.ContributeDraft"""", "")
+        server.admit(effective, receipt(a, at))
     }
 
-    suspend fun rotate(restart: Boolean) {
-        stageRotation()
+    fun restartOffline() {
+        sessions = SessionRepository(server.api, server.vault, server.origin.toString(), server.clock, offline.reopen())
+    }
+
+    suspend fun rotate(restart: Boolean, contribution: Boolean = canContribute) {
+        stageRotation(contribution = contribution)
         if (restart) {
             sessions = SessionRepository(server.api, server.vault, server.origin.toString(), server.clock, offline.reopen())
             requireNotNull(sessions.restore())

@@ -33,6 +33,7 @@ data class OfflineSession(
     val expiresAt: Instant,
     val apparentNow: Instant,
     val elapsedDeadlineMs: Long,
+    internal val canContributeSamples: Boolean = false,
 )
 
 @Serializable
@@ -43,6 +44,7 @@ internal data class OfflineAdmission(
     val displayName: String,
     val receipt: OfflineAccessReceipt,
     val progress: ClockProgress,
+    val canContributeSamples: Boolean = false,
 )
 
 class OfflineCache internal constructor(
@@ -60,15 +62,19 @@ class OfflineCache internal constructor(
 
     // Called only after SessionRepository verifies current authenticated authority over HTTPS.
     internal suspend fun accept(identity: SessionIdentity, operator: Operator, receipt: OfflineAccessReceipt,
-                                beforeRequest: ClockSample) = locked {
+                                beforeRequest: ClockSample, canContributeSamples: Boolean) = locked {
         val record = OfflineAdmission(FORMAT, origin, identity, operator.displayName, receipt,
-            ClockProgress.startingAt(beforeRequest, receipt.verifiedAtUtc))
+            ClockProgress.startingAt(beforeRequest, receipt.verifiedAtUtc), canContributeSamples)
         require(!operator.mustChangePassword)
         checkReceipt(record)
         val previous = if (revoked) null else runCatching { loadAdmission() }.getOrNull()
         if (previous?.identity == identity && previous.origin == origin &&
             utc(previous.receipt.verifiedAtUtc) >= utc(receipt.verifiedAtUtc)) {
-            // A duplicate or late reply cannot move a persisted anchor forward in device time.
+            // A duplicate or late reply cannot extend the anchor, but a known
+            // permission loss must still survive process restart.
+            if (!canContributeSamples && previous.canContributeSamples) {
+                persist(previous.copy(canContributeSamples = false))
+            }
             observe(identity)
             return@locked
         }
@@ -82,10 +88,22 @@ class OfflineCache internal constructor(
     suspend fun resume(expected: SessionIdentity? = null): OfflineSession? = locked { observe(expected) }
 
     // Acquire this lock before the work transaction. Snapshot reads take the same lock before Room.
-    internal suspend fun <T> withCaptureClock(identity: SessionIdentity,
+    internal suspend fun <T> withCaptureClock(identity: SessionIdentity, requireSampleContribution: Boolean,
                                               action: suspend (suspend () -> Instant?) -> T): T = mutex.withLock {
-        action { storage { observe(identity)?.apparentNow } }
+        action {
+            storage { observe(identity)?.takeIf { !requireSampleContribution || it.canContributeSamples }?.apparentNow }
+        }
     }
+
+    // This admission supplies only protected local time and identity, never a bearer.
+    internal suspend fun <T> withOfflineSampleAdmission(action: suspend (suspend () -> OfflineSession) -> T): T =
+        mutex.withLock {
+            action {
+                storage {
+                    observe(null)?.takeIf { it.canContributeSamples } ?: throw PatrolFailure(Issue.UNAUTHENTICATED)
+                }
+            }
+        }
 
     internal suspend fun cacheLines(identity: SessionIdentity, lines: List<ProductionLine>) = locked {
         snapshots.storeDirectory(identity, LineDirectory(lines), downloadedTime())
@@ -163,7 +181,7 @@ class OfflineCache internal constructor(
         val now = utc(next.lastServerUtc)
         val deadline = Math.addExact(next.last.elapsedMs, Duration.between(now, expiresAt).toMillis())
         return OfflineSession(record.identity, Operator(record.displayName, false),
-            utc(record.receipt.verifiedAtUtc), expiresAt, now, deadline)
+            utc(record.receipt.verifiedAtUtc), expiresAt, now, deadline, record.canContributeSamples)
     }
 
     private fun loadAdmission(): OfflineAdmission? =

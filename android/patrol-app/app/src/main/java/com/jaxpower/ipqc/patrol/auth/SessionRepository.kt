@@ -44,6 +44,7 @@ class SessionRepository(
 ) {
     private val mutex = Mutex()
     private val generation = AtomicLong()
+    private var settledOfflineGeneration = 0L
     @Volatile private var active: Credentials? = null
     // Refresh consumes the live credential before network IO. Retain the owning
     // credential for the offline receipt until verification replaces it or it is revoked.
@@ -136,16 +137,39 @@ class SessionRepository(
     }
 
     internal suspend fun <T> withWorkCaptureClock(session: WorkSession, expectedOrigin: String,
+                                                  requireSampleContribution: Boolean = false,
                                                   action: suspend (suspend () -> Instant?) -> T): T =
         withWorkSession(session, expectedOrigin) {
             val cache = offline
             if (cache == null) action { null }
-            else cache.withCaptureClock(session.identity) { observe ->
+            else cache.withCaptureClock(session.identity, requireSampleContribution) { observe ->
                 action {
                     eligibleWorkSession()
                     val now = observe()
                     eligibleWorkSession()
                     now
+                }
+            }
+        }
+
+    // Lock order matches A02 and A03: session, protected clock, then Room.
+    // The same guard is called inside the work transaction immediately before commit.
+    internal suspend fun <T> withOfflineSampleSession(expectedOrigin: String,
+                                                     action: suspend (suspend () -> OfflineSession) -> T): T =
+        mutex.withLock {
+            val cache = offline ?: throw PatrolFailure(Issue.UNAUTHENTICATED)
+            if (origin != expectedOrigin) throw PatrolFailure(Issue.UNAUTHENTICATED)
+            val stamp = settledOfflineGeneration
+            cache.withOfflineSampleAdmission { observe ->
+                action {
+                    checkGeneration(stamp)
+                    val admission = observe()
+                    checkGeneration(stamp)
+                    active?.let {
+                        if (it.identity != admission.identity || it.rejected || it.operator.mustChangePassword ||
+                            !it.canContribute) throw PatrolFailure(Issue.UNAUTHENTICATED)
+                    }
+                    admission
                 }
             }
         }
@@ -190,6 +214,7 @@ class SessionRepository(
         return mutex.withLock {
             checkGeneration(stamp)
             endSession()
+            settledOfflineGeneration = stamp
             val auth = try {
                 responseBody { api.login(NativeLogin(username, password, "Native")) }
             } catch (e: PatrolFailure) {
@@ -226,7 +251,10 @@ class SessionRepository(
         val prior = withContext(NonCancellable) {
             mutex.withLock {
                 checkGeneration(stamp)
-                active.also { endSession() }
+                active.also {
+                    endSession()
+                    settledOfflineGeneration = stamp
+                }
             }
         } ?: return false
         if (!attemptRemote) return false
@@ -404,7 +432,7 @@ class SessionRepository(
                 revokeOffline()
             } else {
                 try {
-                    offline?.accept(auth.identity, auth.operator, verification.receipt, anchor)
+                    offline?.accept(auth.identity, auth.operator, verification.receipt, anchor, auth.canContribute)
                     offlineAuthority = auth.authorityId
                 } catch (e: PatrolFailure) {
                     if (e.issue != Issue.OFFLINE_CLOCK && e.issue != Issue.OFFLINE_EXPIRED) throw e
