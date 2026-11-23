@@ -68,21 +68,57 @@ class SessionRepository(
         offline?.resume(expected)
     }
 
-    internal class WorkSession(val identity: SessionIdentity, internal val authorityId: Any)
+    internal class WorkSession(val identity: SessionIdentity, internal val authorityId: Any, val familyExpiry: Instant)
 
-    internal suspend fun bindWorkSession(): WorkSession = mutex.withLock {
-        val auth = eligibleWorkSession()
-        WorkSession(auth.identity, auth.authorityId)
+    internal suspend fun bindWorkSession(): WorkSession = mutex.withLock { eligibleWorkSession().workSession() }
+
+    internal suspend fun authorizeWork(): WorkSession {
+        val authorized = authorize()
+        return mutex.withLock {
+            val active = eligibleWorkSession()
+            if (active !== authorized) throw PatrolFailure(Issue.UNAUTHENTICATED)
+            active.workSession()
+        }
+    }
+
+    // A coordinator exchange is pinned to one bearer. A denial revokes the same authority
+    // as A02, but the caller must start a fresh exchange to obtain a rotated stamp.
+    internal suspend fun <T> requestWork(session: WorkSession, expectedOrigin: String,
+                                        request: suspend (String) -> T): T {
+        val auth = mutex.withLock { requireWorkSession(session, expectedOrigin) }
+        checkGeneration(auth.generation)
+        val result = try {
+            request(auth.bearer)
+        } catch (e: PatrolFailure) {
+            when (e.issue) {
+                Issue.UNAUTHENTICATED -> reject(auth, allowRefresh = true)
+                Issue.FORBIDDEN -> invalidate(auth)
+                else -> Unit
+            }
+            throw e
+        }
+        return mutex.withLock {
+            requireWorkSession(session, expectedOrigin)
+            currentCoroutineContext().ensureActive()
+            result
+        }
     }
 
     internal suspend fun <T> withWorkSession(session: WorkSession, expectedOrigin: String,
                                             block: suspend () -> T): T = mutex.withLock {
+        requireWorkSession(session, expectedOrigin)
+        val result = block()
+        requireWorkSession(session, expectedOrigin)
+        result
+    }
+
+    private fun Credentials.workSession() = WorkSession(identity, authorityId, familyExpiry)
+
+    private fun requireWorkSession(session: WorkSession, expectedOrigin: String): Credentials {
         val auth = eligibleWorkSession()
         if (origin != expectedOrigin || auth.authorityId !== session.authorityId || auth.identity != session.identity)
             throw PatrolFailure(Issue.UNAUTHENTICATED)
-        val result = block()
-        eligibleWorkSession()
-        result
+        return auth
     }
 
     internal suspend fun <T> withWorkCaptureClock(session: WorkSession, expectedOrigin: String,
@@ -237,14 +273,15 @@ class SessionRepository(
     ): T {
         checkGeneration(auth.generation)
         val result = request(auth)
-        return mutex.withLock {
+        mutex.withLock {
             val current = current()
-            if (auth.rejected || current.identity != auth.identity || current.generation != auth.generation)
+            if (auth.rejected || current.identity != auth.identity || current.generation != auth.generation) {
                 throw PatrolFailure(Issue.UNAUTHENTICATED)
+            }
             accepted(current, result)
             checkGeneration(auth.generation)
-            result
         }
+        return result
     }
 
     private suspend fun invalidate(rejected: Credentials) = reject(rejected, allowRefresh = false)
