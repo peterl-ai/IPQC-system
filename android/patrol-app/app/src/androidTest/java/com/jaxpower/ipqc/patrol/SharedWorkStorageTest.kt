@@ -246,6 +246,135 @@ class SharedWorkStorageTest {
         }
     }
 
+    @Test fun receiptCommitIsAtomicAndLostAcknowledgementReplaysAfterRoomReopen() = runBlocking<Unit>(Dispatchers.IO) {
+        OfflineDeviceFixture().use { device ->
+            device.download()
+            val view = device.snapshots.page(IDENTITY, LINE.id, 1)
+            assertNotNull(view)
+            val a = access(device.sessions, true)
+            val b = SessionIdentity(id(210), id(211), IDENTITY.environment)
+            val original = store(device, device.sessions)
+            val receipt = prepareReceipt(original, a, b)
+            val pending = input.copy(operationId = id(24), clientSampleId = id(25))
+            original.enqueue(a, pending)
+            device.sessions.logout(attemptRemote = false)
+            assertNull(device.vault.read())
+            val sessions = SessionRepository(SecondUserApi(device.api, b), device.vault, ORIGIN, clock)
+            sessions.login("fixture-recovery", "test-only")
+            val reader = access(sessions, false)
+            val keeper = store(device, sessions)
+            val lookup = ReceiptLookup(ReceiptKind.Batch, receipt.batchId)
+            val target = requireNotNull(keeper.locateReceipt(reader, lookup))
+            val reply = ReceiptReply.Batch(receipt)
+            assertTrue(keeper.operations(reader).isEmpty())
+            val interrupt = object : CacheRows by device.rows {
+                override suspend fun replace(slot: String, sealed: ByteArray) {
+                    device.rows.replace(slot, sealed)
+                    error("Interrupted before the Room transaction committed")
+                }
+            }
+            expect(WorkProblem.StorageUnavailable) {
+                store(device, sessions, interrupt).reconcileReceipt(reader, target, reply)
+            }
+            assertTrue(keeper.operations(reader).isEmpty())
+            assertEquals(target, keeper.locateReceipt(reader, lookup))
+
+            val lostReply = object : CacheRows by device.rows {
+                override suspend fun <T> transaction(block: suspend () -> T): T {
+                    device.rows.transaction(block)
+                    error("Caller interrupted after the Room transaction committed")
+                }
+            }
+            expect(WorkProblem.StorageUnavailable) {
+                store(device, sessions, lostReply).reconcileReceipt(reader, target, reply)
+            }
+            device.database.close()
+
+            val db = TaskCacheDatabase.open(device.context, device.databaseFile)
+            try {
+                val rows = RoomCacheRows(db)
+                val restarted = SessionRepository(SecondUserApi(device.api, b), device.vault, ORIGIN, clock)
+                assertNotNull(restarted.restore())
+                val fresh = access(restarted, false)
+                val reopened = store(device, restarted, rows)
+                val refreshed = requireNotNull(reopened.locateReceipt(fresh, lookup))
+                assertEquals(target, refreshed)
+                assertEquals(1, db.openHelper.readableDatabase.version)
+                val initialRows = rows.count()
+                assertEquals(ReceiptRecovery.BatchConfirmed(receipt), reopened.reconcileReceipt(fresh, refreshed, reply))
+                assertEquals(initialRows, rows.count())
+                val conflict = ReceiptRecovery.Conflict(ReceiptConflictReason.ResponseMismatch)
+                val altered = receipt.copy(requestFingerprint = "F".repeat(64))
+                repeat(2) {
+                    assertEquals(conflict, reopened.reconcileReceipt(fresh, refreshed, ReceiptReply.Batch(altered)))
+                    assertEquals(initialRows + 1, rows.count())
+                }
+                assertEquals(receipt, reopened.batch(fresh, receipt.batchId)?.receipt)
+                assertEquals(source, reopened.operation(fresh, input.operationId)?.envelope?.source)
+                val sibling = access(restarted, true)
+                assertEquals(WorkState.Queued, reopened.operation(sibling, pending.operationId)?.state)
+                reopened.withSourceForPreflight(fresh, pending.operationId) {
+                    assertEquals(proof, it.proof)
+                }
+                assertEquals(view, TaskSnapshots(rows, device.workKey, ORIGIN).page(IDENTITY, LINE.id, 1))
+                assertEncrypted(device.databaseFile)
+            } finally {
+                db.close()
+            }
+        }
+    }
+
+    @Test fun corruptedIndividualReceiptAndMissingWorkKeyCannotBeReplacedByFreshResponses() = runBlocking<Unit>(Dispatchers.IO) {
+        OfflineDeviceFixture().use { device ->
+            device.download()
+            val access = access(device.sessions, true)
+            val store = store(device, device.sessions)
+            val receipt = prepareReceipt(store, access, IDENTITY)
+            val lookup = ReceiptLookup(ReceiptKind.Operation, input.operationId)
+            val target = requireNotNull(store.locateReceipt(access, lookup))
+            val op = receipt.operations.single()
+            val prior = device.rows.legacyWorkSlots().toSet()
+            assertEquals(ReceiptRecovery.OperationConfirmed(op),
+                store.reconcileReceipt(access, target, ReceiptReply.Operation(op)))
+            assertEquals(WorkState.OutcomeUnknown, store.batch(access, receipt.batchId)?.state)
+            val slot = (device.rows.legacyWorkSlots().toSet() - prior).single()
+            val original = requireNotNull(device.rows.read(slot))
+            assertFalse(original.toString(Charsets.ISO_8859_1).contains(op.uploadedPersonalSessionId))
+            val corrupted = ByteArray(original.size)
+            device.rows.replace(slot, corrupted)
+            val rowCount = device.rows.count()
+            expect(WorkProblem.StorageUnavailable) {
+                store.reconcileReceipt(access, target, ReceiptReply.Operation(op))
+            }
+            val batchLookup = ReceiptLookup(ReceiptKind.Batch, receipt.batchId)
+            val batch = requireNotNull(store.locateReceipt(access, batchLookup))
+            expect(WorkProblem.StorageUnavailable) {
+                store.reconcileReceipt(access, batch, ReceiptReply.Batch(receipt))
+            }
+            assertEquals(WorkState.OutcomeUnknown, store.batch(access, receipt.batchId)?.state)
+            assertArrayEquals(corrupted, device.rows.read(slot))
+            assertEquals(rowCount, device.rows.count())
+            assertTrue(device.workKey.removeKey())
+            expect(WorkProblem.StorageUnavailable) { store.locateReceipt(access, lookup) }
+            assertEquals(rowCount, device.rows.count())
+        }
+    }
+
+    private suspend fun prepareReceipt(ledger: SharedWorkStore, a: WorkAccess, uploader: SessionIdentity): ServerBatchReceipt {
+        ledger.storeSource(a, source, proof)
+        val envelope = ledger.enqueue(a, input).envelope
+        val batch = ledger.prepareBatch(a, id(22), listOf(input.operationId))
+        ledger.startAttempt(a, batch.batchId)
+        ledger.recoverInterrupted(a)
+        val result = ServerOperationReceipt(task.taskId, input.operationId, batch.batchId, CANONICAL_VERSION,
+            envelope.contentHash, input.kind, attempt.taskItemId, attempt.inspectionAttemptId, id(23),
+            input.clientSampleId, source.contextId, source.contributorUserId, uploader.userId, uploader.familyId,
+            task.environmentId, task.lineId, task.workflowVersion, NOW, 6,
+            ServerSampleValue("Quantitative", "1.23", "OK", input.data?.barcode), false, input.operationId)
+        return ServerBatchReceipt(task.taskId, batch.batchId, batch.fingerprint, uploader.userId, uploader.familyId,
+            NOW, 5, 6, listOf(result))
+    }
+
     private fun id(i: Int) = "10000000-0000-0000-0000-" + i.toString().padStart(12, '0')
 
     private fun store(device: OfflineDeviceFixture, sessions: SessionRepository, rows: CacheRows = device.rows) =

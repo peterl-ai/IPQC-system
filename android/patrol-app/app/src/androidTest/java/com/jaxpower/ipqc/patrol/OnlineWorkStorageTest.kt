@@ -140,6 +140,12 @@ class OnlineWorkStorageTest {
     }
 
     private class CoordinatorApi : WorkContextApi {
+        override suspend fun batchReceipt(bearer: String, taskId: String, batchId: String): Nothing =
+            error("Unexpected batch receipt GET")
+
+        override suspend fun operationReceipt(bearer: String, taskId: String, operationId: String): Nothing =
+            error("Unexpected operation receipt GET")
+
         var issues = 0
         var metadataReads = 0
         var preflights = 0

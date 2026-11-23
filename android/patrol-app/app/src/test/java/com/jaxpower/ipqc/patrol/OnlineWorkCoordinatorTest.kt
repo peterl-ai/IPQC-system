@@ -2,8 +2,6 @@ package com.jaxpower.ipqc.patrol
 
 import com.jaxpower.ipqc.patrol.api.Issue
 import com.jaxpower.ipqc.patrol.work.*
-import java.util.concurrent.CountDownLatch
-import java.util.concurrent.TimeUnit.SECONDS
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.cancelAndJoin
@@ -11,9 +9,7 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
-import okhttp3.mockwebserver.Dispatcher
 import okhttp3.mockwebserver.MockResponse
-import okhttp3.mockwebserver.RecordedRequest
 import okhttp3.mockwebserver.SocketPolicy
 import org.junit.Assert.*
 import org.junit.Test
@@ -478,22 +474,4 @@ class OnlineWorkCoordinatorTest {
         }
     }
 
-    private suspend fun withHeldResponse(server: TestServer, path: String, response: MockResponse,
-                                         test: suspend (release: () -> Unit) -> Unit) {
-        val latch = CountDownLatch(1)
-        val previous = server.web.dispatcher
-        server.web.dispatcher = object : Dispatcher() {
-            override fun dispatch(request: RecordedRequest): MockResponse {
-                if (request.path != path) return previous.dispatch(request)
-                check(latch.await(10, SECONDS))
-                return response
-            }
-        }
-        try {
-            test { latch.countDown() }
-        } finally {
-            latch.countDown()
-            server.web.dispatcher = previous
-        }
-    }
 }

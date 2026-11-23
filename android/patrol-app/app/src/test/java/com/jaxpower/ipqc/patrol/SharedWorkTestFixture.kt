@@ -5,6 +5,7 @@ import com.jaxpower.ipqc.patrol.auth.SessionRepository
 import com.jaxpower.ipqc.patrol.offline.CacheCipher
 import com.jaxpower.ipqc.patrol.offline.CacheRows
 import com.jaxpower.ipqc.patrol.work.*
+import java.time.Instant
 import java.util.Base64
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -47,8 +48,12 @@ internal class SharedWorkTestFixture(val server: TestServer) {
         sessions.login("synthetic", "test-only")
     }
 
+    fun stageRotation(at: Instant = server.clock.instant()) {
+        server.admit(auth(a, "synthetic-access-rotated", "synthetic-refresh-rotated", at), receipt(a, at))
+    }
+
     suspend fun rotate(restart: Boolean) {
-        server.admit(auth(a, "synthetic-access-rotated", "synthetic-refresh-rotated"), receipt(a))
+        stageRotation()
         if (restart) {
             sessions = SessionRepository(server.api, server.vault, server.origin.toString(), server.clock, offline.reopen())
             requireNotNull(sessions.restore())
@@ -57,14 +62,16 @@ internal class SharedWorkTestFixture(val server: TestServer) {
         }
     }
 
-    private fun auth(identity: SessionIdentity, access: String = Fixture.ACCESS, refresh: String = Fixture.REFRESH) =
+    private fun auth(identity: SessionIdentity, access: String = Fixture.ACCESS, refresh: String = Fixture.REFRESH,
+                     at: Instant = server.clock.instant()) =
         Fixture.auth(user = identity.userId, family = identity.familyId, access = access, refresh = refresh,
-            expires = server.clock.instant().plusSeconds(300).toString()).replace(a.environment, identity.environment)
+            expires = at.plusSeconds(300).toString()).replace(a.environment, identity.environment)
 
-    private fun receipt(identity: SessionIdentity) = Fixture.receipt(user = identity.userId, family = identity.familyId)
-        .replace(a.environment, identity.environment)
-        .replace(Fixture.NOW, server.clock.instant().toString())
-        .replace("2026-11-22T14:00:00Z", server.clock.instant().plusSeconds(72 * 3600L).toString())
+    private fun receipt(identity: SessionIdentity, at: Instant = server.clock.instant()) =
+        Fixture.receipt(user = identity.userId, family = identity.familyId)
+            .replace(a.environment, identity.environment)
+            .replace(Fixture.NOW, at.toString())
+            .replace("2026-11-22T14:00:00Z", at.plusSeconds(72 * 3600L).toString())
 
     suspend fun access(identity: WorkTask = task, version: Long = 7, checked: List<WorkSource> = listOf(source),
                        attempts: Set<WorkAttempt> = setOf(attempt), revoked: Set<String> = emptySet()): WorkAccess = WorkAccess(

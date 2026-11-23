@@ -1,5 +1,6 @@
 package com.jaxpower.ipqc.patrol.work
 
+import com.jaxpower.ipqc.patrol.api.PatrolFailure
 import com.jaxpower.ipqc.patrol.offline.CacheCipher
 import com.jaxpower.ipqc.patrol.offline.CacheRows
 import com.jaxpower.ipqc.patrol.offline.KeystoreBox
@@ -30,6 +31,9 @@ internal data class OperationEntry(
 internal data class WorkIssuanceState(val contextId: String? = null, val pendingId: String? = null)
 
 @Serializable
+private data class ReceiptConflicts(val reasons: Set<ReceiptConflictReason>)
+
+@Serializable
 private data class WorkSourceStatus(val revoked: Boolean)
 
 @Serializable
@@ -53,6 +57,8 @@ internal class ProtectedWorkRows(
         } catch (e: CancellationException) {
             throw e
         } catch (e: WorkFailure) {
+            throw e
+        } catch (e: PatrolFailure) {
             throw e
         } catch (_: Exception) {
             // Serialization, SQLite, and crypto exception text may contain protected values.
@@ -117,6 +123,23 @@ internal class WorkTransaction(
     }
 
     suspend fun save(batch: BatchRecord) = write("batch", batch.batchId, batch)
+
+    suspend fun individualReceipt(id: String): ServerOperationReceipt? =
+        read<ServerOperationReceipt>("individual-receipt", id)?.also {
+            workCheck(it.operationId == id, WorkProblem.StorageUnavailable)
+        }
+
+    suspend fun saveIndividualReceipt(receipt: ServerOperationReceipt) =
+        write("individual-receipt", receipt.operationId, receipt)
+
+    suspend fun rememberReceiptConflict(lookup: ReceiptLookup, reason: ReceiptConflictReason) {
+        val kind = when (lookup.kind) {
+            ReceiptKind.Batch -> "batch-receipt-conflict"
+            ReceiptKind.Operation -> "operation-receipt-conflict"
+        }
+        val old = read<ReceiptConflicts>(kind, lookup.id)?.reasons.orEmpty()
+        if (reason !in old) write(kind, lookup.id, ReceiptConflicts(old + reason))
+    }
 
     suspend fun source(id: String): StoredWorkSource? = read<StoredWorkSource>("source", id)?.also {
         workCheck(it.source.contextId == id, WorkProblem.StorageUnavailable)
