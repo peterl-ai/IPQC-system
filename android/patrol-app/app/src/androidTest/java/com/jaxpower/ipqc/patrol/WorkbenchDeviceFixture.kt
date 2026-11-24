@@ -23,6 +23,8 @@ import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.encodeToJsonElement
+import kotlinx.serialization.json.jsonObject
 import okhttp3.RequestBody
 import okhttp3.ResponseBody.Companion.toResponseBody
 import okhttp3.ResponseBody
@@ -99,6 +101,7 @@ internal class WorkbenchDeviceFixture : AutoCloseable {
         val removalReceiptReads = AtomicInteger()
         var explicitRemovalSource: WorkSource? = null
         var explicitRemovalReceipt: ItemRemovalBatchReceipt? = null
+        var observedRemoval: ItemRemovalReceipt? = null
         var includeRemote = true
         var captureUntil = "2026-11-19T14:01:00Z"
         private val proof = Base64.getUrlEncoder().withoutPadding().encodeToString(ByteArray(32) { 29 })
@@ -110,16 +113,19 @@ internal class WorkbenchDeviceFixture : AutoCloseable {
                 val attempt = attempt(taskId, index)
                 DraftAttemptWire(attempt.taskItemId, attempt.inspectionAttemptId, if (index == 0) 1 else 50)
             }
+            val removed = observedRemoval?.takeIf { it.taskId == taskId }
             val remote = if (includeRemote) {
                 val quant = attempts[1]
                 listOf(DraftSampleWire(benchId(30), quant.taskItemId, quant.inspectionAttemptId, benchId(31), 1,
                     DraftSampleValueWire("Quantitative", JsonPrimitive("1.25".toBigDecimal()), "OK", null),
-                    false, benchId(32), IDENTITY.userId, benchId(32), true))
+                    false, benchId(32), IDENTITY.userId, benchId(32), removed?.inspectionAttemptId != quant.inspectionAttemptId))
             } else emptyList()
-            return Response.success(SharedDraftWire(taskId, line.id, 2, if (includeRemote) 7 else 0,
+            return Response.success(SharedDraftWire(taskId, line.id, 2, removed?.draftVersion ?: if (includeRemote) 7 else 0,
                 if (includeRemote) "SharedDraftInitialized" else "AlreadyInitialized", attempts, remote, false,
                 "NotEvaluatedForFormalSubmission", items = attempts.map {
-                    DraftItemWire(it.taskItemId, it.inspectionAttemptId, it.minimumSampleCount, "Applicable")
+                    val receipt = removed?.takeIf { r -> r.inspectionAttemptId == it.inspectionAttemptId }
+                    DraftItemWire(it.taskItemId, it.inspectionAttemptId, it.minimumSampleCount,
+                        receipt?.disposition?.name ?: "Applicable", receipt?.let { r -> Json.encodeToJsonElement(r).jsonObject })
                 }, allItemsRemoved = false))
         }
 

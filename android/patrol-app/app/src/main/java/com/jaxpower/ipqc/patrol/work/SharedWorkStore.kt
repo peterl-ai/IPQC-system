@@ -167,12 +167,15 @@ internal class SharedWorkStore(private val rows: ProtectedWorkRows, private val 
             requireCaptureTime(original, capture) { now }
             val entries = itemRemovals(command.task)
             workCheck(entries.none { (it.serverEvidence?.draftVersion ?: 0) > basis.draftVersion }, WorkProblem.StaleGrant)
-            workCheck(entries.none {
-                val previous = it.removal.command
-                previous.attempt == command.attempt && (it.state in uncertainItemRemovalStates ||
-                    (it.state == WorkState.Queued && previous.expectedDraftVersion == basis.draftVersion &&
-                        !sourceRevoked(previous.contextId)))
+            val turn = itemRemovalTurn(entries, basis.draftVersion)
+            workCheck(turn?.removal?.command?.attempt != command.attempt && entries.none {
+                it.state in uncertainItemRemovalStates && it.removal.command.attempt == command.attempt
             }, WorkProblem.ItemDispositionConflict)
+            workCheck(turn == null && entries.none {
+                it.state in uncertainItemRemovalStates || (it.state == WorkState.Queued &&
+                    it.removal.command.expectedDraftVersion > basis.draftVersion &&
+                    !sourceRevoked(it.removal.command.contextId))
+            }, WorkProblem.ItemRemovalReconciliationRequired)
             requireFreshSampleBasis(basis, sampleHistory(profile))
 
             val ledger = catalog()
@@ -195,6 +198,9 @@ internal class SharedWorkStore(private val rows: ProtectedWorkRows, private val 
             val stored = itemRemovals(task)
             val stale = stored.any { (it.serverEvidence?.draftVersion ?: 0) > basis.draftVersion } ||
                 sampleBasisProblem(basis, sampleHistory(profile)) == WorkProblem.StaleGrant
+            val turn = itemRemovalTurn(stored, basis.draftVersion)?.takeIf { candidate ->
+                stored.none { it.state in uncertainItemRemovalStates && it != candidate }
+            }
             val state = stored.filter { it.removal.command.owner == owner || it.state == WorkState.Accepted }
                 .map { entry ->
                     val cmd = entry.removal.command
@@ -205,21 +211,19 @@ internal class SharedWorkStore(private val rows: ProtectedWorkRows, private val 
                     val status = when {
                         entry.state != WorkState.Queued || evidence != null -> entry.state
                         sourceRevoked(cmd.contextId) -> WorkState.Quarantined
-                        stale || cmd.expectedDraftVersion != basis.draftVersion ||
+                        stale || turn?.removal?.command?.operationId != cmd.operationId ||
                             current?.serverDisposition != ItemDisposition.Applicable -> WorkState.Conflict
                         else -> WorkState.Queued
                     }
                     LocalItemRemovalHistory(entry.removal, status, current != null, entry.batch, evidence)
                 }
-            val provisional = state.filter {
-                val cmd = it.removal.command
-                it.state in provisionalItemStates && cmd.expectedDraftVersion == basis.draftVersion
-            }.associateBy { it.removal.command.attempt }
+            val provisional = turn?.removal?.takeIf { it.command.owner == owner }
             val projection = basis.attempts.map { item ->
                 ProjectedItemDisposition(item.attempt, item.required, item.serverDisposition, item.serverRemoval,
-                    provisional[item.attempt]?.removal?.reference()?.takeIf {
-                        basis.editable && !stale && item.serverDisposition == ItemDisposition.Applicable
-                    })
+                    provisional?.takeIf {
+                        it.command.attempt == item.attempt && basis.editable && !stale &&
+                            item.serverDisposition == ItemDisposition.Applicable
+                    }?.reference())
             }
             OfflineTransactionResult(LocalItemDispositionDraft(basis.draftVersion, catalog().localEditVersion,
                 projection, basis.samples, state, basis.historicalItemRemovals, stale))
@@ -260,10 +264,13 @@ internal class SharedWorkStore(private val rows: ProtectedWorkRows, private val 
         workCheck(basis.requireItemRemovalAttempt(cmd.attempt).required == entry.removal.minimumSampleCount, WorkProblem.ScopeMismatch)
         checkItemRemovalBarrier(task, basis.draftVersion)
         checkSampleBatchBarrier(basis.draftVersion)
-        workCheck(batch(id) == null && itemRemovals(task).none { it.batch?.batchId == id }, WorkProblem.BatchIdentityConflict)
+        val entries = itemRemovals(task)
+        workCheck(batch(id) == null && entries.none { it.batch?.batchId == id }, WorkProblem.BatchIdentityConflict)
         val original = requireSource(cmd.contextId, task)
         workCheck(original.source == entry.removal.source && validProof(original.proof) &&
             !sourceRevoked(cmd.contextId), WorkProblem.SourceUnavailable)
+        workCheck(itemRemovalTurn(entries, basis.draftVersion)?.removal?.reference() == operation,
+            WorkProblem.ItemRemovalReconciliationRequired)
 
         val sealed = ItemRemovalCanonical.batch(entry.removal, id)
         saveItemRemoval(entry.copy(batch = sealed))
@@ -274,8 +281,8 @@ internal class SharedWorkStore(private val rows: ProtectedWorkRows, private val 
     // A04-02 has no caller that sends an item-removal request.
     suspend fun startItemRemovalAttempt(access: WorkAccess, observed: OfflineSampleBasis, id: String) {
         workCheck(transact(access) {
-            val entry = itemRemovals(access.task).singleOrNull { it.batch?.batchId == id }
-                ?: throw WorkFailure(WorkProblem.InvalidState)
+            val entries = itemRemovals(access.task)
+            val entry = entries.singleOrNull { it.batch?.batchId == id } ?: throw WorkFailure(WorkProblem.InvalidState)
             val cmd = entry.removal.command
             val original = requireSource(cmd.contextId, access.task)
             workCheck(access.session.canContribute && original.source == entry.removal.source &&
@@ -288,6 +295,8 @@ internal class SharedWorkStore(private val rows: ProtectedWorkRows, private val 
                 WorkProblem.ScopeMismatch)
             checkItemRemovalBarrier(access.task, access.serverDraftVersion)
             checkSampleBatchBarrier(access.serverDraftVersion)
+            workCheck(itemRemovalTurn(entries, access.serverDraftVersion)?.removal?.reference() == entry.removal.reference(),
+                WorkProblem.ItemRemovalReconciliationRequired)
             saveItemRemoval(entry.copy(state = WorkState.InFlight))
             true
         } == true, WorkProblem.StorageUnavailable)
@@ -380,6 +389,8 @@ internal class SharedWorkStore(private val rows: ProtectedWorkRows, private val 
             val history = sampleHistory(profile)
             requireFreshSampleBasis(profile.basis, history)
             val op = edit.operation(source.contextId, profile.basis.draftVersion)
+            workCheck(itemRemoval(op.operationId) == null, WorkProblem.OperationIdentityConflict)
+            checkSampleItemRemovals(itemRemovals(task), profile.basis.draftVersion, setOf(op.attempt))
             val board = sampleBoard(profile.basis, history)
             if (op.kind == SampleKind.CaptureSample) {
                 workCheck(history.none {
@@ -567,6 +578,8 @@ internal class SharedWorkStore(private val rows: ProtectedWorkRows, private val 
                 if (access.requiresCaptureGrant)
                     workCheck(access.captureGrant?.contextId == context.source.contextId, WorkProblem.SourceUnavailable)
                 requireCaptureTime(context.source, access.captureGrant, captureTime)
+                workCheck(itemRemoval(op.operationId) == null, WorkProblem.OperationIdentityConflict)
+                checkSampleItemRemovals(itemRemovals(access.task), access.serverDraftVersion, setOf(op.attempt))
                 for (ref in op.dependencies) {
                     val prior = requireOperation(ref.operationId)
                     val previous = prior.envelope.operation
@@ -661,7 +674,9 @@ internal class SharedWorkStore(private val rows: ProtectedWorkRows, private val 
     private suspend fun WorkTransaction.sealBatch(task: WorkTask, id: String, entries: List<OperationEntry>): BatchRecord {
         val expected = entries.first().envelope.operation.baseDraftVersion
         checkItemRemovalBarrier(task, expected)
-        workCheck(itemRemovals(task).none { it.batch?.batchId == id }, WorkProblem.BatchIdentityConflict)
+        val removals = itemRemovals(task)
+        checkSampleItemRemovals(removals, expected, entries.map { it.envelope.operation.attempt }.toSet())
+        workCheck(removals.none { it.batch?.batchId == id }, WorkProblem.BatchIdentityConflict)
         val members = entries.map { it.envelope.reference() }
         val ids = members.map { it.operationId }.toSet()
         val accepted = entries.flatMap { it.envelope.operation.dependencies }.distinct()
@@ -692,8 +707,9 @@ internal class SharedWorkStore(private val rows: ProtectedWorkRows, private val 
                 other != id && requireBatch(other).state in setOf(WorkState.InFlight, WorkState.OutcomeUnknown)
             }, WorkProblem.InvalidState)
             workCheck(access.serverDraftVersion == batch.expectedDraftVersion, WorkProblem.ScopeMismatch)
-            workCheck(batch.operations.all { ref ->
-                val op = requireOperation(ref.operationId).envelope
+            val operations = sealedMembers(access.task, batch)
+            checkSampleItemRemovals(itemRemovals(access.task), batch.expectedDraftVersion, operations.map { it.operation.attempt }.toSet())
+            workCheck(operations.all { op ->
                 workCheck(op.operation.attempt in access.currentAttempts, WorkProblem.ScopeMismatch)
                 !sourceRevoked(op.source.contextId) && access.approves(op.source)
             }, WorkProblem.SourceUnavailable)
@@ -806,6 +822,7 @@ internal class SharedWorkStore(private val rows: ProtectedWorkRows, private val 
         }, WorkProblem.InvalidState)
         workCheck(access.serverDraftVersion == batch.expectedDraftVersion, WorkProblem.ScopeMismatch)
         val members = sealedMembers(access.task, batch)
+        checkSampleItemRemovals(itemRemovals(access.task), batch.expectedDraftVersion, members.map { it.operation.attempt }.toSet())
         for (entry in members) {
             val op = entry.operation
             workCheck(op.attempt in access.currentAttempts, WorkProblem.ScopeMismatch)
@@ -1137,6 +1154,5 @@ internal class SharedWorkStore(private val rows: ProtectedWorkRows, private val 
 
     private companion object {
         val receiptStates = setOf(WorkState.InFlight, WorkState.OutcomeUnknown, WorkState.Accepted)
-        val provisionalItemStates = setOf(WorkState.Queued, WorkState.InFlight, WorkState.OutcomeUnknown)
     }
 }

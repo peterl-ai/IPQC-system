@@ -53,16 +53,10 @@ class OfflineItemRemovalStorageTest {
                 val b = activate(restarted, fixture.b)
                 assertTrue(reopened.draft(scope, fixture.b).history.isEmpty())
                 assertWorkFailure(WorkProblem.SourceUnavailable) { reopened.save(intent) }
-                assertWorkFailure(WorkProblem.OperationIdentityConflict) {
-                    val replacement = reopened.newRemoval(scope, fixture.b, fixture.attempt(scope.taskId, 0),
-                        true, RemovalConfirmation.Equipment)
-                    reopened.save(replacement.copy(operationId = intent.operationId))
-                }
-                val other = reopened.save(reopened.newRemoval(scope, fixture.b, fixture.attempt(scope.taskId, 0),
-                    true, RemovalConfirmation.Equipment))
-                assertEquals(fixture.b.userId, other.source.contributorUserId)
-                assertEquals(fixture.b.familyId, other.source.originPersonalSessionId)
-                assertNotEquals(original.contextId, other.source.contextId)
+                val competing = reopened.newRemoval(scope, fixture.b, fixture.attempt(scope.taskId, 0),
+                    true, RemovalConfirmation.Equipment)
+                assertWorkFailure(WorkProblem.ItemRemovalReconciliationRequired) { reopened.save(competing) }
+                assertTrue(reopened.draft(scope, fixture.b).items.none { it.provisionalRemoval != null })
 
                 assertWorkFailure(WorkProblem.SourceUnavailable) {
                     restarted.store.prepareItemRemovalForReconciliation(b.access, b.draft.sampleBasis, benchId(81), removal.reference())
@@ -90,6 +84,19 @@ class OfflineItemRemovalStorageTest {
                 assertEquals(removal, accepted.removal)
                 assertEquals(IDENTITY.userId, accepted.receipt?.contributorUserId)
                 assertEquals(bAccess.userId, accepted.receipt?.uploadedByUserId)
+                assertWorkFailure(WorkProblem.StaleGrant) { reopened.save(competing) }
+                fixture.wire.observedRemoval = outcome
+                restarted.online.open(fixture.task(), bAccess)
+                assertWorkFailure(WorkProblem.StaleGrant) { reopened.save(competing) }
+                val newCommand = reopened.newRemoval(scope, bAccess, competing.attempt, true, RemovalConfirmation.Equipment)
+                assertWorkFailure(WorkProblem.OperationIdentityConflict) {
+                    reopened.save(newCommand.copy(operationId = intent.operationId))
+                }
+                val next = reopened.save(newCommand)
+                assertEquals(8L, next.command.expectedDraftVersion)
+                assertEquals(bAccess.userId, next.source.contributorUserId)
+                assertEquals(bAccess.familyId, next.source.originPersonalSessionId)
+                assertNotEquals(original.contextId, next.source.contextId)
                 assertEquals(0, fixture.wire.sends.get())
                 assertEncrypted(fixture.device.databaseFile)
             } finally {
@@ -135,6 +142,106 @@ class OfflineItemRemovalStorageTest {
             } finally {
                 db.close()
             }
+        }
+    }
+
+    @Test fun provisionalRemovalFencesAllSampleEditsAndPresealedUploadAtEveryUnresolvedState() = runBlocking<Unit>(Dispatchers.IO) {
+        WorkbenchDeviceFixture().use { fixture ->
+            val app = fixture.workServices()
+            val grant = activate(app, IDENTITY)
+            val scope = fixture.scope()
+            val target = fixture.attempt(scope.taskId, 1)
+            val other = fixture.attempt(scope.taskId, 0)
+            val samples = app.online.offlineSamples
+            val removals = app.online.offlineItemRemovals
+            val input = SampleInput.Quantitative("1.50")
+            val capture = samples.newCapture(target, input)
+            val measured = samples.save(scope, capture)
+            val opId = measured.envelope.operation.operationId
+            val extra = samples.save(scope, samples.newCapture(target, input)).envelope.operation.operationId
+            val sealed = samples.prepareBatch(scope, benchId(84), listOf(opId))
+            val source = requireNotNull(grant.source)
+            val access = WorkAccess(grant.access.session, scope, 7, setOf(target, other),
+                setOf(ValidatedWorkSource(source.contextId, source.contributorUserId, source.captureUntilUtc)))
+            val candidate = app.store.inspectUpload(access, sealed.batchId)
+
+            val removal = removals.save(removals.newRemoval(scope, IDENTITY, target, true, RemovalConfirmation.Production))
+            val competing = removals.newRemoval(scope, IDENTITY, other, true, RemovalConfirmation.Equipment)
+            val removalBatch = removals.prepareBatch(scope, IDENTITY, benchId(85), removal.reference())
+            suspend fun assertBlocked(state: WorkState, batchProblem: WorkProblem) {
+                val projection = removals.draft(scope, IDENTITY)
+                assertEquals(state, projection.history.single().state)
+                assertEquals(listOf(removal.reference()), projection.items.mapNotNull { it.provisionalRemoval })
+                assertFalse(projection.provisionallyAllItemsRemoved)
+                assertEquals("1.25", projection.samples.single().value.inspectionValue)
+                val attempts = listOf(samples.newCapture(target, input),
+                    OfflineSampleEdit.Correct(capture.key, input, measured.envelope.reference()),
+                    OfflineSampleEdit.Remove(capture.key, measured.envelope.reference()))
+                for (edit in attempts) {
+                    assertWorkFailure(WorkProblem.ItemDispositionConflict) { samples.save(scope, edit) }
+                    assertWorkFailure(WorkProblem.ItemDispositionConflict) {
+                        app.store.enqueue(access, edit.operation(source.contextId, 7))
+                    }
+                }
+                assertWorkFailure(WorkProblem.ItemRemovalReconciliationRequired) { removals.save(competing) }
+                val replayedSample = samples.save(scope, capture).envelope
+                assertEquals(measured.envelope.reference(), replayedSample.reference())
+                assertEquals(measured.envelope.canonicalPayload, replayedSample.canonicalPayload)
+                assertEquals(measured.envelope.originLocalEditVersion, replayedSample.originLocalEditVersion)
+                assertEquals(removal, removals.save(removal.command))
+                assertWorkFailure(batchProblem) { samples.prepareBatch(scope, benchId(86), listOf(extra)) }
+                assertWorkFailure(batchProblem) { app.store.prepareBatch(access, benchId(86), listOf(extra)) }
+                assertWorkFailure(batchProblem) { app.store.startAttempt(access, sealed.batchId) }
+                assertWorkFailure(batchProblem) { app.store.inspectUpload(access, sealed.batchId) }
+                assertWorkFailure(batchProblem) { app.store.beginUpload(access, candidate) }
+                val unrelated = samples.newCapture(other, SampleInput.Qualitative(QualitativeJudgment.OK))
+                assertEquals(other, samples.save(scope, unrelated).envelope.operation.attempt)
+            }
+
+            assertBlocked(WorkState.Queued, WorkProblem.ItemDispositionConflict)
+            app.store.startItemRemovalAttempt(access, grant.draft.sampleBasis, removalBatch.batchId)
+            assertBlocked(WorkState.InFlight, WorkProblem.InvalidState)
+            app.store.markItemRemovalOutcomeUnknown(access, removalBatch.batchId)
+            assertBlocked(WorkState.OutcomeUnknown, WorkProblem.InvalidState)
+            assertEquals(0, fixture.wire.sends.get())
+        }
+    }
+
+    @Test fun legacyParallelRowsKeepTheirBytesAndOnlyTheFirstCanAdvanceTheVersion() = runBlocking<Unit>(Dispatchers.IO) {
+        WorkbenchDeviceFixture().use { fixture ->
+            val app = fixture.workServices()
+            activate(app, IDENTITY)
+            val scope = fixture.scope()
+            val local = app.online.offlineItemRemovals
+            val first = local.save(local.newRemoval(scope, IDENTITY, fixture.attempt(scope.taskId, 0),
+                true, RemovalConfirmation.Production))
+            val secondCommand = local.newRemoval(scope, IDENTITY, fixture.attempt(scope.taskId, 1),
+                true, RemovalConfirmation.Equipment)
+            val secondSave = runCatching { local.save(secondCommand) }
+            assertTrue("Two same-version saves produced ${local.draft(scope, IDENTITY).items.count { it.provisionalRemoval != null }} provisional removals",
+                secondSave.isFailure)
+            assertEquals(WorkProblem.ItemRemovalReconciliationRequired, (secondSave.exceptionOrNull() as? WorkFailure)?.problem)
+            val prior = requireNotNull(app.rows.transaction(scope) {
+                val catalog = catalog()
+                val sequence = catalog.localEditVersion + 1
+                val bytes = ItemRemovalCanonical.operation(secondCommand, sequence)
+                val legacy = first.copy(command = secondCommand, localEditVersion = sequence,
+                    minimumSampleCount = 50, canonicalPayload = bytes, contentHash = workHash(bytes))
+                reserveItemRemovalId(secondCommand.operationId)
+                saveItemRemoval(ItemRemovalEntry(legacy))
+                save(catalog.copy(localEditVersion = sequence, itemRemovalIds = catalog.itemRemovalIds + secondCommand.operationId))
+                legacy
+            })
+            val projected = local.draft(scope, IDENTITY)
+            assertFalse(projected.provisionallyAllItemsRemoved)
+            assertEquals(listOf(first.reference()), projected.items.mapNotNull { it.provisionalRemoval })
+            assertEquals(listOf(WorkState.Queued, WorkState.Conflict), projected.history.map { it.state })
+            assertWorkFailure(WorkProblem.ItemRemovalReconciliationRequired) {
+                local.prepareBatch(scope, IDENTITY, benchId(87), prior.reference())
+            }
+            assertEquals(prior, local.save(secondCommand))
+            assertEquals(first.reference(), local.prepareBatch(scope, IDENTITY, benchId(88), first.reference()).operation)
+            assertEquals(0, fixture.wire.sends.get())
         }
     }
 

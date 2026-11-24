@@ -35,6 +35,26 @@ internal suspend fun WorkTransaction.itemRemovals(task: WorkTask): List<ItemRemo
         checkedItemRemoval(task, id) ?: throw WorkFailure(WorkProblem.StorageUnavailable)
     }
 
+// Older builds could queue more than one removal at the same version. Keep every
+// row, but give the active attempt (or the earliest queued edit) the only turn.
+internal suspend fun WorkTransaction.itemRemovalTurn(entries: List<ItemRemovalEntry>, version: Long): ItemRemovalEntry? =
+    entries.filter {
+        val command = it.removal.command
+        command.expectedDraftVersion == version &&
+            (it.state in uncertainItemRemovalStates || (it.state == WorkState.Queued && !sourceRevoked(command.contextId)))
+    }.minWithOrNull(compareBy({ it.state !in uncertainItemRemovalStates }, { it.removal.localEditVersion }))
+
+internal suspend fun WorkTransaction.checkSampleItemRemovals(entries: List<ItemRemovalEntry>, version: Long,
+                                                             attempts: Set<WorkAttempt>) {
+    val blocked = entries.any {
+        it.removal.command.attempt in attempts && (it.state in uncertainItemRemovalStates || it.serverEvidence != null)
+    } || entries.filter { it.removal.command.expectedDraftVersion >= version }
+        .groupBy { it.removal.command.expectedDraftVersion }.any { (base, sameVersion) ->
+            itemRemovalTurn(sameVersion, base)?.removal?.command?.attempt?.let { it in attempts } == true
+        }
+    workCheck(!blocked, WorkProblem.ItemDispositionConflict)
+}
+
 internal suspend fun WorkTransaction.checkItemRemovalBarrier(task: WorkTask, observedVersion: Long) {
     val entries = itemRemovals(task)
     workCheck(entries.none { it.state in uncertainItemRemovalStates }, WorkProblem.InvalidState)

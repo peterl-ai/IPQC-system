@@ -223,19 +223,19 @@ class OfflineItemRemovalCoordinatorTest {
             val e = RemovalFixture(server)
             val initial = e.arm()
             val command = e.command()
-            val saved = e.local.save(command)
             val samples = e.coordinator.offlineSamples
             val sample = samples.save(e.f.task, samples.newCapture(e.f.attempt, SampleInput.Quantitative("2.5")))
             val sampleBatch = samples.prepareBatch(e.f.task, testId(81), listOf(sample.envelope.operation.operationId))
-            val batch = e.local.prepareBatch(e.f.task, command.owner, testId(82), saved.reference())
-            // The sample and item writers share one task barrier.
+            // An older sample attempt must settle before the removal can seal.
             val source = requireNotNull(initial.source)
             val checked = e.f.work.access(checked = listOf(source))
             e.f.work.store.startAttempt(checked, sampleBatch.batchId)
+            val saved = e.local.save(command)
             expectWork(WorkProblem.InvalidState) {
-                e.f.work.store.startItemRemovalAttempt(checked, initial.draft.sampleBasis, batch.batchId)
+                e.local.prepareBatch(e.f.task, command.owner, testId(82), saved.reference())
             }
             e.f.work.store.recordRejection(checked, sampleBatch.batchId, WorkConflict.DraftVersionConflict)
+            val batch = e.local.prepareBatch(e.f.task, command.owner, testId(82), saved.reference())
             e.f.work.store.startItemRemovalAttempt(checked, initial.draft.sampleBasis, batch.batchId)
             assertEquals(WorkState.InFlight, e.local.draft(e.f.task, command.owner).history.single().state)
             expectWork(WorkProblem.InvalidState) { e.f.work.store.inspectUpload(checked, sampleBatch.batchId) }

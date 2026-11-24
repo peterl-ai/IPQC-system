@@ -292,6 +292,8 @@ internal fun WorkProblem.label(): String = when (this) {
     WorkProblem.ScopeMismatch, WorkProblem.StaleGrant -> "This inspection attempt is unavailable for local editing. Reload the task."
     WorkProblem.SampleInputMismatch -> "The sample does not match the frozen inspection requirement."
     WorkProblem.SampleLimit -> "This attempt already has 50 applicable samples."
+    WorkProblem.ItemDispositionConflict -> "Resolve the inspection item disposition before editing its samples."
+    WorkProblem.ItemRemovalReconciliationRequired -> "Reconcile the pending item removal online before removing another item."
     WorkProblem.DependencyMismatch -> "The sample changed. Reload before correcting or removing it."
     WorkProblem.IssuanceUncertain -> "The server could not confirm activation. Local capture stays locked."
     WorkProblem.OperationIdentityConflict -> "This operation could not be matched to the saved sample."

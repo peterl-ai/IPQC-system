@@ -49,6 +49,43 @@ public sealed class ItemRemovalTests
         Assert.Equal(0, await s.F.Read(db => db.PatrolTaskItemSamples.CountAsync()));
     }
 
+    [Fact]
+    public async Task Second_item_at_the_same_version_cannot_reuse_its_immutable_operation()
+    {
+        await using var fixture = await PersonalSessionFixture.CreateAsync();
+        await SingleItemCas(fixture);
+    }
+
+    internal static async Task SingleItemCas(PersonalSessionFixture fixture)
+    {
+        var setup = await SharedDraftFixture.Setup(fixture, true);
+        for (var version = 0; version < 7; version++)
+            await setup.Accept(setup.Batch(setup.Capture(new(null, 2.6m, null), version: version), version));
+
+        var before = (await setup.Read())!;
+        Assert.Equal(7, before.DraftVersion);
+        var other = before.CurrentAttempts.Single(x => x.TaskItemId != setup.ItemId);
+        var first = Input(setup, 7);
+        var second = Input(setup, 7, other);
+        var bytes = DraftCanonical.ItemRemoval(setup.TaskId, second);
+        Assert.Equal(8, (await Accept(setup, first)).Operation.DraftVersion);
+
+        using var stale = await setup.Client().PostAsJsonAsync(Url(setup), second);
+        Assert.Equal(HttpStatusCode.Conflict, stale.StatusCode);
+        Assert.Equal("DraftVersionConflict", (await stale.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("code").GetString());
+        using var envelopeOnly = await setup.Client().PostAsJsonAsync(Url(setup), second with { ExpectedDraftVersion = 8 });
+        Assert.Equal(HttpStatusCode.Conflict, envelopeOnly.StatusCode);
+        Assert.Equal("DraftAttemptConflict", (await envelopeOnly.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("code").GetString());
+        Assert.NotEqual(bytes, DraftCanonical.ItemRemoval(setup.TaskId, second with {
+            ExpectedDraftVersion = 8, Operation = second.Operation with { BaseDraftVersion = 8 }
+        }));
+        var after = (await setup.Read())!;
+        Assert.False(after.AllItemsRemoved);
+        Assert.Equal("Applicable", after.Items!.Single(x => x.TaskItemId == other.TaskItemId).Disposition);
+        Assert.Equal(7, after.Samples.Count);
+        await Counts(setup, 8, 1, 7, 7, 8);
+    }
+
     [Fact] public async Task RM01_05_06_09_11_12_Real_item_removal_preserves_history_and_receipts()
     { await using var f = await PersonalSessionFixture.CreateAsync(); await Lifecycle(f); }
     internal static async Task Lifecycle(PersonalSessionFixture f) {

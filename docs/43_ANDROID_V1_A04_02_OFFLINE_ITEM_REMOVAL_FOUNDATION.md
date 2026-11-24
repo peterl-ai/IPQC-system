@@ -80,6 +80,33 @@ and an accepted server disposition stay separately visible even when their IDs m
 The provisional and server-observed all-Removed indicators both leave Formal Submit and PQE
 confirmation to their own workflows.
 
+## Single-operation CAS and sample barriers
+
+A RemoveItem batch accepts one operation and advances the shared task DraftVersion by one.
+If two commands are captured at version 7, the first accepted command advances the version
+to 8. The second unchanged command receives `DraftVersionConflict`. Updating only the batch
+version receives `DraftAttemptConflict`, and changing the command's original base changes its
+canonical bytes and hash. The backend contract and database schema are unchanged.
+
+Room admits one unresolved eligible removal per task and observed version across operators.
+An additional save returns `ItemRemovalReconciliationRequired` and asks for online
+reconciliation. A durable uncertain attempt also blocks further removals until settled.
+Previously persisted same-version commands remain immutable and independently readable:
+an in-flight or unknown command takes priority, otherwise the earliest eligible edit owns the
+turn. Other queued commands remain in history as conflicts and cannot seal or start. A
+projection can show at most one provisional removal. Once the exact full receipt settles a
+started batch, refresh the server observation before recording a new intent for another item.
+The old version-7 command stays version 7, including on exact retry.
+
+New sample capture, correction and sample removal for the affected attempt are refused in
+the same Room transaction. The guard also covers both sample batch preparation paths and
+rechecks presealed batches at attempt start and upload admission. Existing samples, reads
+and exact replays remain available under their original authorization. Unrelated items can
+still be edited locally. The existing shared-version InFlight and OutcomeUnknown barriers
+continue to apply to preparation and sending for the task. The online refresh preserves the
+distinct server disposition and recorded sample history. A04-02 adds no automatic upload or
+Formal Submit.
+
 ## Batch preparation and A/B
 
 An eligible creator can seal a queued command locally for the exact observed version. The
@@ -118,7 +145,7 @@ the WorkContext guarantee.
 Production item-removal controls, UnableToMeasureNG editing, NG fields, PIC, photos,
 background upload, Formal Submit, PQE, rollout and physical Samsung UAT remain deferred.
 
-## Local verification
+## Original A04-02 local verification
 
 Windows JDK 17 and Android SDK 36, from `android/patrol-app`:
 
@@ -152,3 +179,17 @@ expiry and rollback, interrupted transactions and lost acknowledgement, and the 
 lock until exact local resolution. The JVM HTTP tests check B's current bearer on the receipt
 GET and the distinction between a 404, individual evidence and full batch acceptance.
 Factory HTTPS end-to-end and physical-device UAT were outside these runs.
+
+## Independent review repair verification
+
+The reviewed APK from `fae258fadc8c108db3aa6181c89f00b541661d8e` was exercised with the repair's regression tests. It
+persisted two same-version removals and projected both as provisional. It also let a local
+sample capture through after queuing a removal for the same attempt. The new test suite
+exercises all three unresolved states, exact replay, pending upload admission, and unaffected
+item editing. The Backend Release endpoint test reproduced both stale-CAS results at
+versions 7 and 8. The PostgreSQL test calls the same scenario against the CI provider.
+
+Local Android JVM passed 129 tests, Lint passed with the existing two warnings, and both APK
+assemblies passed with the same command shown above. The API 30 emulator passed all 43
+instrumentation tests, including the new cross-state and legacy-row cases. The pinned
+independent re-review packet carries the API 35 run, exact APKs and GitHub job evidence.
