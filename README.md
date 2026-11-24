@@ -2,6 +2,10 @@
 
 Internal JAX Power IPQC platform that replaces the **IPQC / Line Patrol portion** of Jinko GQMS for new JAX Power operations.
 
+## Project Memory
+
+Start with the [Project Memory index](docs/handoff/README.md) and [current project state](docs/handoff/CURRENT_PROJECT_STATE.md). They link to approved decisions, PR and independent review history, open issues and dated handoff snapshots. Verify live Git and CI before resuming work.
+
 ## Rev3.2 / R32-01 current direction
 
 [Approved Rev3.2](docs/architecture/IPQC_ANDROID_ARCHITECTURE_V1_REV3_2_2026-11-10.md) and its [Handoff Supersession](docs/architecture/IPQC_ANDROID_ARCHITECTURE_V1_REV3_2_IMPLEMENTATION_HANDOFF_SUPERSESSION_2026-11-10.md) supersede the older device-PKI direction. Future Android uses personal login → server-backed line selection → tasks on both SM-X210/API35 and SM-T500/API30 (one minSdk30 app). P1-03B is cancelled; R32-01 implements no Android, personal-session extension or LineShared execution.
