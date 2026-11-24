@@ -6,6 +6,7 @@ public sealed class ItemRemovalPostgresTests
     [DisposablePostgresFact] public Task Accepted_A_history_after_revoke() => Run(ItemRemovalIntegrityTests.AcceptedA);
     private static async Task Run(Func<PersonalSessionFixture, Task> action) { await using var f = await PersonalSessionFixture.CreateAsync(true); await action(f); }
     [DisposablePostgresFact] public Task Lifecycle() => Run(ItemRemovalTests.Lifecycle);
+    [DisposablePostgresFact] public Task SingleItemCas() => Run(ItemRemovalTests.SingleItemCas);
     [DisposablePostgresFact] public Task Authority() => Run(ItemRemovalTests.Authority);
     [DisposablePostgresFact] public Task Bad_proof() => Run(f => ItemRemovalTests.BadSource(f, "proof"));
     [DisposablePostgresFact] public Task Missing_proof() => Run(f => ItemRemovalTests.BadSource(f, "missing"));

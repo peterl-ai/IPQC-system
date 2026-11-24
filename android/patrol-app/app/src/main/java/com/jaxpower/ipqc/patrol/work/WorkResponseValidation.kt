@@ -1,6 +1,8 @@
 package com.jaxpower.ipqc.patrol.work
 
+import com.jaxpower.ipqc.patrol.api.Issue
 import com.jaxpower.ipqc.patrol.api.LineTaskDetail
+import com.jaxpower.ipqc.patrol.api.PatrolFailure
 import com.jaxpower.ipqc.patrol.api.ensureResponse
 import com.jaxpower.ipqc.patrol.api.utc
 import com.jaxpower.ipqc.patrol.auth.SessionRepository
@@ -87,8 +89,21 @@ internal fun SharedDraftWire.validate(detail: LineTaskDetail, session: SessionRe
     val frozen = currentAttempts.map { pair ->
         val attempt = WorkAttempt(pair.taskItemId, pair.inspectionAttemptId)
         val type = FrozenSampleType.fromDefinition(definitions.getValue(pair.taskItemId).inspectionType)
-        FrozenSampleAttempt(attempt, pair.minimumSampleCount, type,
-            dispositions?.get(pair.taskItemId)?.disposition == "Applicable")
+        val item = dispositions?.get(pair.taskItemId)
+        val disposition = item?.let { ItemDisposition.valueOf(it.disposition) }
+        val receipt = item?.removal?.let {
+            try {
+                it.decodeItemRemovalReceipt()
+            } catch (_: kotlinx.serialization.SerializationException) {
+                throw PatrolFailure(Issue.RESPONSE)
+            }
+        }
+        // Existing sample reads also accept responses lacking typed removal details.
+        // No item edit is armed by such a response.
+        if (receipt != null) ensureResponse(disposition == ItemDisposition.Removed &&
+            receipt.matches(task, attempt, pair.minimumSampleCount) && receipt.draftVersion <= draftVersion)
+        FrozenSampleAttempt(attempt, pair.minimumSampleCount, type, disposition == ItemDisposition.Applicable,
+            disposition, receipt)
     }.sortedBy { it.attempt.taskItemId }
     val observed = samples.map { sample ->
         val key = LocalSampleKey(WorkAttempt(sample.taskItemId, sample.inspectionAttemptId), sample.clientSampleId)
@@ -106,6 +121,7 @@ internal fun SharedDraftWire.validate(detail: LineTaskDetail, session: SessionRe
         observed.filter { it.current && !it.removed }.groupBy { it.key.attempt }.all { (attempt, records) ->
             records.size <= MAX_CURRENT_SAMPLES && records.all { it.value.inspectionType == applicable[attempt]?.type?.name }
         }
+    ensureResponse(frozen.mapNotNull { it.serverRemoval?.operationId }.let { it.distinct().size == it.size })
     return OnlineDraft(task, draftVersion, requireNotNull(state), frozen.map { it.attempt }.toSet(),
         applicable.keys, allItemsRemoved, validPlanning, OfflineSampleBasis(task, draftVersion, editable, frozen, observed))
 }

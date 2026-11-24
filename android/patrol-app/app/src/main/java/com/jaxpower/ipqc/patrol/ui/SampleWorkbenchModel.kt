@@ -56,7 +56,8 @@ internal data class WorkbenchUi(
     val lastSavedId: String? = null,
     val retryPending: Boolean = false,
 ) {
-    val canEdit get() = hasLocalAccess && draft != null && !busy && !retryPending && blocked == null
+    val blocksNavigation get() = busy || retryPending
+    val canEdit get() = hasLocalAccess && draft != null && !blocksNavigation && blocked == null
 }
 
 internal class SampleWorkbenchModel(private val scope: CoroutineScope, private val online: OnlineWorkCoordinator) {
@@ -288,9 +289,12 @@ internal fun WorkProblem.label(): String = when (this) {
     WorkProblem.SourceUnavailable -> "Local capture requires an eligible online activation."
     WorkProblem.CaptureWindowClosed -> "The local capture window expired. Activate capture online to continue."
     WorkProblem.CaptureTimeUnavailable -> "The protected capture time is unavailable. Verify online."
-    WorkProblem.ScopeMismatch, WorkProblem.StaleGrant -> "This inspection attempt is unavailable for local editing. Reload the task."
+    WorkProblem.ScopeMismatch -> "This inspection attempt is unavailable for local editing. Reload the task."
+    WorkProblem.StaleGrant -> "Reload the shared draft online before editing."
     WorkProblem.SampleInputMismatch -> "The sample does not match the frozen inspection requirement."
     WorkProblem.SampleLimit -> "This attempt already has 50 applicable samples."
+    WorkProblem.ItemDispositionConflict -> "Resolve the inspection item disposition before editing its samples."
+    WorkProblem.ItemRemovalReconciliationRequired -> "Reconcile the pending item removal online before removing another item."
     WorkProblem.DependencyMismatch -> "The sample changed. Reload before correcting or removing it."
     WorkProblem.IssuanceUncertain -> "The server could not confirm activation. Local capture stays locked."
     WorkProblem.OperationIdentityConflict -> "This operation could not be matched to the saved sample."

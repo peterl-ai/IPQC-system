@@ -26,6 +26,8 @@ internal data class FrozenSampleAttempt(
     val required: Int,
     val type: FrozenSampleType?,
     val applicable: Boolean,
+    val serverDisposition: ItemDisposition? = null,
+    val serverRemoval: ItemRemovalReceipt? = null,
 )
 
 @Serializable
@@ -47,6 +49,7 @@ internal data class OfflineSampleBasis(
     val editable: Boolean,
     val attempts: List<FrozenSampleAttempt>,
     val samples: List<ObservedSample>,
+    val historicalItemRemovals: List<ItemRemovalReceipt> = emptyList(),
 )
 
 @Serializable

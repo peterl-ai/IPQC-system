@@ -1,6 +1,7 @@
 package com.jaxpower.ipqc.patrol
 
 import android.graphics.Bitmap
+import android.view.KeyEvent
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.graphics.asAndroidBitmap
@@ -188,6 +189,41 @@ class SampleWorkbenchTest {
             assertEquals(durable.history.last().operation.envelope.operation.operationId,
                 draft(app).history.last().operation.envelope.operation.operationId)
             compose.onNodeWithText("Saved locally · Pending sync").assertIsDisplayed()
+            assertEquals(0, fixture.wire.sends.get())
+            close(app)
+        }
+    }
+
+    @Test fun pendingSaveBlocksSystemBackToolbarBackAndSwitchLineUntilExactAcknowledgement() {
+        WorkbenchDeviceFixture().use { fixture ->
+            val fault = FaultRows(fixture.device.rows)
+            val app = fixture.components(rows = fault)
+            install(app)
+            login(app)
+            openWorkbench(fixture, app)
+            activate(app)
+            offline(app)
+
+            fault.mode.set(Fault.Before)
+            chooseQualitative("OK")
+            saveSample()
+            awaitRetry(app)
+            compose.onNodeWithText("Back").assertIsNotEnabled()
+            compose.onNodeWithText("Switch line").assertIsNotEnabled()
+            InstrumentationRegistry.getInstrumentation().sendKeyDownUpSync(KeyEvent.KEYCODE_BACK)
+            compose.runOnIdle {
+                assertTrue(app.model.ui.value.screen is Screen.SampleWorkbench)
+                // Exercise stale click callbacks as well as disabled semantics.
+                app.model.back()
+                app.model.switchLine()
+                assertTrue(app.model.ui.value.screen is Screen.SampleWorkbench)
+                assertTrue(app.model.workbench?.ui?.value?.retryPending == true)
+            }
+            button("Retry same save").performClick()
+            awaitCount(app, 1)
+            compose.onNodeWithText("Back").assertIsEnabled()
+            compose.onNodeWithText("Switch line").assertIsEnabled()
+            assertEquals(1L, draft(app).localEditVersion)
             assertEquals(0, fixture.wire.sends.get())
             close(app)
         }

@@ -3,6 +3,7 @@ package com.jaxpower.ipqc.patrol.work
 import com.jaxpower.ipqc.patrol.api.GuardedSampleExchange
 import com.jaxpower.ipqc.patrol.api.OfflineAccessReceipt
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import okhttp3.RequestBody
 import okhttp3.ResponseBody
@@ -74,6 +75,7 @@ internal class DraftAttemptWire(val taskItemId: String, val inspectionAttemptId:
 @Serializable
 internal class DraftItemWire(
     val taskItemId: String, val inspectionAttemptId: String, val minimumSampleCount: Int, val disposition: String,
+    val removal: JsonObject? = null,
 )
 
 @Serializable

@@ -21,8 +21,12 @@ import java.time.ZoneOffset
 import java.util.Base64
 import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.encodeToJsonElement
+import kotlinx.serialization.json.jsonObject
 import okhttp3.RequestBody
+import okhttp3.ResponseBody.Companion.toResponseBody
 import okhttp3.ResponseBody
 import retrofit2.Response
 
@@ -73,13 +77,18 @@ internal class WorkbenchDeviceFixture : AutoCloseable {
 
     fun components(connectivity: MutableStateFlow<Boolean> = MutableStateFlow(true), cache: OfflineCache = device.cache,
                    rows: CacheRows = device.rows, enabled: Boolean = true): WorkbenchComponents {
+        val work = workServices(cache, rows)
+        val model = PatrolViewModel(work.sessions, work.patrol, connectivity, cache, work.online.takeIf { enabled })
+        return WorkbenchComponents(work.rows, work.online, model, connectivity)
+    }
+
+    fun workServices(cache: OfflineCache = device.cache, rows: CacheRows = device.rows): WorkbenchWorkServices {
         val session = SessionRepository(api, device.vault, ORIGIN, clock, cache)
         val patrol = PatrolRepository(api, session, cache)
         val ledgerRows = ProtectedWorkRows(rows, ORIGIN, device.workKey)
         val store = SharedWorkStore(ledgerRows, session)
         val online = OnlineWorkCoordinator(ORIGIN, patrol, wire, session, store)
-        val model = PatrolViewModel(session, patrol, connectivity, cache, online.takeIf { enabled })
-        return WorkbenchComponents(ledgerRows, online, model, connectivity)
+        return WorkbenchWorkServices(ledgerRows, online, session, store, patrol)
     }
 
     override fun close() = device.close()
@@ -88,6 +97,12 @@ internal class WorkbenchDeviceFixture : AutoCloseable {
         val issues = AtomicInteger()
         val reads = AtomicInteger()
         val sends = AtomicInteger()
+        val removalPreflights = AtomicInteger()
+        val removalReceiptReads = AtomicInteger()
+        var explicitRemovalSource: WorkSource? = null
+        var explicitRemovalReceipt: ItemRemovalBatchReceipt? = null
+        var explicitIndividualRemovalReceipt: ItemRemovalReceipt? = null
+        var observedRemoval: ItemRemovalReceipt? = null
         var includeRemote = true
         var captureUntil = "2026-11-19T14:01:00Z"
         private val proof = Base64.getUrlEncoder().withoutPadding().encodeToString(ByteArray(32) { 29 })
@@ -99,16 +114,19 @@ internal class WorkbenchDeviceFixture : AutoCloseable {
                 val attempt = attempt(taskId, index)
                 DraftAttemptWire(attempt.taskItemId, attempt.inspectionAttemptId, if (index == 0) 1 else 50)
             }
+            val removed = observedRemoval?.takeIf { it.taskId == taskId }
             val remote = if (includeRemote) {
                 val quant = attempts[1]
                 listOf(DraftSampleWire(benchId(30), quant.taskItemId, quant.inspectionAttemptId, benchId(31), 1,
                     DraftSampleValueWire("Quantitative", JsonPrimitive("1.25".toBigDecimal()), "OK", null),
-                    false, benchId(32), IDENTITY.userId, benchId(32), true))
+                    false, benchId(32), IDENTITY.userId, benchId(32), removed?.inspectionAttemptId != quant.inspectionAttemptId))
             } else emptyList()
-            return Response.success(SharedDraftWire(taskId, line.id, 2, if (includeRemote) 7 else 0,
+            return Response.success(SharedDraftWire(taskId, line.id, 2, removed?.draftVersion ?: if (includeRemote) 7 else 0,
                 if (includeRemote) "SharedDraftInitialized" else "AlreadyInitialized", attempts, remote, false,
                 "NotEvaluatedForFormalSubmission", items = attempts.map {
-                    DraftItemWire(it.taskItemId, it.inspectionAttemptId, it.minimumSampleCount, "Applicable")
+                    val receipt = removed?.takeIf { r -> r.inspectionAttemptId == it.inspectionAttemptId }
+                    DraftItemWire(it.taskItemId, it.inspectionAttemptId, it.minimumSampleCount,
+                        receipt?.disposition?.name ?: "Applicable", receipt?.let { r -> Json.encodeToJsonElement(r).jsonObject })
                 }, allItemsRemoved = false))
         }
 
@@ -140,7 +158,19 @@ internal class WorkbenchDeviceFixture : AutoCloseable {
         }
 
         override suspend fun preflight(bearer: String, taskId: String, input: WorkContextPreflightInputWire):
-            Response<WorkContextPreflightWire> = error("The pilot never preflights an upload")
+            Response<WorkContextPreflightWire> {
+            val original = checkNotNull(explicitRemovalSource) { "Unexpected upload preflight" }
+            check(device.api.loginSubject == b && original.task.taskId == taskId)
+            check(input.expectedTaskLineId == original.task.lineId && input.expectedEnvironmentId == original.task.environmentId &&
+                input.expectedWorkflowVersion == original.task.workflowVersion)
+            val submitted = input.sources.single()
+            check(submitted.workContextId == original.contextId && submitted.contributorUserIdAssertion == original.contributorUserId &&
+                submitted.proofSecret == proof)
+            removalPreflights.incrementAndGet()
+            return Response.success(WorkContextPreflightWire(NOW,
+                listOf(WorkContextValidatedWire(original.contextId, original.contributorUserId, original.captureUntilUtc)),
+                "SourcePreflightOnly", false))
+        }
 
         override suspend fun preflightSampleBatch(bearer: String, taskId: String, input: WorkContextPreflightInputWire,
                                                   guard: GuardedSampleExchange): Response<ResponseBody> {
@@ -154,11 +184,18 @@ internal class WorkbenchDeviceFixture : AutoCloseable {
             error("Unexpected sample upload")
         }
 
-        override suspend fun batchReceipt(bearer: String, taskId: String, batchId: String): Response<ResponseBody> =
-            error("The pilot never reconciles batches automatically")
+        override suspend fun batchReceipt(bearer: String, taskId: String, batchId: String): Response<ResponseBody> {
+            val receipt = checkNotNull(explicitRemovalReceipt) { "Unexpected batch receipt query" }
+            check(device.api.loginSubject.userId == receipt.uploadedByUserId && receipt.taskId == taskId && receipt.batchId == batchId)
+            removalReceiptReads.incrementAndGet()
+            return Response.success(Json.encodeToString(receipt).toResponseBody())
+        }
 
-        override suspend fun operationReceipt(bearer: String, taskId: String, operationId: String): Response<ResponseBody> =
-            error("Local recovery never queries a server receipt")
+        override suspend fun operationReceipt(bearer: String, taskId: String, operationId: String): Response<ResponseBody> {
+            val receipt = checkNotNull(explicitIndividualRemovalReceipt) { "Unexpected operation receipt query" }
+            check(device.api.loginSubject.userId == receipt.uploadedByUserId && receipt.taskId == taskId && receipt.operationId == operationId)
+            return Response.success(Json.encodeToString(receipt).toResponseBody())
+        }
     }
 
     private companion object { const val FAMILY_EXPIRY = "2026-11-26T14:00:00Z" }
@@ -169,6 +206,14 @@ internal class WorkbenchComponents(
     val online: OnlineWorkCoordinator,
     val model: PatrolViewModel,
     val connectivity: MutableStateFlow<Boolean>,
+)
+
+internal class WorkbenchWorkServices(
+    val rows: ProtectedWorkRows,
+    val online: OnlineWorkCoordinator,
+    val sessions: SessionRepository,
+    val store: SharedWorkStore,
+    val patrol: PatrolRepository,
 )
 
 internal fun benchId(value: Int) = "70000000-0000-0000-0000-" + value.toString().padStart(12, '0')
