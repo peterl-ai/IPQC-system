@@ -13,6 +13,7 @@ import com.jaxpower.ipqc.patrol.auth.SessionRepository
 import com.jaxpower.ipqc.patrol.offline.OfflineCache
 import com.jaxpower.ipqc.patrol.offline.OfflineSession
 import com.jaxpower.ipqc.patrol.tasks.PatrolRepository
+import com.jaxpower.ipqc.patrol.work.OnlineWorkCoordinator
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
@@ -35,6 +36,7 @@ sealed interface Screen {
     data class Tasks(val operator: Operator, val line: ProductionLine, val page: Int, val load: Load<PagedLineTasks>) : Screen
     data class Detail(val operator: Operator, val line: ProductionLine, val task: LineTaskSummary,
                       val listPage: Int, val load: Load<LineTaskDetail>) : Screen
+    data class SampleWorkbench(val origin: Detail) : Screen
 }
 
 data class PatrolUi(
@@ -47,12 +49,17 @@ data class PatrolUi(
     val offline: OfflineSession? = null,
 )
 
-class PatrolViewModel(
+class PatrolViewModel internal constructor(
     private val sessions: SessionRepository?,
     private val patrol: PatrolRepository?,
     connectivity: Flow<Boolean>,
-    private val cache: OfflineCache? = null,
+    private val cache: OfflineCache?,
+    onlineWorkbench: OnlineWorkCoordinator?,
 ) : ViewModel() {
+    constructor(sessions: SessionRepository?, patrol: PatrolRepository?, connectivity: Flow<Boolean>,
+                cache: OfflineCache? = null) : this(sessions, patrol, connectivity, cache, null)
+
+    internal val workbench = onlineWorkbench?.let { SampleWorkbenchModel(viewModelScope, it) }
     private val mutableUi = MutableStateFlow(PatrolUi(configured = sessions != null, issue = if (sessions == null) Issue.CONFIGURATION else null))
     val ui = mutableUi.asStateFlow()
     private var pending: Job? = null
@@ -77,6 +84,9 @@ class PatrolViewModel(
                         }
                     } else if (!online) {
                         enterOffline()
+                    } else if (ui.value.screen is Screen.SampleWorkbench && ui.value.offline != null) {
+                        // The pilot can retain the local draft on network return.
+                        // Existing explicit verification is required before arming online again.
                     } else if (first || cache != null) {
                         reconnect()
                     } else if (ui.value.issue == Issue.OFFLINE) {
@@ -133,6 +143,9 @@ class PatrolViewModel(
         when (val screen = ui.value.screen) {
             is Screen.Tasks -> loadLines(screen.operator)
             is Screen.Detail -> loadLines(screen.operator)
+            is Screen.SampleWorkbench -> {
+                if (workbench?.ui?.value?.busy != true) loadLines(screen.origin.operator)
+            }
             else -> Unit
         }
     }
@@ -153,6 +166,30 @@ class PatrolViewModel(
         loadDetail(Screen.Detail(screen.operator, screen.line, task, screen.page, Load.Loading))
     }
 
+    internal fun openWorkbench() {
+        val screen = ui.value.screen as? Screen.Detail ?: return
+        val pilot = workbench ?: return
+        if (ui.value.busy || !foreground || signingOut) return
+        val target = WorkbenchTarget.from(screen) ?: return
+        val local = ui.value.offline
+        if (local != null && local.identity != target.owner) return
+        show(Screen.SampleWorkbench(screen))
+        if (ui.value.screen is Screen.SampleWorkbench) pilot.open(target, canUseWorkbenchNetwork())
+    }
+
+    internal fun armWorkbench(target: WorkbenchTarget) {
+        if (canUseWorkbenchNetwork()) workbench?.arm(target)
+    }
+
+    internal fun reloadWorkbench(target: WorkbenchTarget) {
+        if (foreground && !ui.value.busy && ui.value.screen is Screen.SampleWorkbench) {
+            workbench?.reload(target, canUseWorkbenchNetwork())
+        }
+    }
+
+    private fun canUseWorkbenchNetwork(): Boolean = foreground && !signingOut && !ui.value.busy &&
+        ui.value.screen is Screen.SampleWorkbench && ui.value.online && ui.value.offline == null
+
     fun refresh() {
         when (val screen = ui.value.screen) {
             is Screen.Lines -> loadLines(screen.operator)
@@ -166,6 +203,9 @@ class PatrolViewModel(
         if (ui.value.busy) return
         when (val screen = ui.value.screen) {
             is Screen.Detail -> loadTasks(screen.operator, screen.line, screen.listPage)
+            is Screen.SampleWorkbench -> {
+                if (workbench?.ui?.value?.busy != true) show(screen.origin)
+            }
             is Screen.Tasks -> loadLines(screen.operator)
             is Screen.Lines -> show(Screen.Home(screen.operator))
             else -> Unit
@@ -202,7 +242,7 @@ class PatrolViewModel(
     internal fun leaveForeground() {
         foreground = false
         if (cache != null && !signingOut &&
-            (ui.value.offline != null || !ui.value.online || ui.value.busy)) {
+            (ui.value.offline != null || !ui.value.online || ui.value.busy || ui.value.screen is Screen.SampleWorkbench)) {
             interrupt()
             show(Screen.Login)
         }
@@ -216,6 +256,8 @@ class PatrolViewModel(
     }
 
     private fun enterOffline(fallback: Issue? = Issue.OFFLINE) {
+        val retained = ui.value.screen as? Screen.SampleWorkbench
+        val expected = workbench?.ui?.value?.target?.owner
         interrupt()
         val service = sessions
         val localCache = cache
@@ -224,7 +266,7 @@ class PatrolViewModel(
             return
         }
         val stamp = epoch
-        show(Screen.Login, busy = true, issue = fallback)
+        show(retained ?: Screen.Login, busy = true, issue = fallback)
         pending = viewModelScope.launch {
             try {
                 val grant = service.resumeOffline()
@@ -234,8 +276,11 @@ class PatrolViewModel(
                 } else if (localCache.remainingMs(grant) <= 0) {
                     lockOffline(Issue.OFFLINE_EXPIRED)
                 } else {
-                    mutableUi.value = ui.value.copy(screen = Screen.Home(grant.operator), busy = false,
-                        issue = null, message = null, offline = grant)
+                    val sameWorkbench = retained != null && expected == grant.identity
+                    if (!sameWorkbench && retained != null) workbench?.close()
+                    mutableUi.value = ui.value.copy(
+                        screen = if (sameWorkbench) requireNotNull(retained) else Screen.Home(grant.operator),
+                        busy = false, issue = null, message = null, offline = grant)
                     monitorOffline(localCache)
                 }
             } catch (failure: PatrolFailure) {
@@ -359,6 +404,7 @@ class PatrolViewModel(
             lockOffline(Issue.OFFLINE_EXPIRED)
             return
         }
+        if (screen !is Screen.SampleWorkbench && ui.value.screen is Screen.SampleWorkbench) workbench?.close()
         mutableUi.value = ui.value.copy(screen = screen, busy = busy, issue = issue, message = message,
             offline = local)
     }

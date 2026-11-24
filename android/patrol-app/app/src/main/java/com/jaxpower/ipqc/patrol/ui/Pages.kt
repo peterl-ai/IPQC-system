@@ -63,7 +63,9 @@ internal fun PatrolPage(ui: PatrolUi, model: PatrolViewModel) {
         is Screen.Lines -> LinesPage(screen.load, ui.offline != null, model::select, model::refresh)
         is Screen.Tasks -> TasksPage(screen, ui.busy, model::refresh, model::switchLine,
             model::previousPage, model::nextPage, model::openTask, cached = ui.offline != null)
-        is Screen.Detail -> DetailPage(screen, ui.busy, model::refresh, model::switchLine, cached = ui.offline != null)
+        is Screen.Detail -> DetailPage(screen, ui.busy, model::refresh, model::switchLine, cached = ui.offline != null,
+            workbench = model.workbench?.let { model::openWorkbench })
+        is Screen.SampleWorkbench -> model.workbench?.let { SampleWorkbenchPage(ui, model, it) } ?: Unit
     }
 }
 
@@ -217,6 +219,7 @@ internal fun TasksPage(
 @Composable
 internal fun DetailPage(
     screen: Screen.Detail, busy: Boolean, refresh: () -> Unit, switchLine: () -> Unit, cached: Boolean = false,
+    workbench: (() -> Unit)? = null,
 ) {
     LazyColumn(Modifier.fillMaxSize().padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         item { TaskHeading("Task ${screen.task.taskNo}", screen.line, busy, refresh, switchLine, cached) }
@@ -227,6 +230,9 @@ internal fun DetailPage(
                 item {
                     if (cached) Text("Last validated ${load.value.summary.validatedAccess.validatedAtUtc}")
                     DetailSummary(load.value)
+                    if (workbench != null) {
+                        Button(onClick = workbench, enabled = !busy) { Text("Open sample workbench") }
+                    }
                 }
                 item { Text("Frozen inspection items", style = MaterialTheme.typography.titleLarge) }
                 items(load.value.items, key = { it.id }) { Definition(it) }

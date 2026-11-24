@@ -8,6 +8,7 @@ import com.jaxpower.ipqc.patrol.api.ensureResponse
 import com.jaxpower.ipqc.patrol.api.problemCode
 import com.jaxpower.ipqc.patrol.api.responseBody
 import com.jaxpower.ipqc.patrol.api.utc
+import com.jaxpower.ipqc.patrol.auth.SessionIdentity
 import com.jaxpower.ipqc.patrol.auth.SessionRepository
 import com.jaxpower.ipqc.patrol.tasks.PatrolRepository
 import java.time.Instant
@@ -49,11 +50,12 @@ internal class OnlineWorkCoordinator(
         selectionCommit.withLock { selection.incrementAndGet() }
     }
 
-    suspend fun open(task: LineTaskSummary): Grant {
+    suspend fun open(task: LineTaskSummary, expected: SessionIdentity? = null): Grant {
         val selected = selectionCommit.withLock { selection.incrementAndGet() }
         return mutex.withLock {
             requireSelection(selected)
             val session = sessions.authorizeWork()
+            workCheck(expected == null || session.identity == expected, WorkProblem.SourceUnavailable)
             publish(selected, readDraft(task, session, selected), task, session)
         }
     }

@@ -79,7 +79,7 @@ internal class LocalSampleBoard(
     fun values(): List<LocalSampleValue> = samples.values.toList()
 
     fun progress(): List<LocalSampleProgress> = applicable.values.map {
-        LocalSampleProgress(it.attempt, it.required, count(it.attempt))
+        LocalSampleProgress(it.attempt, it.required, count(it.attempt), it.type)
     }
 
     private fun count(attempt: WorkAttempt) = samples.values.count { it.key.attempt == attempt && !it.removed }

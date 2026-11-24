@@ -10,6 +10,8 @@ plugins {
 }
 
 val serverUrl = providers.gradleProperty("IPQC_SERVER_URL").orElse("")
+val debugSampleWorkbench = providers.gradleProperty("IPQC_ENABLE_SAMPLE_WORKBENCH").orNull == "true" &&
+    providers.environmentVariable("GITHUB_ACTIONS").orNull != "true"
 val quotedServerUrl = serverUrl.get()
     .replace("\\", "\\\\").replace("\"", "\\\"")
     .replace("\r", "\\r").replace("\n", "\\n")
@@ -27,6 +29,15 @@ android {
         versionName = "0.1.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         buildConfigField("String", "SERVER_URL", "\"${quotedServerUrl}\"")
+    }
+
+    buildTypes {
+        debug {
+            buildConfigField("boolean", "IPQC_ENABLE_SAMPLE_WORKBENCH", debugSampleWorkbench.toString())
+        }
+        release {
+            buildConfigField("boolean", "IPQC_ENABLE_SAMPLE_WORKBENCH", "false")
+        }
     }
 
     compileOptions {
