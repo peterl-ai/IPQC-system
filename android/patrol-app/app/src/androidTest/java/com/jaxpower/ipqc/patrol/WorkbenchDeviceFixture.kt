@@ -101,6 +101,7 @@ internal class WorkbenchDeviceFixture : AutoCloseable {
         val removalReceiptReads = AtomicInteger()
         var explicitRemovalSource: WorkSource? = null
         var explicitRemovalReceipt: ItemRemovalBatchReceipt? = null
+        var explicitIndividualRemovalReceipt: ItemRemovalReceipt? = null
         var observedRemoval: ItemRemovalReceipt? = null
         var includeRemote = true
         var captureUntil = "2026-11-19T14:01:00Z"
@@ -185,13 +186,16 @@ internal class WorkbenchDeviceFixture : AutoCloseable {
 
         override suspend fun batchReceipt(bearer: String, taskId: String, batchId: String): Response<ResponseBody> {
             val receipt = checkNotNull(explicitRemovalReceipt) { "Unexpected batch receipt query" }
-            check(device.api.loginSubject == b && receipt.taskId == taskId && receipt.batchId == batchId)
+            check(device.api.loginSubject.userId == receipt.uploadedByUserId && receipt.taskId == taskId && receipt.batchId == batchId)
             removalReceiptReads.incrementAndGet()
             return Response.success(Json.encodeToString(receipt).toResponseBody())
         }
 
-        override suspend fun operationReceipt(bearer: String, taskId: String, operationId: String): Response<ResponseBody> =
-            error("Local recovery never queries a server receipt")
+        override suspend fun operationReceipt(bearer: String, taskId: String, operationId: String): Response<ResponseBody> {
+            val receipt = checkNotNull(explicitIndividualRemovalReceipt) { "Unexpected operation receipt query" }
+            check(device.api.loginSubject.userId == receipt.uploadedByUserId && receipt.taskId == taskId && receipt.operationId == operationId)
+            return Response.success(Json.encodeToString(receipt).toResponseBody())
+        }
     }
 
     private companion object { const val FAMILY_EXPIRY = "2026-11-26T14:00:00Z" }

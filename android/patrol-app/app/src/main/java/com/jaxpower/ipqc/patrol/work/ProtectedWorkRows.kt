@@ -19,6 +19,7 @@ internal data class WorkCatalog(
     val operationIds: List<String> = emptyList(),
     val batchIds: List<String> = emptyList(),
     val itemRemovalIds: List<String> = emptyList(),
+    val observedItemRemovalVersion: Long = 0,
 )
 
 @Serializable

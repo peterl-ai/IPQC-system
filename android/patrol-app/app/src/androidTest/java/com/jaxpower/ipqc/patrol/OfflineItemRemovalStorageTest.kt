@@ -278,6 +278,195 @@ class OfflineItemRemovalStorageTest {
         }
     }
 
+    @Test fun acceptedRemovalFencesAllNewSampleEditsUntilVerifiedRefresh() = runBlocking<Unit>(Dispatchers.IO) {
+        WorkbenchDeviceFixture().use { fixture ->
+            val a = fixture.workServices()
+            val grant = activate(a, IDENTITY)
+            val scope = fixture.scope()
+            val removals = a.online.offlineItemRemovals
+            val samples = a.online.offlineSamples
+            val removedAttempt = fixture.attempt(scope.taskId, 0)
+            val sampleAttempt = fixture.attempt(scope.taskId, 1)
+            val input = SampleInput.Quantitative("1.50")
+            val oldCapture = samples.newCapture(sampleAttempt, input)
+            val original = samples.save(scope, oldCapture).envelope
+            val removal = removals.save(removals.newRemoval(scope, IDENTITY, removedAttempt, true, RemovalConfirmation.Production))
+            val batch = removals.prepareBatch(scope, IDENTITY, benchId(91), removal.reference())
+            val priorForCorrection = samples.save(scope, samples.newCapture(sampleAttempt, input)).envelope
+            assertEquals(7L, priorForCorrection.operation.baseDraftVersion)
+            assertNull(samples.captureProblem(scope, IDENTITY))
+
+            a.store.startItemRemovalAttempt(approved(grant, removal.source), grant.draft.sampleBasis, batch.batchId)
+            val receipt = acceptance(removal, batch, IDENTITY)
+            fixture.wire.explicitRemovalReceipt = receipt
+            assertEquals(ItemRemovalReceiptRecovery.BatchConfirmed(receipt), a.online.recoverItemRemovalReceipt(
+                grant, ReceiptLookup(ReceiptKind.Batch, batch.batchId)))
+            val before = requireNotNull(a.rows.transaction(scope) { catalog() })
+            val rowCount = fixture.device.rows.count()
+            val edits = listOf(samples.newCapture(sampleAttempt, input),
+                OfflineSampleEdit.Correct(LocalSampleKey(sampleAttempt, priorForCorrection.operation.clientSampleId),
+                    SampleInput.Quantitative("1.75"), priorForCorrection.reference()),
+                OfflineSampleEdit.Remove(oldCapture.key, original.reference()))
+            val offlineProblems = edits.map { edit ->
+                runCatching { samples.save(scope, edit) }.exceptionOrNull().let { (it as? WorkFailure)?.problem }
+            }
+            val onlineProblems = edits.map { edit ->
+                val newId = when (edit) {
+                    is OfflineSampleEdit.Capture -> edit.copy(operationId = benchId(92), key = edit.key.copy(clientSampleId = benchId(93)))
+                    is OfflineSampleEdit.Correct -> edit.copy(operationId = benchId(94))
+                    is OfflineSampleEdit.Remove -> edit.copy(operationId = benchId(95))
+                }
+                runCatching { a.store.enqueue(grant.access, newId.operation(removal.source.contextId, 7)) }
+                    .exceptionOrNull().let { (it as? WorkFailure)?.problem }
+            }
+            assertEquals("Offline and online admission at version 7",
+                List(6) { WorkProblem.StaleGrant }, offlineProblems + onlineProblems)
+            assertEquals(rowCount, fixture.device.rows.count())
+            assertEquals(before, a.rows.transaction(scope) { catalog() })
+            val stale = samples.draft(scope, IDENTITY)
+            assertEquals(7L, stale.observedServerDraftVersion)
+            assertEquals(WorkProblem.StaleGrant, stale.captureProblem)
+            assertEquals(WorkProblem.StaleGrant, samples.captureProblem(scope, IDENTITY))
+            assertEquals(listOf(original.reference(), priorForCorrection.reference()), stale.history.map { it.operation.envelope.reference() })
+            assertEquals("1.25", stale.confirmed.single().value.inspectionValue)
+            val items = removals.draft(scope, IDENTITY)
+            assertEquals(WorkState.Accepted, items.history.single().state)
+            assertEquals(receipt.itemOperations.single(), items.history.single().receipt)
+            assertNull(items.items.single { it.attempt == removedAttempt }.provisionalRemoval)
+            assertEquals(original.canonicalPayload, samples.save(scope, oldCapture).envelope.canonicalPayload)
+            assertEquals(original.reference(), a.store.enqueue(grant.access, original.operation).envelope.reference())
+            assertEquals(removal, removals.save(removal.command))
+
+            fixture.wire.observedRemoval = receipt.itemOperations.single()
+            val refreshed = a.online.issueOrReuse(a.online.open(fixture.task(), IDENTITY))
+            assertEquals(8L, refreshed.draft.version)
+            assertNull(samples.captureProblem(scope, IDENTITY))
+            val reopenedHistory = samples.draft(scope, IDENTITY).history
+            assertEquals(listOf(original.reference(), priorForCorrection.reference()),
+                reopenedHistory.map { it.operation.envelope.reference() })
+            assertTrue(reopenedHistory.none { it.matchesObservedDraftVersion })
+            val newCapture = samples.newCapture(sampleAttempt, input)
+            val newOffline = samples.save(scope, newCapture).envelope
+            val onlineCapture = samples.newCapture(sampleAttempt, input)
+            val newOnline = a.store.enqueue(refreshed.access, onlineCapture.operation(removal.source.contextId, 8)).envelope
+            assertEquals(8L, newOffline.operation.baseDraftVersion)
+            assertEquals(8L, newOnline.operation.baseDraftVersion)
+            assertNotEquals(original.reference(), newOffline.reference())
+            val savedAgain = samples.save(scope, oldCapture).envelope
+            assertEquals(original.reference(), savedAgain.reference())
+            assertEquals(original.canonicalPayload, savedAgain.canonicalPayload)
+            assertEquals(original.source, savedAgain.source)
+            assertEquals(7L, savedAgain.operation.baseDraftVersion)
+            assertEquals(0, fixture.wire.sends.get())
+        }
+    }
+
+    @Test fun individualRemovalReceiptFencesBThroughRoomReopenWithoutSettlingUnknownBatch() = runBlocking<Unit>(Dispatchers.IO) {
+        WorkbenchDeviceFixture().use { fixture ->
+            val a = fixture.workServices()
+            activate(a, IDENTITY)
+            val scope = fixture.scope()
+            val aLocal = a.online.offlineItemRemovals
+            val removal = aLocal.save(aLocal.newRemoval(scope, IDENTITY, fixture.attempt(scope.taskId, 0),
+                true, RemovalConfirmation.Production))
+            a.sessions.logout(attemptRemote = false)
+            fixture.device.api.loginSubject = fixture.b
+            val b = activate(a, fixture.b)
+            val samples = a.online.offlineSamples
+            val sampleAttempt = fixture.attempt(scope.taskId, 1)
+            val input = SampleInput.Quantitative("1.50")
+            val pending = samples.newCapture(sampleAttempt, input)
+            val prior = samples.save(scope, pending).envelope
+            fixture.wire.explicitRemovalSource = removal.source
+            val approved = a.online.preflight(b, removal.command.operationId)
+            val batch = a.online.prepareItemRemovalForReconciliation(approved, benchId(96), removal.reference())
+            a.store.startItemRemovalAttempt(approved.access, approved.draft.sampleBasis, batch.batchId)
+            a.store.markItemRemovalOutcomeUnknown(approved.access, batch.batchId)
+            val receipt = acceptance(removal, batch, fixture.b).itemOperations.single()
+            fixture.wire.explicitIndividualRemovalReceipt = receipt
+            assertEquals(ItemRemovalReceiptRecovery.OperationObserved(receipt), a.online.recoverItemRemovalReceipt(
+                approved, ReceiptLookup(ReceiptKind.Operation, removal.command.operationId)))
+            val bSource = requireNotNull(b.source)
+            val oldCaptureAccess = WorkAccess(approved.access.session, scope, 7, approved.draft.applicableAttempts,
+                requiresCaptureGrant = true, captureGrant = requireNotNull(b.access.captureGrant))
+            assertWorkFailure(WorkProblem.StaleGrant) {
+                a.store.enqueue(oldCaptureAccess, samples.newCapture(sampleAttempt, input).operation(bSource.contextId, 7))
+            }
+
+            fixture.device.database.close()
+            val db = TaskCacheDatabase.open(fixture.device.context, fixture.device.databaseFile)
+            try {
+                val restarted = fixture.workServices(cache = fixture.device.openCache(db), rows = RoomCacheRows(db))
+                val offline = restarted.online.offlineSamples
+                assertEquals(WorkProblem.StaleGrant, offline.captureProblem(scope, fixture.b))
+                assertWorkFailure(WorkProblem.StaleGrant) { offline.save(scope, offline.newCapture(sampleAttempt, input)) }
+                assertEquals(prior.reference(), offline.save(scope, pending).envelope.reference())
+                val savedRemoval = restarted.rows.transaction(scope) { itemRemoval(removal.command.operationId) }!!
+                assertEquals(WorkState.OutcomeUnknown, savedRemoval.state)
+                assertEquals(receipt, savedRemoval.individualReceipt)
+                assertEquals(IDENTITY.userId, savedRemoval.removal.source.contributorUserId)
+                assertEquals(fixture.b.userId, receipt.uploadedByUserId)
+                fixture.wire.observedRemoval = receipt
+                val fresh = activate(restarted, fixture.b)
+                assertEquals(8L, fresh.draft.version)
+                val freshSample = offline.save(scope, offline.newCapture(sampleAttempt, input)).envelope
+                assertEquals(8L, freshSample.operation.baseDraftVersion)
+                assertWorkFailure(WorkProblem.InvalidState) {
+                    offline.prepareBatch(scope, benchId(97), listOf(freshSample.operation.operationId))
+                }
+                assertEquals(0, fixture.wire.sends.get())
+            } finally {
+                db.close()
+            }
+        }
+    }
+
+    @Test fun authenticatedRemoteRemovalObservationFencesAnotherOperatorsOldProfile() = runBlocking<Unit>(Dispatchers.IO) {
+        WorkbenchDeviceFixture().use { fixture ->
+            val app = fixture.workServices()
+            activate(app, IDENTITY)
+            val scope = fixture.scope()
+            val remote = fixture.attempt(scope.taskId, 0)
+            val receipt = ItemRemovalReceipt(scope.taskId, benchId(101), benchId(102), "RemoveItem", 1,
+                "A".repeat(64), remote.taskItemId, remote.inspectionAttemptId, benchId(103),
+                fixture.b.userId, fixture.b.userId, fixture.b.familyId, scope.environmentId, scope.lineId,
+                scope.workflowVersion, NOW, 8, ItemDisposition.Removed, true, RemovalConfirmation.Equipment, null, 1, 1, false)
+            app.sessions.logout(attemptRemote = false)
+            fixture.device.api.loginSubject = fixture.b
+            app.sessions.login("synthetic-reader", "test-only")
+            fixture.wire.observedRemoval = receipt
+            assertEquals(8L, app.online.open(fixture.task(), fixture.b).draft.version)
+            app.sessions.logout(attemptRemote = false)
+            fixture.device.api.loginSubject = IDENTITY
+            app.sessions.login("synthetic-inspector", "test-only")
+
+            val offline = app.online.offlineSamples
+            val draft = offline.draft(scope, IDENTITY)
+            assertEquals(7L, draft.observedServerDraftVersion)
+            assertEquals(WorkProblem.StaleGrant, draft.captureProblem)
+            assertWorkFailure(WorkProblem.StaleGrant) {
+                offline.save(scope, offline.newCapture(fixture.attempt(scope.taskId, 1), SampleInput.Quantitative("1.75")))
+            }
+            assertTrue(app.rows.transaction(scope) { catalog().operationIds.isEmpty() && catalog().itemRemovalIds.isEmpty() } == true)
+        }
+    }
+
+    private fun approved(grant: OnlineWorkCoordinator.Grant, source: WorkSource) =
+        WorkAccess(grant.access.session, source.task, grant.draft.version, grant.draft.applicableAttempts,
+            setOf(ValidatedWorkSource(source.contextId, source.contributorUserId, source.captureUntilUtc)))
+
+    private fun acceptance(removal: ItemRemovalEnvelope, batch: ItemRemovalBatch, uploader: SessionIdentity): ItemRemovalBatchReceipt {
+        val command = removal.command
+        val scope = command.task
+        val operation = ItemRemovalReceipt(scope.taskId, command.operationId, batch.batchId, "RemoveItem", 1,
+            removal.contentHash, command.attempt.taskItemId, command.attempt.inspectionAttemptId, command.contextId,
+            command.owner.userId, uploader.userId, uploader.familyId, scope.environmentId, scope.lineId,
+            scope.workflowVersion, NOW, 8, ItemDisposition.Removed, true, command.confirmation, command.reason,
+            removal.minimumSampleCount, 1, false)
+        return ItemRemovalBatchReceipt(scope.taskId, batch.batchId, batch.fingerprint, uploader.userId, uploader.familyId,
+            NOW, 7, 8, emptyList(), listOf(operation), 2)
+    }
+
     private suspend fun activate(app: WorkbenchWorkServices, owner: SessionIdentity):
         OnlineWorkCoordinator.Grant {
         app.sessions.login("synthetic-inspector", "test-only")

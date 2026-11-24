@@ -55,10 +55,29 @@ internal suspend fun WorkTransaction.checkSampleItemRemovals(entries: List<ItemR
     workCheck(!blocked, WorkProblem.ItemDispositionConflict)
 }
 
+// Authenticated shared-draft observations also carry receipts for operations
+// from other devices. Remember only the version, in the task-wide catalog.
+internal suspend fun WorkTransaction.rememberObservedItemRemovalVersion(basis: OfflineSampleBasis) {
+    val version = basis.attempts.mapNotNull { it.serverRemoval?.draftVersion }.maxOrNull() ?: return
+    val saved = catalog()
+    if (version > saved.observedItemRemovalVersion) save(saved.copy(observedItemRemovalVersion = version))
+}
+
+internal suspend fun WorkTransaction.itemRemovalVersionProblem(entries: List<ItemRemovalEntry>,
+                                                               observedVersion: Long): WorkProblem? =
+    WorkProblem.StaleGrant.takeIf {
+        catalog().observedItemRemovalVersion > observedVersion ||
+            entries.any { (it.serverEvidence?.draftVersion ?: 0) > observedVersion }
+    }
+
+internal suspend fun WorkTransaction.requireCurrentItemRemovalVersion(entries: List<ItemRemovalEntry>, observedVersion: Long) {
+    itemRemovalVersionProblem(entries, observedVersion)?.let { throw WorkFailure(it) }
+}
+
 internal suspend fun WorkTransaction.checkItemRemovalBarrier(task: WorkTask, observedVersion: Long) {
     val entries = itemRemovals(task)
     workCheck(entries.none { it.state in uncertainItemRemovalStates }, WorkProblem.InvalidState)
-    workCheck(entries.none { (it.batchReceipt?.draftVersion ?: 0) > observedVersion }, WorkProblem.StaleGrant)
+    requireCurrentItemRemovalVersion(entries, observedVersion)
 }
 
 internal fun ItemRemovalEnvelope.matches(receipt: ItemRemovalReceipt): Boolean =

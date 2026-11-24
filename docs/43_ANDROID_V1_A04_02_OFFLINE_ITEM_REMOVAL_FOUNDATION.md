@@ -107,6 +107,27 @@ continue to apply to preparation and sending for the task. The online refresh pr
 distinct server disposition and recorded sample history. A04-02 adds no automatic upload or
 Formal Submit.
 
+## Task-wide version fence from removal evidence
+
+An authenticated item removal receipt proves advancement of the entire task DraftVersion.
+Within Room, new offline sample capture, correction and removal, and online enqueue, compare
+their observed version with verified protected removal evidence before recording a new edit.
+A full accepted batch or a verified individual operation receipt can establish that evidence.
+An authenticated shared-draft observation can also establish it for an operation from another
+device. Its removal receipt version is recorded as task-scoped metadata across operator profiles.
+An individual receipt leaves the existing uncertain-upload barrier in place.
+
+When protected evidence proves version 8 and the profile or grant still uses version 7, new
+edits report `StaleGrant`. Workbench capture checks report the same condition and retain
+read-only history. A queued removal without server evidence continues to permit new offline
+edits on unrelated applicable attempts. The same-attempt disposition check applies separately.
+
+Replaying an original authorized sample command finds its existing row before checking admission
+for a new edit. Its ID, canonical bytes, hash, provenance and original DraftVersion are preserved.
+Refreshing the authenticated shared draft lets eligible new edits use version 8. Existing
+version-7 rows remain available for history and review without version changes, and accepted
+removal remains distinct from a local provisional disposition.
+
 ## Batch preparation and A/B
 
 An eligible creator can seal a queued command locally for the exact observed version. The
@@ -193,3 +214,16 @@ Local Android JVM passed 129 tests, Lint passed with the existing two warnings, 
 assemblies passed with the same command shown above. The API 30 emulator passed all 43
 instrumentation tests, including the new cross-state and legacy-row cases. The pinned
 independent re-review packet carries the API 35 run, exact APKs and GitHub job evidence.
+
+## Task-wide stale-version repair verification
+
+The reviewed APK at `8d4235e5773f84dc1b1dd74a8fd2c7843e9b41ae` admitted all six version-7 sample edits in the regression
+after the full V2 removal receipt recorded version 8. The focused repro uses the same test
+harness as the repaired APK. The repaired version rejects all six, preserves the catalog
+and original sample rows, and accepts genuinely new version-8 edits after authenticated
+refresh. Additional cases exercise an individual receipt across A/B handoff and Room reopen,
+and a remote authenticated observation without a matching local removal command.
+
+Android JVM passed 129 tests, Lint passed with the existing two warnings, and both APKs
+assembled. The API 30 emulator passed all 46 instrumentation tests, including the earlier
+P2 and P3 coverage. The re-review packet carries the pinned API 35 evidence and final CI logs.

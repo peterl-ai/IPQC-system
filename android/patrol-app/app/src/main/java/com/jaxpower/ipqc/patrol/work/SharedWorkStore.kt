@@ -89,10 +89,12 @@ internal class SharedWorkStore(private val rows: ProtectedWorkRows, private val 
     suspend fun observeOfflineSamples(session: SessionRepository.WorkSession, basis: OfflineSampleBasis) {
         sessions.withWorkSession(session, rows.origin) { requireCurrent ->
             rows.transaction(basis.task) {
-                val profile = offlineProfile(session.identity.userId) ?: return@transaction
-                if (profile.owner != session.identity) return@transaction
-                val observed = updateBasis(profile.basis, basis.copy(editable = basis.editable && session.canContribute))
-                if (observed != profile.basis) saveOfflineProfile(profile.copy(basis = observed))
+                rememberObservedItemRemovalVersion(basis)
+                val profile = offlineProfile(session.identity.userId)?.takeIf { it.owner == session.identity }
+                if (profile != null) {
+                    val observed = updateBasis(profile.basis, basis.copy(editable = basis.editable && session.canContribute))
+                    if (observed != profile.basis) saveOfflineProfile(profile.copy(basis = observed))
+                }
                 requireCurrent()
             }
         }
@@ -127,6 +129,7 @@ internal class SharedWorkStore(private val rows: ProtectedWorkRows, private val 
                 workCheck(latest.sameObservation(basis), WorkProblem.StaleGrant)
                 val profile = OfflineSampleProfile(owner, source.contextId, deadline.toString(), latest)
                 workCheck(requireOfflineSource(profile) == source, WorkProblem.SourceUnavailable)
+                rememberObservedItemRemovalVersion(latest)
                 requireCaptureTime(source, CaptureGrant(source.contextId, deadline), now)
                 saveOfflineProfile(profile)
                 requireCaptureTime(source, CaptureGrant(source.contextId, deadline), now)
@@ -166,7 +169,7 @@ internal class SharedWorkStore(private val rows: ProtectedWorkRows, private val 
             val now = observe().apparentNow
             requireCaptureTime(original, capture) { now }
             val entries = itemRemovals(command.task)
-            workCheck(entries.none { (it.serverEvidence?.draftVersion ?: 0) > basis.draftVersion }, WorkProblem.StaleGrant)
+            requireCurrentItemRemovalVersion(entries, basis.draftVersion)
             val turn = itemRemovalTurn(entries, basis.draftVersion)
             workCheck(turn?.removal?.command?.attempt != command.attempt && entries.none {
                 it.state in uncertainItemRemovalStates && it.removal.command.attempt == command.attempt
@@ -196,7 +199,7 @@ internal class SharedWorkStore(private val rows: ProtectedWorkRows, private val 
             val observed = (basis.historicalItemRemovals + basis.attempts.mapNotNull { it.serverRemoval })
                 .associateBy { it.operationId }
             val stored = itemRemovals(task)
-            val stale = stored.any { (it.serverEvidence?.draftVersion ?: 0) > basis.draftVersion } ||
+            val stale = itemRemovalVersionProblem(stored, basis.draftVersion) != null ||
                 sampleBasisProblem(basis, sampleHistory(profile)) == WorkProblem.StaleGrant
             val turn = itemRemovalTurn(stored, basis.draftVersion)?.takeIf { candidate ->
                 stored.none { it.state in uncertainItemRemovalStates && it != candidate }
@@ -390,7 +393,9 @@ internal class SharedWorkStore(private val rows: ProtectedWorkRows, private val 
             requireFreshSampleBasis(profile.basis, history)
             val op = edit.operation(source.contextId, profile.basis.draftVersion)
             workCheck(itemRemoval(op.operationId) == null, WorkProblem.OperationIdentityConflict)
-            checkSampleItemRemovals(itemRemovals(task), profile.basis.draftVersion, setOf(op.attempt))
+            val removals = itemRemovals(task)
+            requireCurrentItemRemovalVersion(removals, profile.basis.draftVersion)
+            checkSampleItemRemovals(removals, profile.basis.draftVersion, setOf(op.attempt))
             val board = sampleBoard(profile.basis, history)
             if (op.kind == SampleKind.CaptureSample) {
                 workCheck(history.none {
@@ -419,13 +424,15 @@ internal class SharedWorkStore(private val rows: ProtectedWorkRows, private val 
                 profile.basis.samples, board.values(), history, board.progress(), block))
         }
 
-    // Foreground UI can recheck the protected clock and source without decoding the ledger.
+    // Reuse the same clock, source and task-wide version checks as the draft projection.
     suspend fun offlineCaptureProblem(task: WorkTask, expected: SessionIdentity): WorkProblem? =
         offlineTransaction(task, expected) { profile, observe -> OfflineTransactionResult(captureProblem(profile, observe)) }
 
     private suspend fun WorkTransaction.captureProblem(profile: OfflineSampleProfile, observe: suspend () -> OfflineSession):
         WorkProblem? = try {
-        workCheck(profile.basis.editable, WorkProblem.ScopeMismatch)
+        val basis = profile.basis
+        requireCurrentItemRemovalVersion(itemRemovals(basis.task), basis.draftVersion)
+        workCheck(basis.editable, WorkProblem.ScopeMismatch)
         val source = requireOfflineSource(profile)
         val cap = CaptureGrant(source.contextId, Instant.parse(profile.captureUntilUtc))
         requireCaptureTime(source, cap) { observe().apparentNow }
@@ -579,7 +586,9 @@ internal class SharedWorkStore(private val rows: ProtectedWorkRows, private val 
                     workCheck(access.captureGrant?.contextId == context.source.contextId, WorkProblem.SourceUnavailable)
                 requireCaptureTime(context.source, access.captureGrant, captureTime)
                 workCheck(itemRemoval(op.operationId) == null, WorkProblem.OperationIdentityConflict)
-                checkSampleItemRemovals(itemRemovals(access.task), access.serverDraftVersion, setOf(op.attempt))
+                val removals = itemRemovals(access.task)
+                requireCurrentItemRemovalVersion(removals, access.serverDraftVersion)
+                checkSampleItemRemovals(removals, access.serverDraftVersion, setOf(op.attempt))
                 for (ref in op.dependencies) {
                     val prior = requireOperation(ref.operationId)
                     val previous = prior.envelope.operation
