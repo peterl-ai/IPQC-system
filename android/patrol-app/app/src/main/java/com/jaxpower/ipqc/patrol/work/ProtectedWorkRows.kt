@@ -18,6 +18,7 @@ internal data class WorkCatalog(
     val localEditVersion: Long = 0,
     val operationIds: List<String> = emptyList(),
     val batchIds: List<String> = emptyList(),
+    val itemRemovalIds: List<String> = emptyList(),
 )
 
 @Serializable
@@ -29,7 +30,7 @@ internal data class OperationEntry(
 )
 
 @Serializable
-internal class OfflineCaptureEvidence(val atUtc: String, val untilUtc: String)
+internal data class OfflineCaptureEvidence(val atUtc: String, val untilUtc: String)
 
 @Serializable
 internal data class WorkIssuanceState(val contextId: String? = null, val pendingId: String? = null)
@@ -86,8 +87,19 @@ internal class WorkTransaction(
 
     suspend fun save(entry: OperationEntry) = write("operation", entry.envelope.operation.operationId, entry)
 
-    // A new operation and its cross-task claim share the caller's Room transaction.
-    suspend fun reserveOperationId(id: String) {
+    suspend fun itemRemoval(id: String): ItemRemovalEntry? = read<ItemRemovalEntry>("item-removal", id)?.also {
+        workCheck(it.removal.command.operationId == id && it.removal.workspaceId == workspaceId,
+            WorkProblem.StorageUnavailable)
+    }
+
+    suspend fun saveItemRemoval(entry: ItemRemovalEntry) = write("item-removal", entry.removal.command.operationId, entry)
+
+    // A new operation and its cross-task/cross-kind claim share the caller's Room transaction.
+    suspend fun reserveOperationId(id: String) = claimOperationId(id, slot("operation", id))
+
+    suspend fun reserveItemRemovalId(id: String) = claimOperationId(id, slot("item-removal", id))
+
+    private suspend fun claimOperationId(id: String, operationSlot: String) {
         val marker = registrySlot("ready")
         when (readSealed<Int>(marker)) {
             null -> {
@@ -99,7 +111,7 @@ internal class WorkTransaction(
         }
         val claim = registrySlot(id)
         workCheck(readSealed<OperationIdClaim>(claim) == null, WorkProblem.OperationIdentityConflict)
-        writeSealed(claim, OperationIdClaim(slot("operation", id)))
+        writeSealed(claim, OperationIdClaim(operationSlot))
     }
 
     private suspend fun indexLegacyOperations() {

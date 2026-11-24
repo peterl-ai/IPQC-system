@@ -56,7 +56,8 @@ internal data class WorkbenchUi(
     val lastSavedId: String? = null,
     val retryPending: Boolean = false,
 ) {
-    val canEdit get() = hasLocalAccess && draft != null && !busy && !retryPending && blocked == null
+    val blocksNavigation get() = busy || retryPending
+    val canEdit get() = hasLocalAccess && draft != null && !blocksNavigation && blocked == null
 }
 
 internal class SampleWorkbenchModel(private val scope: CoroutineScope, private val online: OnlineWorkCoordinator) {

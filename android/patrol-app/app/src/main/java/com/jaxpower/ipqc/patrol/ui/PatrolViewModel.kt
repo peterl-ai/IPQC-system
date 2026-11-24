@@ -144,7 +144,7 @@ class PatrolViewModel internal constructor(
             is Screen.Tasks -> loadLines(screen.operator)
             is Screen.Detail -> loadLines(screen.operator)
             is Screen.SampleWorkbench -> {
-                if (workbench?.ui?.value?.busy != true) loadLines(screen.origin.operator)
+                if (workbench?.ui?.value?.blocksNavigation != true) loadLines(screen.origin.operator)
             }
             else -> Unit
         }
@@ -204,7 +204,7 @@ class PatrolViewModel internal constructor(
         when (val screen = ui.value.screen) {
             is Screen.Detail -> loadTasks(screen.operator, screen.line, screen.listPage)
             is Screen.SampleWorkbench -> {
-                if (workbench?.ui?.value?.busy != true) show(screen.origin)
+                if (workbench?.ui?.value?.blocksNavigation != true) show(screen.origin)
             }
             is Screen.Tasks -> loadLines(screen.operator)
             is Screen.Lines -> show(Screen.Home(screen.operator))

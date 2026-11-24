@@ -34,6 +34,7 @@ internal class OnlineWorkCoordinator(
     private val latestVersion = mutableMapOf<WorkTask, Long>()
     private var active: Grant? = null
     internal val offlineSamples = OfflineSampleCoordinator(store)
+    internal val offlineItemRemovals = OfflineItemRemovalCoordinator(store)
 
     internal class Grant internal constructor(
         val draft: OnlineDraft,
@@ -210,6 +211,34 @@ internal class OnlineWorkCoordinator(
     } catch (failure: PatrolFailure) {
         when (failure.issue) {
             Issue.UNAUTHENTICATED, Issue.FORBIDDEN -> ReceiptRecovery.AuthenticationFailure(failure.issue)
+            else -> throw failure
+        }
+    }
+
+    // A different operator first obtains a matched source grant through explicit preflight.
+    suspend fun prepareItemRemovalForReconciliation(grant: Grant, batchId: String, operation: OperationReference): ItemRemovalBatch =
+        withGrant(grant) {
+            workCheck(grant.access.session.canContribute, WorkProblem.SourceUnavailable)
+            val draft = readDraft(grant.selectedTask, grant.access.session, grant.selection)
+            selectionCommit.withLock {
+                grant.access.requireCurrent()
+                store.prepareItemRemovalForReconciliation(grant.access, draft.sampleBasis, batchId, operation)
+            }
+        }
+
+    suspend fun recoverItemRemovalReceipt(grant: Grant, lookup: ReceiptLookup): ItemRemovalReceiptRecovery = try {
+        withGrant(grant) {
+            val target = store.locateItemRemovalReceipt(grant.access, lookup)
+                ?: return@withGrant ItemRemovalReceiptRecovery.Unresolved(ReceiptUncertainty.NoLocalAttempt)
+            val reply = request(grant) { bearer -> api.readItemRemovalReceipt(target, bearer) }
+            selectionCommit.withLock {
+                grant.access.requireCurrent()
+                store.reconcileItemRemovalReceipt(grant.access, target, reply)
+            }
+        }
+    } catch (failure: PatrolFailure) {
+        when (failure.issue) {
+            Issue.UNAUTHENTICATED, Issue.FORBIDDEN -> ItemRemovalReceiptRecovery.AuthenticationFailure(failure.issue)
             else -> throw failure
         }
     }

@@ -117,7 +117,10 @@ private fun PatrolBar(ui: PatrolUi, viewModel: PatrolViewModel) {
             horizontalArrangement = Arrangement.spacedBy(4.dp),
         ) {
             if (screen is Screen.Lines || screen is Screen.Tasks || screen is Screen.Detail || screen is Screen.SampleWorkbench) {
-                TextButton(onClick = viewModel::back, enabled = !ui.busy) { Text("Back") }
+                val workbench = if (screen is Screen.SampleWorkbench) viewModel.workbench?.ui?.collectAsStateWithLifecycle() else null
+                TextButton(onClick = viewModel::back, enabled = !ui.busy && workbench?.value?.blocksNavigation != true) {
+                    Text("Back")
+                }
             }
             Text("IPQC Patrol", style = MaterialTheme.typography.titleLarge, modifier = Modifier.widthIn(max = 260.dp))
             Spacer(Modifier.weight(1f))

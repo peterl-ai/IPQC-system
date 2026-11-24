@@ -26,7 +26,7 @@ internal object DraftOperationCanonical {
         return data.copy(inspectionValue = data.inspectionValue?.let(::decimalText))
     }
 
-    fun operation(source: WorkSource, op: SampleOperation, localEditVersion: Long): String = encode(buildJsonObject {
+    fun operation(source: WorkSource, op: SampleOperation, localEditVersion: Long): String = encodeDraftCanonical(buildJsonObject {
         put("v", CANONICAL_VERSION)
         put("environment", source.task.environmentId)
         put("task", source.task.taskId)
@@ -52,7 +52,7 @@ internal object DraftOperationCanonical {
     })
 
     fun batch(task: WorkTask, batchId: String, expected: Long, members: List<OperationReference>,
-              accepted: List<OperationReference>): String = workHash(encode(buildJsonObject {
+              accepted: List<OperationReference>): String = workHash(encodeDraftCanonical(buildJsonObject {
         put("v", CANONICAL_VERSION)
         put("task", task.taskId)
         put("batch", batchId)
@@ -83,32 +83,32 @@ internal object DraftOperationCanonical {
         val coefficient = value.movePointRight(-exponent.toInt()).toPlainString()
         return coefficient + "E-" + (-exponent).toString().padStart(2, '0')
     }
+}
 
-    private fun encode(value: JsonElement): String = when (value) {
-        is JsonObject -> value.entries.joinToString(",", "{", "}") { quote(it.key) + ":" + encode(it.value) }
-        is JsonArray -> value.joinToString(",", "[", "]", transform = ::encode)
-        is JsonPrimitive -> if (value.isString) quote(value.content) else value.content
-    }
+internal fun encodeDraftCanonical(value: JsonElement): String = when (value) {
+    is JsonObject -> value.entries.joinToString(",", "{", "}") { quoteCanonical(it.key) + ":" + encodeDraftCanonical(it.value) }
+    is JsonArray -> value.joinToString(",", "[", "]", transform = ::encodeDraftCanonical)
+    is JsonPrimitive -> if (value.isString) quoteCanonical(value.content) else value.content
+}
 
-    // Utf8JsonWriter's default encoder escapes non-ASCII code units and these ASCII characters.
-    private fun quote(value: String) = buildString {
-        append('"')
-        value.forEachIndexed { index, ch ->
-            if (ch.isHighSurrogate()) require(value.getOrNull(index + 1)?.isLowSurrogate() == true)
-            if (ch.isLowSurrogate()) require(value.getOrNull(index - 1)?.isHighSurrogate() == true)
-            when (ch) {
-                '\\' -> append("\\\\")
-                '\n' -> append("\\n")
-                '\r' -> append("\\r")
-                '\t' -> append("\\t")
-                '\b' -> append("\\b")
-                '\u000C' -> append("\\f")
-                else -> if (ch in ' '..'~' && ch !in "\"&'+<>\u0060") append(ch)
-                    else append("\\u").append(ch.code.toString(16).uppercase(Locale.ROOT).padStart(4, '0'))
-            }
+// Utf8JsonWriter's default encoder escapes non-ASCII code units and these ASCII characters.
+private fun quoteCanonical(value: String) = buildString {
+    append('"')
+    value.forEachIndexed { index, ch ->
+        if (ch.isHighSurrogate()) require(value.getOrNull(index + 1)?.isLowSurrogate() == true)
+        if (ch.isLowSurrogate()) require(value.getOrNull(index - 1)?.isHighSurrogate() == true)
+        when (ch) {
+            '\\' -> append("\\\\")
+            '\n' -> append("\\n")
+            '\r' -> append("\\r")
+            '\t' -> append("\\t")
+            '\b' -> append("\\b")
+            '\u000C' -> append("\\f")
+            else -> if (ch in ' '..'~' && ch !in "\"&'+<>\u0060") append(ch)
+                else append("\\u").append(ch.code.toString(16).uppercase(Locale.ROOT).padStart(4, '0'))
         }
-        append('"')
     }
+    append('"')
 }
 
 internal fun workHash(value: String): String = MessageDigest.getInstance("SHA-256")

@@ -33,12 +33,7 @@ private val integerToken = Regex("""-?(0|[1-9][0-9]*)""")
 private val decimalToken = Regex("""-?(0|[1-9][0-9]*)(\.[0-9]+)?([eE][+-]?[0-9]+)?""")
 
 internal suspend fun WorkContextApi.readReceipt(target: ReceiptTarget, bearer: String): ReceiptReply = try {
-    val id = target.lookup.id
-    val task = target.task.taskId
-    val response = when (target.lookup.kind) {
-        ReceiptKind.Batch -> batchReceipt(bearer, task, id)
-        ReceiptKind.Operation -> operationReceipt(bearer, task, id)
-    }
+    val response = receiptResponse(target, bearer)
     when (response.code()) {
         404 -> {
             response.errorBody()?.close()
@@ -62,6 +57,71 @@ internal suspend fun WorkContextApi.readReceipt(target: ReceiptTarget, bearer: S
     ReceiptReply.Unavailable(Issue.RESPONSE)
 } catch (_: IllegalArgumentException) {
     ReceiptReply.Unavailable(Issue.RESPONSE)
+}
+
+internal sealed interface ItemRemovalReceiptReply {
+    data class Batch(val receipt: ItemRemovalBatchReceipt) : ItemRemovalReceiptReply
+    data class Operation(val receipt: ItemRemovalReceipt) : ItemRemovalReceiptReply
+    data object Missing : ItemRemovalReceiptReply
+    data object Conflict : ItemRemovalReceiptReply
+    data class Unavailable(val issue: Issue) : ItemRemovalReceiptReply
+}
+
+internal suspend fun WorkContextApi.readItemRemovalReceipt(target: ReceiptTarget, bearer: String): ItemRemovalReceiptReply = try {
+    val response = receiptResponse(target, bearer)
+    when (response.code()) {
+        404 -> {
+            response.errorBody()?.close()
+            ItemRemovalReceiptReply.Missing
+        }
+        409 -> {
+            response.errorBody()?.close()
+            ItemRemovalReceiptReply.Conflict
+        }
+        else -> responseBody { response }.use { body ->
+            ensureResponse(response.code() == 200)
+            withContext(Dispatchers.IO) {
+                val json = body.readWorkJson()
+                when (target.lookup.kind) {
+                    ReceiptKind.Batch -> ItemRemovalReceiptReply.Batch(json.decodeItemRemovalBatchReceipt())
+                    ReceiptKind.Operation -> ItemRemovalReceiptReply.Operation(json.decodeItemRemovalReceipt())
+                }
+            }
+        }
+    }
+} catch (failure: PatrolFailure) {
+    if (failure.issue == Issue.UNAUTHENTICATED || failure.issue == Issue.FORBIDDEN) throw failure
+    ItemRemovalReceiptReply.Unavailable(failure.issue)
+} catch (_: IOException) {
+    ItemRemovalReceiptReply.Unavailable(Issue.CONNECTION)
+} catch (_: SerializationException) {
+    ItemRemovalReceiptReply.Unavailable(Issue.RESPONSE)
+} catch (_: IllegalArgumentException) {
+    ItemRemovalReceiptReply.Unavailable(Issue.RESPONSE)
+}
+
+internal fun JsonObject.decodeItemRemovalReceipt(): ItemRemovalReceipt {
+    for (field in listOf("canonicalizationVersion", "workflowVersion", "draftVersion", "minimumSampleCount",
+        "remainingApplicableItemCount")) requireInteger(field)
+    for (field in listOf("confirmedAbsentOrNotApplicable", "warnsLastApplicableItemRemoval")) {
+        val value = get(field) as? JsonPrimitive
+        ensureResponse(value != null && !value.isString && value.booleanOrNull != null)
+    }
+    return receiptJson.decodeFromJsonElement(this)
+}
+
+private fun JsonObject.decodeItemRemovalBatchReceipt(): ItemRemovalBatchReceipt {
+    for (field in listOf("previousDraftVersion", "draftVersion", "receiptVersion")) requireInteger(field)
+    ensureResponse((get("operations") as? JsonArray)?.isEmpty() == true)
+    val operation = (get("itemOperations") as? JsonArray)?.singleOrNull() as? JsonObject
+        ?: throw PatrolFailure(Issue.RESPONSE)
+    operation.decodeItemRemovalReceipt()
+    return receiptJson.decodeFromJsonElement(this)
+}
+
+private suspend fun WorkContextApi.receiptResponse(target: ReceiptTarget, bearer: String) = when (target.lookup.kind) {
+    ReceiptKind.Batch -> batchReceipt(bearer, target.task.taskId, target.lookup.id)
+    ReceiptKind.Operation -> operationReceipt(bearer, target.task.taskId, target.lookup.id)
 }
 
 private fun ResponseBody.readTypedReceipt(kind: ReceiptKind): ReceiptReply {

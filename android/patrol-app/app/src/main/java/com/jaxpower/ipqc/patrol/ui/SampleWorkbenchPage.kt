@@ -220,7 +220,7 @@ private fun WorkbenchHeading(origin: Screen.Detail, state: WorkbenchUi, online: 
                     color = MaterialTheme.colorScheme.primary)
             }
             TextButton(onClick = reload, enabled = !state.busy && !state.retryPending) { Text("Reload draft") }
-            TextButton(onClick = switchLine, enabled = !state.busy) { Text("Switch line") }
+            TextButton(onClick = switchLine, enabled = !state.blocksNavigation) { Text("Switch line") }
         }
         state.blocked?.let { Text(it.label(), style = MaterialTheme.typography.bodySmall) }
     }
