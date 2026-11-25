@@ -1,6 +1,6 @@
 package com.jaxpower.ipqc.patrol.work
 
-import com.jaxpower.ipqc.patrol.api.GuardedSampleExchange
+import com.jaxpower.ipqc.patrol.api.GuardedUploadExchange
 import com.jaxpower.ipqc.patrol.api.Issue
 import com.jaxpower.ipqc.patrol.api.LineTaskSummary
 import com.jaxpower.ipqc.patrol.api.PatrolFailure
@@ -91,9 +91,17 @@ internal class OnlineWorkCoordinator(
         return draft
     }
 
-    // The task lease covers refresh, preflight, the POST and local settlement.
-    // A second coordinator in this process cannot treat a live attempt as abandoned.
     suspend fun uploadBatch(grant: Grant, batchId: String): SampleUploadResult = withGrant(grant) {
+        withUploadLease(grant) { draft -> uploadPreparedSampleBatch(grant, draft, batchId) }
+    }
+
+    suspend fun uploadItemRemovalBatch(grant: Grant, batchId: String): ItemRemovalUploadResult = withGrant(grant) {
+        withUploadLease(grant) { draft -> uploadPreparedItemRemoval(grant, draft, batchId) }
+    }
+
+    // One process lease across both transport kinds covers refresh, preflight,
+    // the POST and settlement. Room also fences unresolved work after a restart.
+    private suspend fun <T> withUploadLease(grant: Grant, upload: suspend (OnlineDraft) -> T): T {
         val session = grant.access.session
         if (!session.canContribute) throw PatrolFailure(Issue.FORBIDDEN)
         val scope = origin to grant.draft.task
@@ -103,39 +111,42 @@ internal class OnlineWorkCoordinator(
             val draft = readDraft(grant.selectedTask, session, grant.selection)
             workCheck(draft.task == grant.draft.task && draft.validPlanning &&
                 draft.availability in uploadableDrafts && draft.applicableAttempts.isNotEmpty(), WorkProblem.ScopeMismatch)
-            uploadPreparedSampleBatch(grant, draft, batchId)
+            return upload(draft)
         } finally {
             synchronized(uploading) { uploading.remove(scope) }
         }
     }
 
+    private fun uploadAccess(grant: Grant, draft: OnlineDraft, sources: Set<ValidatedWorkSource> = emptySet()) =
+        WorkAccess(grant.access.session, draft.task, draft.version, draft.applicableAttempts, sources, current = {
+            grant.access.requireCurrent()
+            true
+        })
+
+    private fun uploadFence(grant: Grant) = GuardedUploadExchange {
+        runCatching { grant.access.requireCurrent() }.isSuccess &&
+            sessions.maySendContribution(grant.access.session, origin)
+    }
+
     private suspend fun uploadPreparedSampleBatch(grant: Grant, draft: OnlineDraft, batchId: String): SampleUploadResult {
-        val session = grant.access.session
-        fun uploadAccess(sources: Set<ValidatedWorkSource> = emptySet()) =
-            WorkAccess(session, draft.task, draft.version, draft.applicableAttempts, sources, current = {
-                grant.access.requireCurrent()
-                true
-            })
-        val access = uploadAccess()
+        val access = uploadAccess(grant, draft)
         val candidate = store.inspectUpload(access, batchId)
-        val fence = GuardedSampleExchange {
-            runCatching { grant.access.requireCurrent() }.isSuccess && sessions.maySendContribution(session, origin)
+        val fence = uploadFence(grant)
+        val sources = when (val preflight = request(grant) { api.checkUploadSources(it, draft.task.taskId, candidate.preflightInput(), fence) }) {
+            is UploadExchange.Success -> validateUploadSources(candidate.sources, preflight.body)
+            is UploadExchange.Rejected -> return rejection(grant, access, candidate, preflight.rejection, preflight = true)
+            is UploadExchange.Unknown -> return SampleUploadResult.NotSent(preflight.issue)
         }
-        val sources = when (val preflight = request(grant) { api.checkSampleSources(it, candidate, fence) }) {
-            is SampleExchange.Success -> validateUploadSources(candidate, preflight.body)
-            is SampleExchange.Rejected -> return rejection(grant, access, candidate, preflight.rejection, preflight = true)
-            is SampleExchange.Unknown -> return SampleUploadResult.NotSent(preflight.issue)
-        }
-        val approved = uploadAccess(sources)
+        val approved = uploadAccess(grant, draft, sources)
         try {
             val body = selectionCommit.withLock {
                 grant.access.requireCurrent()
                 store.beginUpload(approved, candidate)
             }
             return when (val reply = request(grant) { api.sendSampleBatch(it, draft.task.taskId, body, fence) }) {
-                is SampleExchange.Success -> acceptUpload(grant, approved, candidate.target, reply.body)
-                is SampleExchange.Rejected -> rejection(grant, approved, candidate, reply.rejection, preflight = false)
-                is SampleExchange.Unknown -> SampleUploadResult.OutcomeUnknown(reply.issue)
+                is UploadExchange.Success -> acceptUpload(grant, approved, candidate.target, reply.body)
+                is UploadExchange.Rejected -> rejection(grant, approved, candidate, reply.rejection, preflight = false)
+                is UploadExchange.Unknown -> SampleUploadResult.OutcomeUnknown(reply.issue)
             }
         } finally {
             withContext(NonCancellable) {
@@ -148,12 +159,87 @@ internal class OnlineWorkCoordinator(
         }
     }
 
-    private fun validateUploadSources(candidate: UploadCandidate, reply: WorkContextPreflightWire): Set<ValidatedWorkSource> {
+    private suspend fun uploadPreparedItemRemoval(grant: Grant, draft: OnlineDraft, batchId: String): ItemRemovalUploadResult {
+        val access = uploadAccess(grant, draft)
+        val candidate = store.inspectItemRemovalUpload(access, draft.sampleBasis, batchId)
+        val fence = uploadFence(grant)
+        val preflight = request(grant) {
+            api.checkUploadSources(it, draft.task.taskId, candidate.preflightInput(), fence)
+        }
+        val sources = when (preflight) {
+            is UploadExchange.Success -> validateUploadSources(listOf(candidate.source), preflight.body)
+            is UploadExchange.Rejected -> return rejectItemRemoval(grant, access, candidate, preflight.rejection, preflight = true)
+            is UploadExchange.Unknown -> return ItemRemovalUploadResult.NotSent(preflight.issue)
+        }
+        val approved = uploadAccess(grant, draft, sources)
+        try {
+            val body = selectionCommit.withLock {
+                grant.access.requireCurrent()
+                store.beginItemRemovalUpload(approved, draft.sampleBasis, candidate)
+            }
+            return when (val reply = request(grant) { api.sendItemRemovalBatch(it, draft.task.taskId, body, fence) }) {
+                is UploadExchange.Success -> acceptItemRemoval(grant, approved, draft, candidate, reply.body)
+                is UploadExchange.Rejected -> rejectItemRemoval(grant, approved, candidate, reply.rejection, preflight = false)
+                is UploadExchange.Unknown -> ItemRemovalUploadResult.OutcomeUnknown(reply.issue)
+            }
+        } finally {
+            withContext(NonCancellable) {
+                try {
+                    store.leaveItemRemovalUncertain(candidate)
+                } catch (_: WorkFailure) {
+                    // If a write fails, retain InFlight for recovery on reopen.
+                }
+            }
+        }
+    }
+
+    private suspend fun rejectItemRemoval(grant: Grant, access: WorkAccess, candidate: ItemRemovalUploadCandidate,
+                                          rejection: UploadRejection, preflight: Boolean): ItemRemovalUploadResult {
+        val recorded = selectionCommit.withLock {
+            grant.access.requireCurrent()
+            store.applyItemRemovalUploadRejection(access, candidate, rejection, preflight)
+        }
+        return if (recorded) ItemRemovalUploadResult.Rejected(rejection.reason)
+        else if (preflight) ItemRemovalUploadResult.NotSent(Issue.RESPONSE)
+        else ItemRemovalUploadResult.OutcomeUnknown(Issue.RESPONSE)
+    }
+
+    private suspend fun acceptItemRemoval(grant: Grant, access: WorkAccess, draft: OnlineDraft,
+                                          candidate: ItemRemovalUploadCandidate,
+                                          reply: ItemRemovalBatchResult): ItemRemovalUploadResult {
+        val operation = reply.operation
+        if (operation.operationId != candidate.entry.removal.command.operationId)
+            return ItemRemovalUploadResult.OutcomeUnknown(Issue.RESPONSE)
+        val target = candidate.target
+        val uploader = access.session.identity
+        // Backend counts current attempts that have not been Removed, including UnableToMeasureNG.
+        if (!reply.replayOnly && (operation.uploadedByUserId != uploader.userId ||
+                operation.uploadedPersonalSessionId != uploader.familyId ||
+                operation.remainingApplicableItemCount != draft.sampleBasis.attempts.count {
+                    it.serverDisposition != ItemDisposition.Removed
+                } - 1)) return ItemRemovalUploadResult.OutcomeUnknown(Issue.RESPONSE)
+
+        val receipt = reply.receipt
+        val result = selectionCommit.withLock {
+            grant.access.requireCurrent()
+            if (receipt != null) store.reconcileItemRemovalReceipt(access, target, ItemRemovalReceiptReply.Batch(receipt))
+            else store.reconcileItemRemovalReceipt(access,
+                target.copy(lookup = ReceiptLookup(ReceiptKind.Operation, operation.operationId)),
+                ItemRemovalReceiptReply.Operation(operation))
+        }
+        return when (result) {
+            is ItemRemovalReceiptRecovery.BatchConfirmed -> ItemRemovalUploadResult.Accepted(result.receipt, reply.replayOnly)
+            is ItemRemovalReceiptRecovery.OperationObserved -> ItemRemovalUploadResult.NeedsBatchReceipt(result.receipt)
+            else -> ItemRemovalUploadResult.OutcomeUnknown(Issue.RESPONSE)
+        }
+    }
+
+    private fun validateUploadSources(sources: List<StoredWorkSource>, reply: WorkContextPreflightWire): Set<ValidatedWorkSource> {
         val byId = reply.sources.associateBy { it.workContextId }
         val time = utc(reply.validatedAtUtc)
         ensureResponse(reply.purpose == "SourcePreflightOnly" && !reply.acceptsWork &&
-            byId.size == reply.sources.size && byId.keys == candidate.sources.map { it.source.contextId }.toSet())
-        return candidate.sources.map { stored ->
+            byId.size == reply.sources.size && byId.keys == sources.map { it.source.contextId }.toSet())
+        return sources.map { stored ->
             val original = stored.source
             val matched = byId.getValue(original.contextId)
             ensureResponse(matched.contributorUserId == original.contributorUserId &&

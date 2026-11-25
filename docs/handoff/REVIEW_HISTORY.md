@@ -14,6 +14,14 @@ Independent ChatGPT issued **HOLD — MINOR DOCUMENTATION REPAIR** at Base `cadd
 
 **R44-P3-01 · FIXED — AWAITING INDEPENDENT RE-REVIEW.** Both Step 5 entries now use the same 45-minute monitoring deadline, require successful terminal CI and inspection of the actual job logs, and require a safe fetch and revalidation of a behind remote-tracking ref. Codex reviewed the instructions for queued or running CI, success, failure, timeout, a behind ref, and revision or tree drift. The initial independent HOLD remains the latest independent verdict. [AGENTS.md](../../AGENTS.md) · [Project Memory index](README.md)
 
+### 2026-11-25 final independent re-review of PR #44
+
+Independent ChatGPT issued **PASS — R44-P3-01 VERIFIED CLOSED** at Base `cadd0973795aaecd4143c96de44ffd80f2ed356a`, HEAD `273a0631b10652c5968e5f7adff8e5dbb458d3d3` and Tree `eeaf2bea0f903136e3c4a8b95ce423feb96ea559`. No new actionable P1, P2 or P3 findings were established in the focused re-review. The reviewer verified the live revision and synthetic merge parents and tree, all three attachment SHA-256 values, archive integrity and twelve Markdown blob identities, and the six-file focused and eleven-file complete documentation scopes.
+
+The reviewer confirmed the identical Step 5 rule, enforced 45-minute deadline, safe non-forced remote-tracking fetch and revalidation, protected checkout requirements, existing authorization limits, and both final CI runs and eight actual job logs. Test reruns, reconstruction of the two patch trees and inspection of the original Windows checkout were outside the independent reviewer's verification. Android JVM test counts and protected local checkout verification remain developer evidence. [Final Push, attempt 1](https://github.com/peterl-ai/IPQC-system/actions/runs/45632653357/attempts/1) · [Final pull_request, attempt 1](https://github.com/peterl-ai/IPQC-system/actions/runs/45632668142/attempts/1)
+
+Peter merged PR #44 as `cddea323146ec3685b91a941fbc31fa87becdeb2`. Its ordered parents are the reviewed Base and HEAD, and its tree equals the reviewed Tree. Codex inspected the four actual merged-main jobs at that checkout. [PR #44 merged-main CI 45642806832, attempt 1](https://github.com/peterl-ai/IPQC-system/actions/runs/45642806832/attempts/1)
+
 ## #43 Android A04-02
 
 ### Earlier review rounds and pre-final status

@@ -280,30 +280,84 @@ internal class SharedWorkStore(private val rows: ProtectedWorkRows, private val 
         return sealed
     }
 
-    // The next transport phase can use this explicit, preflight-gated boundary.
-    // A04-02 has no caller that sends an item-removal request.
     suspend fun startItemRemovalAttempt(access: WorkAccess, observed: OfflineSampleBasis, id: String) {
         workCheck(transact(access) {
-            val entries = itemRemovals(access.task)
-            val entry = entries.singleOrNull { it.batch?.batchId == id } ?: throw WorkFailure(WorkProblem.InvalidState)
-            val cmd = entry.removal.command
-            val original = requireSource(cmd.contextId, access.task)
-            workCheck(access.session.canContribute && original.source == entry.removal.source &&
-                validProof(original.proof) && access.approves(original.source) && !sourceRevoked(cmd.contextId),
-                WorkProblem.SourceUnavailable)
-            workCheck(entry.state == WorkState.Queued && cmd.expectedDraftVersion == access.serverDraftVersion &&
-                observed.task == access.task && observed.draftVersion == access.serverDraftVersion &&
-                cmd.attempt in access.currentAttempts, WorkProblem.InvalidState)
-            workCheck(observed.requireItemRemovalAttempt(cmd.attempt).required == entry.removal.minimumSampleCount,
-                WorkProblem.ScopeMismatch)
-            checkItemRemovalBarrier(access.task, access.serverDraftVersion)
-            checkSampleBatchBarrier(access.serverDraftVersion)
-            workCheck(itemRemovalTurn(entries, access.serverDraftVersion)?.removal?.reference() == entry.removal.reference(),
-                WorkProblem.ItemRemovalReconciliationRequired)
-            saveItemRemoval(entry.copy(state = WorkState.InFlight))
+            val candidate = itemRemovalUploadCandidate(access, observed, id)
+            workCheck(access.approves(candidate.source.source), WorkProblem.SourceUnavailable)
+            saveItemRemoval(candidate.entry.copy(state = WorkState.InFlight))
             true
         } == true, WorkProblem.StorageUnavailable)
     }
+
+    suspend fun inspectItemRemovalUpload(access: WorkAccess, observed: OfflineSampleBasis, id: String): ItemRemovalUploadCandidate =
+        transact(access) { itemRemovalUploadCandidate(access, observed, id) }
+            ?: throw WorkFailure(WorkProblem.StorageUnavailable)
+
+    suspend fun beginItemRemovalUpload(access: WorkAccess, observed: OfflineSampleBasis,
+                                      candidate: ItemRemovalUploadCandidate): RequestBody = transact(access) {
+        val latest = itemRemovalUploadCandidate(access, observed, candidate.target.batchId)
+        workCheck(latest.target == candidate.target && latest.entry == candidate.entry &&
+            latest.source.source == candidate.source.source && latest.source.proof == candidate.source.proof,
+            WorkProblem.StaleGrant)
+        workCheck(access.approves(latest.source.source), WorkProblem.SourceUnavailable)
+        val body = latest.encodeBatch()
+        saveItemRemoval(latest.entry.copy(state = WorkState.InFlight))
+        body
+    } ?: throw WorkFailure(WorkProblem.StorageUnavailable)
+
+    private suspend fun WorkTransaction.itemRemovalUploadCandidate(access: WorkAccess, observed: OfflineSampleBasis,
+                                                                   id: String): ItemRemovalUploadCandidate {
+        val entries = itemRemovals(access.task)
+        val entry = entries.singleOrNull { it.batch?.batchId == id } ?: throw WorkFailure(WorkProblem.InvalidState)
+        val batch = requireNotNull(entry.batch)
+        val cmd = entry.removal.command
+        val original = requireSource(cmd.contextId, access.task)
+        workCheck(access.session.canContribute && original.source == entry.removal.source && validProof(original.proof) &&
+            cmd.contextId !in access.securityRevokedSources && !sourceRevoked(cmd.contextId), WorkProblem.SourceUnavailable)
+        workCheck(entry.state == WorkState.Queued && cmd.expectedDraftVersion == access.serverDraftVersion &&
+            observed.task == access.task && observed.draftVersion == access.serverDraftVersion &&
+            cmd.attempt in access.currentAttempts, WorkProblem.InvalidState)
+        workCheck(observed.requireItemRemovalAttempt(cmd.attempt).required == entry.removal.minimumSampleCount,
+            WorkProblem.ScopeMismatch)
+        workCheck(entries.none { it.state in uncertainItemRemovalStates }, WorkProblem.InvalidState)
+        requireCurrentItemRemovalVersion(entries, access.serverDraftVersion)
+        checkSampleBatchBarrier(access.serverDraftVersion)
+        workCheck(itemRemovalTurn(entries, access.serverDraftVersion)?.removal?.reference() == entry.removal.reference(),
+            WorkProblem.ItemRemovalReconciliationRequired)
+        return ItemRemovalUploadCandidate(ReceiptTarget(ReceiptLookup(ReceiptKind.Batch, id), access.task,
+            workspaceId, id, batch.fingerprint), entry, original)
+    }
+
+    // Loss of authority can only make an exact committed attempt query-only.
+    suspend fun leaveItemRemovalUncertain(candidate: ItemRemovalUploadCandidate) {
+        val target = candidate.target
+        rows.transaction(target.task) {
+            val entry = checkedItemRemoval(target.task, candidate.entry.removal.command.operationId)
+            if (entry != null && workspaceId == target.workspaceId && entry.batch == candidate.entry.batch &&
+                entry.removal == candidate.entry.removal && entry.state == WorkState.InFlight)
+                saveItemRemoval(entry.copy(state = WorkState.OutcomeUnknown))
+        }
+    }
+
+    suspend fun applyItemRemovalUploadRejection(access: WorkAccess, candidate: ItemRemovalUploadCandidate,
+                                               rejection: UploadRejection, preflight: Boolean): Boolean = transact(access) {
+        val command = candidate.entry.removal.command
+        val entry = checkedItemRemoval(access.task, command.operationId) ?: return@transact false
+        val expectedState = if (preflight) WorkState.Queued else WorkState.InFlight
+        if (workspaceId != candidate.target.workspaceId || entry.batch != candidate.entry.batch ||
+            entry.removal != candidate.entry.removal || entry.state != expectedState || entry.serverEvidence != null)
+            return@transact false
+
+        val reason = rejection.reason
+        if (reason.isSourceRejection()) {
+            if (rejection.contexts != setOf(command.contextId) ||
+                rejection.operations != (if (preflight) emptySet() else setOf(command.operationId))) return@transact false
+            if (reason == WorkConflict.SourceSecurityRevoked) rememberSourceRevoked(command.contextId)
+        } else if (preflight) return@transact false
+        val state = if (reason.isSourceRejection()) WorkState.Quarantined else WorkState.Conflict
+        saveItemRemoval(entry.copy(state = state))
+        true
+    } == true
 
     suspend fun markItemRemovalOutcomeUnknown(access: WorkAccess, id: String) {
         workCheck(transact(access) {
@@ -732,6 +786,9 @@ internal class SharedWorkStore(private val rows: ProtectedWorkRows, private val 
             for (id in catalog().batchIds) {
                 val batch = requireBatch(id)
                 if (batch.state == WorkState.InFlight) save(batch.copy(state = WorkState.OutcomeUnknown))
+            }
+            for (entry in itemRemovals(access.task)) {
+                if (entry.state == WorkState.InFlight) saveItemRemoval(entry.copy(state = WorkState.OutcomeUnknown))
             }
         }
     }

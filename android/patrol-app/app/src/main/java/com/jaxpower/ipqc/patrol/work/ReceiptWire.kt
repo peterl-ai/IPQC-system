@@ -110,7 +110,7 @@ internal fun JsonObject.decodeItemRemovalReceipt(): ItemRemovalReceipt {
     return receiptJson.decodeFromJsonElement(this)
 }
 
-private fun JsonObject.decodeItemRemovalBatchReceipt(): ItemRemovalBatchReceipt {
+internal fun JsonObject.decodeItemRemovalBatchReceipt(): ItemRemovalBatchReceipt {
     for (field in listOf("previousDraftVersion", "draftVersion", "receiptVersion")) requireInteger(field)
     ensureResponse((get("operations") as? JsonArray)?.isEmpty() == true)
     val operation = (get("itemOperations") as? JsonArray)?.singleOrNull() as? JsonObject

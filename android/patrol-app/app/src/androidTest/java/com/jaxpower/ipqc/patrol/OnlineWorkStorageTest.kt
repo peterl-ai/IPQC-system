@@ -481,7 +481,7 @@ class OnlineWorkStorageTest {
         var beforeSampleUpload: suspend () -> Unit = {}
 
         override suspend fun uploadSampleBatch(bearer: String, taskId: String, input: RequestBody,
-                                               guard: GuardedSampleExchange): Response<ResponseBody> {
+                                               guard: GuardedUploadExchange): Response<ResponseBody> {
             val receipt = requireNotNull(sampleReceipt)
             check(bearer == "Bearer fixture-device-b" && taskId == TASK.id && guard.maySend())
             beforeSampleUpload()
@@ -494,8 +494,12 @@ class OnlineWorkStorageTest {
                 "canExecute":false,"acceptsFormalInspection":false}""")
         }
 
-        override suspend fun preflightSampleBatch(bearer: String, taskId: String, input: WorkContextPreflightInputWire,
-                                                  guard: GuardedSampleExchange): Response<ResponseBody> {
+        override suspend fun uploadItemRemovalBatch(bearer: String, taskId: String, input: RequestBody,
+                                                    guard: GuardedUploadExchange): Response<ResponseBody> =
+            error("Unexpected item removal upload")
+
+        override suspend fun preflightUploadSources(bearer: String, taskId: String, input: WorkContextPreflightInputWire,
+                                                  guard: GuardedUploadExchange): Response<ResponseBody> {
             check(guard.maySend() && sampleReceipt != null)
             samplePreflights++
             return json(Json.encodeToString(requireNotNull(preflight(bearer, taskId, input).body())))
