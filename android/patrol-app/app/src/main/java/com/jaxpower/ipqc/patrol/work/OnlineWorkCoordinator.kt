@@ -13,6 +13,7 @@ import com.jaxpower.ipqc.patrol.auth.SessionRepository
 import com.jaxpower.ipqc.patrol.tasks.PatrolRepository
 import java.time.Instant
 import java.time.temporal.ChronoUnit
+import java.util.UUID
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 import kotlinx.coroutines.NonCancellable
@@ -299,6 +300,26 @@ internal class OnlineWorkCoordinator(
             Issue.UNAUTHENTICATED, Issue.FORBIDDEN -> ReceiptRecovery.AuthenticationFailure(failure.issue)
             else -> throw failure
         }
+    }
+
+    suspend fun itemRemovalWorkbench(grant: Grant): WorkbenchRemoval = withGrant(grant) {
+        store.itemRemovalWorkbench(grant.access, grant.draft.sampleBasis)
+    }
+
+    // Only the explicit foreground action calls this. Preflight grants permission
+    // to seal the original source; upload still makes its own current admission checks.
+    suspend fun sendWorkbenchItemRemoval(grant: Grant, selected: WorkbenchRemoval.Row): ItemRemovalUploadResult {
+        val candidate = itemRemovalWorkbench(grant).rows.singleOrNull { it.operation == selected.operation }
+            ?: throw WorkFailure(WorkProblem.ItemRemovalReconciliationRequired)
+        workCheck(candidate.attempt == selected.attempt && candidate.currentAttempt && !candidate.operationConfirmed &&
+            candidate.state == WorkState.Queued && (selected.batchId == null || candidate.batchId == selected.batchId),
+            WorkProblem.ItemRemovalReconciliationRequired)
+        candidate.batchId?.let { return uploadItemRemovalBatch(grant, it) }
+        val approved = preflight(grant, candidate.operation.operationId)
+        val proposedId = UUID.nameUUIDFromBytes(
+            ("ipqc:item-removal:batch:" + candidate.operation.operationId).encodeToByteArray()).toString()
+        val batch = prepareItemRemovalForReconciliation(approved, proposedId, candidate.operation)
+        return uploadItemRemovalBatch(approved, batch.batchId)
     }
 
     // A different operator first obtains a matched source grant through explicit preflight.

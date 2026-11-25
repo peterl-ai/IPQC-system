@@ -46,14 +46,19 @@ internal suspend fun WorkTransaction.itemRemovalTurn(entries: List<ItemRemovalEn
 
 internal suspend fun WorkTransaction.checkSampleItemRemovals(entries: List<ItemRemovalEntry>, version: Long,
                                                              attempts: Set<WorkAttempt>) {
-    val blocked = entries.any {
-        it.removal.command.attempt in attempts && (it.state in uncertainItemRemovalStates || it.serverEvidence != null)
-    } || entries.filter { it.removal.command.expectedDraftVersion >= version }
-        .groupBy { it.removal.command.expectedDraftVersion }.any { (base, sameVersion) ->
-            itemRemovalTurn(sameVersion, base)?.removal?.command?.attempt?.let { it in attempts } == true
-        }
-    workCheck(!blocked, WorkProblem.ItemDispositionConflict)
+    val blocked = sampleItemRemovalBlocks(entries, version)
+    workCheck(attempts.none(blocked::contains), WorkProblem.ItemDispositionConflict)
 }
+
+internal suspend fun WorkTransaction.sampleItemRemovalBlocks(entries: List<ItemRemovalEntry>, version: Long): Set<WorkAttempt> =
+    buildSet {
+        entries.filter { it.state in uncertainItemRemovalStates || it.serverEvidence != null }
+            .forEach { add(it.removal.command.attempt) }
+        entries.filter { it.removal.command.expectedDraftVersion >= version }
+            .groupBy { it.removal.command.expectedDraftVersion }.forEach { (base, sameVersion) ->
+                itemRemovalTurn(sameVersion, base)?.let { add(it.removal.command.attempt) }
+            }
+    }
 
 // Authenticated shared-draft observations also carry receipts for operations
 // from other devices. Remember only the version, in the task-wide catalog.

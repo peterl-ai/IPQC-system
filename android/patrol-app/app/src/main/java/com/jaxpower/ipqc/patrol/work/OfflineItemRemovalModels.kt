@@ -165,8 +165,40 @@ internal data class LocalItemDispositionDraft(
     val history: List<LocalItemRemovalHistory>,
     val historicalServerRemovals: List<ItemRemovalReceipt>,
     val requiresFreshServerDraft: Boolean,
+    val sampleBlocks: Set<WorkAttempt> = emptySet(),
+    val blocksNewRemoval: Boolean = false,
 ) {
     val serverAllItemsRemoved get() = items.isNotEmpty() && items.all { it.server == ItemDisposition.Removed }
     val provisionallyAllItemsRemoved get() = items.any { it.provisionalRemoval != null } &&
         items.all { it.server == ItemDisposition.Removed || it.provisionalRemoval != null }
 }
+
+internal data class WorkbenchRemoval(
+    val items: List<Item>,
+    val rows: List<Row>,
+    val sampleBlocks: Set<WorkAttempt>,
+    val blocksNewRemoval: Boolean,
+    val requiresRefresh: Boolean,
+    val serverAllItemsRemoved: Boolean,
+    val provisionallyAllItemsRemoved: Boolean,
+) {
+    data class Item(val attempt: WorkAttempt, val server: ItemDisposition?, val warnedLast: Boolean)
+    data class Row(
+        val attempt: WorkAttempt,
+        val operation: OperationReference,
+        val batchId: String?,
+        val state: WorkState,
+        val currentAttempt: Boolean,
+        val operationConfirmed: Boolean,
+        val warnedLast: Boolean,
+    )
+}
+
+internal fun LocalItemDispositionDraft.forWorkbench() = WorkbenchRemoval(
+    items.map { WorkbenchRemoval.Item(it.attempt, it.server, it.serverRemoval?.warnsLastApplicableItemRemoval == true) },
+    history.map {
+        WorkbenchRemoval.Row(it.removal.command.attempt, it.removal.reference(), it.batch?.batchId, it.state,
+            it.currentAttempt, it.receipt != null, it.receipt?.warnsLastApplicableItemRemoval == true)
+    },
+    sampleBlocks, blocksNewRemoval, requiresFreshServerDraft, serverAllItemsRemoved, provisionallyAllItemsRemoved,
+)

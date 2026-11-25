@@ -14,6 +14,9 @@ import com.jaxpower.ipqc.patrol.offline.OfflineCache
 import com.jaxpower.ipqc.patrol.offline.OfflineSession
 import com.jaxpower.ipqc.patrol.tasks.PatrolRepository
 import com.jaxpower.ipqc.patrol.work.OnlineWorkCoordinator
+import com.jaxpower.ipqc.patrol.work.RemovalConfirmation
+import com.jaxpower.ipqc.patrol.work.WorkAttempt
+import com.jaxpower.ipqc.patrol.work.WorkbenchRemoval
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
@@ -187,8 +190,31 @@ class PatrolViewModel internal constructor(
         }
     }
 
-    private fun canUseWorkbenchNetwork(): Boolean = foreground && !signingOut && !ui.value.busy &&
-        ui.value.screen is Screen.SampleWorkbench && ui.value.online && ui.value.offline == null
+    internal fun saveWorkbenchItemRemoval(target: WorkbenchTarget, attempt: WorkAttempt, confirmed: Boolean,
+                                          source: RemovalConfirmation, reason: String?) {
+        if (canUseWorkbench()) workbench?.saveItemRemoval(target, attempt, confirmed, source, reason)
+    }
+
+    internal fun checkWorkbenchRemovalSave(target: WorkbenchTarget) {
+        if (canUseWorkbench()) workbench?.checkItemRemovalSave(target)
+    }
+
+    internal fun retryWorkbenchRemovalSave(target: WorkbenchTarget) {
+        if (canUseWorkbench()) workbench?.retryItemRemovalSave(target)
+    }
+
+    internal fun uploadWorkbenchItemRemoval(target: WorkbenchTarget, row: WorkbenchRemoval.Row) {
+        if (canUseWorkbenchNetwork()) workbench?.uploadItemRemoval(target, row)
+    }
+
+    internal fun checkWorkbenchItemRemovalReceipt(target: WorkbenchTarget, row: WorkbenchRemoval.Row) {
+        if (canUseWorkbenchNetwork()) workbench?.checkItemRemovalReceipt(target, row)
+    }
+
+    private fun canUseWorkbench(): Boolean = foreground && !signingOut && !ui.value.busy &&
+        ui.value.screen is Screen.SampleWorkbench
+
+    private fun canUseWorkbenchNetwork(): Boolean = canUseWorkbench() && ui.value.online && ui.value.offline == null
 
     fun refresh() {
         when (val screen = ui.value.screen) {

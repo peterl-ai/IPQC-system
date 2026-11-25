@@ -56,6 +56,8 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.jaxpower.ipqc.patrol.api.LineTaskDefinition
 import com.jaxpower.ipqc.patrol.work.FrozenSampleType
+import com.jaxpower.ipqc.patrol.work.ItemDisposition
+import com.jaxpower.ipqc.patrol.work.WorkProblem
 import com.jaxpower.ipqc.patrol.work.LocalSampleHistory
 import com.jaxpower.ipqc.patrol.work.LocalSampleProgress
 import com.jaxpower.ipqc.patrol.work.LocalSampleValue
@@ -87,9 +89,10 @@ internal fun SampleWorkbenchPage(patrol: PatrolUi, model: PatrolViewModel, pilot
     val target = state.target ?: return
     val origin = (patrol.screen as? Screen.SampleWorkbench)?.origin ?: return
     val definitions = remember(target) { target.detail.items.sortedBy { it.sequenceNo } }
-    var selectedId by remember(target) { mutableStateOf(definitions.firstOrNull()?.id) }
-    var form by remember(target) { mutableStateOf(SampleForm()) }
-    var removal by remember(target) { mutableStateOf<LocalSampleValue?>(null) }
+    val selectedId = state.selectedItemId
+    var form by remember(target, selectedId) { mutableStateOf(SampleForm()) }
+    var removal by remember(target, selectedId) { mutableStateOf<LocalSampleValue?>(null) }
+    var itemRemoval by remember(target, selectedId) { mutableStateOf<WorkAttempt?>(null) }
     val focus = LocalFocusManager.current
     val typing = WindowInsets.ime.getBottom(LocalDensity.current) > 0
     LaunchedEffect(state.lastSavedId) {
@@ -102,6 +105,7 @@ internal fun SampleWorkbenchPage(patrol: PatrolUi, model: PatrolViewModel, pilot
         if (state.draft == null || !state.hasLocalAccess) {
             form = SampleForm()
             removal = null
+            itemRemoval = null
         }
     }
 
@@ -120,6 +124,17 @@ internal fun SampleWorkbenchPage(patrol: PatrolUi, model: PatrolViewModel, pilot
         }
         state.error?.let { WorkbenchNotice(it, error = true) }
         state.saved?.let { WorkbenchNotice(it) }
+        if (state.uploadingRemoval) WorkbenchNotice("Uploading removal…")
+        if (state.removalSavePending) {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(onClick = { model.checkWorkbenchRemovalSave(target) }, enabled = !state.busy) {
+                    Text("Check removal save")
+                }
+                Button(onClick = { model.retryWorkbenchRemovalSave(target) }, enabled = !state.busy) {
+                    Text("Retry same removal save")
+                }
+            }
+        }
         if (state.retryPending) {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedButton(onClick = { pilot.checkSave(target) }, enabled = !state.busy) { Text("Check local save") }
@@ -131,12 +146,11 @@ internal fun SampleWorkbenchPage(patrol: PatrolUi, model: PatrolViewModel, pilot
         val progress = draft?.progress.orEmpty().associateBy { it.attempt.taskItemId }
         val history = draft?.history.orEmpty().groupBy { it.operation.envelope.operation.attempt.taskItemId }
         val selected = definitions.singleOrNull { it.id == selectedId } ?: return@Column
+        val removalView = state.removalView(canUseOnline)
         fun select(item: LineTaskDefinition) {
             if (selectedId != item.id) {
                 focus.clearFocus()
-                selectedId = item.id
-                form = SampleForm()
-                removal = null
+                pilot.selectItem(target, item.id)
             }
         }
 
@@ -151,7 +165,18 @@ internal fun SampleWorkbenchPage(patrol: PatrolUi, model: PatrolViewModel, pilot
                     form = SampleForm(sample, QualitativeJudgment.entries.firstOrNull { it.name == sample.value?.judgment },
                         sample.value?.inspectionValue.orEmpty(), sample.value?.barcode.orEmpty())
                 },
-                remove = { removal = it })
+                remove = { removal = it },
+                itemRemovalPanel = {
+                    ItemRemovalPanel(selected.id, removalView, canUseOnline, state.blocksNavigation,
+                        state.blocked == WorkProblem.StaleGrant,
+                        canStart = requirement?.attempt?.let(state::canStartRemoval) == true,
+                        start = {
+                            focus.clearFocus()
+                            itemRemoval = requirement?.attempt
+                        },
+                        upload = { model.uploadWorkbenchItemRemoval(target, it) },
+                        checkReceipt = { model.checkWorkbenchItemRemovalReceipt(target, it) })
+                })
         }
 
         BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
@@ -161,7 +186,8 @@ internal fun SampleWorkbenchPage(patrol: PatrolUi, model: PatrolViewModel, pilot
                         verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         item { Text("Inspection items", style = MaterialTheme.typography.titleLarge) }
                         items(definitions, key = { it.id }) { item ->
-                            ItemChoice(item, item.id == selectedId, progress[item.id], history[item.id].orEmpty(), !state.busy,
+                            ItemChoice(item, item.id == selectedId, progress[item.id], history[item.id].orEmpty(),
+                                removalView?.itemRemovalLabel(item.id), !state.blocksNavigation,
                                 select = { select(item) })
                         }
                     }
@@ -171,13 +197,27 @@ internal fun SampleWorkbenchPage(patrol: PatrolUi, model: PatrolViewModel, pilot
                 Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         items(definitions, key = { it.id }) { item ->
-                            ItemChoice(item, item.id == selectedId, progress[item.id], history[item.id].orEmpty(), !state.busy,
+                            ItemChoice(item, item.id == selectedId, progress[item.id], history[item.id].orEmpty(),
+                                removalView?.itemRemovalLabel(item.id), !state.blocksNavigation,
                                 Modifier.width(208.dp), select = { select(item) })
                         }
                     }
                     detailPane(Modifier.weight(1f).fillMaxWidth())
                 }
             }
+        }
+        val confirmation = itemRemoval
+        if (confirmation != null && state.canStartRemoval(confirmation)) {
+            ItemRemovalConfirmation(
+                last = removalView?.items?.count { it.server != ItemDisposition.Removed } == 1,
+                dismiss = { itemRemoval = null },
+                save = { confirmed, source, reason ->
+                    itemRemoval = null
+                    model.saveWorkbenchItemRemoval(target, confirmation, confirmed, source, reason)
+                },
+            )
+        } else if (confirmation != null) {
+            LaunchedEffect(confirmation) { itemRemoval = null }
         }
         removal?.let { sample ->
             val attempt = progress[selected.id]?.attempt
@@ -189,7 +229,7 @@ internal fun SampleWorkbenchPage(patrol: PatrolUi, model: PatrolViewModel, pilot
                     Button(onClick = {
                         removal = null
                         if (attempt != null) pilot.remove(target, attempt, sample)
-                    }, enabled = state.canEdit && attempt != null) { Text("Confirm removal") }
+                    }, enabled = attempt?.let(state::canEditSamples) == true) { Text("Confirm removal") }
                 },
                 dismissButton = { TextButton(onClick = { removal = null }) { Text("Cancel") } },
             )
@@ -213,13 +253,17 @@ private fun WorkbenchHeading(origin: Screen.Detail, state: WorkbenchUi, online: 
                 style = MaterialTheme.typography.bodySmall)
         }
         Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-            if (state.blocked != null || !state.hasLocalAccess) {
-                Button(onClick = arm, enabled = online && !state.busy && !state.retryPending) { Text("Activate local capture") }
+            if (state.blocked == WorkProblem.StaleGrant) {
+                Text("Online refresh required", style = MaterialTheme.typography.labelLarge)
+            } else if (state.removalView(online)?.serverAllItemsRemoved == true) {
+                Text("No applicable items remain", style = MaterialTheme.typography.labelLarge)
+            } else if (state.blocked != null || !state.hasLocalAccess) {
+                Button(onClick = arm, enabled = online && !state.blocksNavigation) { Text("Activate local capture") }
             } else {
                 Text("Local capture active", style = MaterialTheme.typography.labelLarge,
                     color = MaterialTheme.colorScheme.primary)
             }
-            TextButton(onClick = reload, enabled = !state.busy && !state.retryPending) { Text("Reload draft") }
+            TextButton(onClick = reload, enabled = !state.blocksNavigation) { Text("Reload draft") }
             TextButton(onClick = switchLine, enabled = !state.blocksNavigation) { Text("Switch line") }
         }
         state.blocked?.let { Text(it.label(), style = MaterialTheme.typography.bodySmall) }
@@ -228,7 +272,7 @@ private fun WorkbenchHeading(origin: Screen.Detail, state: WorkbenchUi, online: 
 
 @Composable
 private fun ItemChoice(item: LineTaskDefinition, selected: Boolean, progress: LocalSampleProgress?,
-                       history: List<LocalSampleHistory>, enabled: Boolean, modifier: Modifier = Modifier,
+                       history: List<LocalSampleHistory>, removalStatus: String?, enabled: Boolean, modifier: Modifier = Modifier,
                        select: () -> Unit) {
     val currentStatus = history.lastOrNull { it.currentAttempt && it.matchesObservedDraftVersion }?.operation?.state?.label()
     Card(onClick = select, modifier = modifier.fillMaxWidth().testTag("inspection-item-" + item.id)
@@ -238,7 +282,7 @@ private fun ItemChoice(item: LineTaskDefinition, selected: Boolean, progress: Lo
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Text(item.inspectionItem, style = MaterialTheme.typography.titleSmall)
             Text(progress?.countLabel() ?: "No current sample requirement", style = MaterialTheme.typography.bodySmall)
-            currentStatus?.let { Text(it, style = MaterialTheme.typography.labelMedium) }
+            (removalStatus ?: currentStatus)?.let { Text(it, style = MaterialTheme.typography.labelMedium) }
         }
     }
 }
@@ -248,8 +292,10 @@ private fun WorkbenchItem(
     modifier: Modifier, item: LineTaskDefinition, progress: LocalSampleProgress?, state: WorkbenchUi, form: SampleForm,
     change: (SampleForm) -> Unit, save: (WorkAttempt, SampleInput) -> Unit,
     correct: (LocalSampleValue) -> Unit, remove: (LocalSampleValue) -> Unit,
+    itemRemovalPanel: @Composable () -> Unit,
 ) {
     val type = progress?.type?.takeIf { it == FrozenSampleType.fromDefinition(item.inspectionType) }
+    val canEditSamples = progress?.attempt?.let(state::canEditSamples) == true
     val current = state.draft?.effective.orEmpty().filter { it.key.attempt == progress?.attempt }
     val histories = state.draft?.history.orEmpty().asReversed().filter { it.operation.envelope.operation.attempt.taskItemId == item.id }
     val older = state.draft?.confirmed.orEmpty().filter { it.key.attempt.taskItemId == item.id && !it.current &&
@@ -269,13 +315,14 @@ private fun WorkbenchItem(
                     if (item.upperLimitValue.isNotBlank()) Text("Frozen upper limit · " + item.upperLimitOperator + " " + item.upperLimitValue)
                     Text(progress?.let { it.countLabel() + if (it.meetsCount) " · Count met" else " · Incomplete" }
                         ?: "No applicable current attempt", style = MaterialTheme.typography.titleSmall)
+                    itemRemovalPanel()
                 }
             }
         }
         if (type != null && state.hasLocalAccess) {
             item {
                 val withinCapacity = progress.applicableSamples < MAX_CURRENT_SAMPLES || form.previous != null
-                SampleEditor(type, form, change, enabled = state.canEdit && withinCapacity,
+                SampleEditor(type, form, change, enabled = canEditSamples && withinCapacity,
                     save = { input -> save(progress.attempt, input) })
                 if (!withinCapacity) Text("50 applicable samples. Correct or remove an eligible sample.")
             }
@@ -294,8 +341,8 @@ private fun WorkbenchItem(
                             OutlinedButton(onClick = {
                                 correct(sample)
                                 scope.launch { scroll.animateScrollToItem(1) }
-                            }, enabled = state.canEdit) { Text("Correct sample") }
-                            TextButton(onClick = { remove(sample) }, enabled = state.canEdit) { Text("Remove sample") }
+                            }, enabled = canEditSamples) { Text("Correct sample") }
+                            TextButton(onClick = { remove(sample) }, enabled = canEditSamples) { Text("Remove sample") }
                         }
                     }
                 }

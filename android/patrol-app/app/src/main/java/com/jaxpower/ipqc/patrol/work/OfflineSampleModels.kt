@@ -162,4 +162,5 @@ internal data class LocalSampleDraft(
     val history: List<LocalSampleHistory>,
     val progress: List<LocalSampleProgress>,
     val captureProblem: WorkProblem? = null,
+    val itemRemoval: WorkbenchRemoval? = null,
 )

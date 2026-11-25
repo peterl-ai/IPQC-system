@@ -194,43 +194,63 @@ internal class SharedWorkStore(private val rows: ProtectedWorkRows, private val 
 
     suspend fun itemDispositionDraft(task: WorkTask, owner: SessionIdentity): LocalItemDispositionDraft =
         offlineTransaction(task, owner) { profile, _ ->
-            val basis = profile.basis
-            val byAttempt = basis.attempts.associateBy { it.attempt }
-            val observed = (basis.historicalItemRemovals + basis.attempts.mapNotNull { it.serverRemoval })
-                .associateBy { it.operationId }
-            val stored = itemRemovals(task)
-            val stale = itemRemovalVersionProblem(stored, basis.draftVersion) != null ||
-                sampleBasisProblem(basis, sampleHistory(profile)) == WorkProblem.StaleGrant
-            val turn = itemRemovalTurn(stored, basis.draftVersion)?.takeIf { candidate ->
-                stored.none { it.state in uncertainItemRemovalStates && it != candidate }
-            }
-            val state = stored.filter { it.removal.command.owner == owner || it.state == WorkState.Accepted }
-                .map { entry ->
-                    val cmd = entry.removal.command
-                    val current = byAttempt[cmd.attempt]
-                    val evidence = entry.serverEvidence ?: observed[cmd.operationId]?.takeIf {
-                        entry.removal.matches(it)
-                    }
-                    val status = when {
-                        entry.state != WorkState.Queued || evidence != null -> entry.state
-                        sourceRevoked(cmd.contextId) -> WorkState.Quarantined
-                        stale || turn?.removal?.command?.operationId != cmd.operationId ||
-                            current?.serverDisposition != ItemDisposition.Applicable -> WorkState.Conflict
-                        else -> WorkState.Queued
-                    }
-                    LocalItemRemovalHistory(entry.removal, status, current != null, entry.batch, evidence)
-                }
-            val provisional = turn?.removal?.takeIf { it.command.owner == owner }
-            val projection = basis.attempts.map { item ->
-                ProjectedItemDisposition(item.attempt, item.required, item.serverDisposition, item.serverRemoval,
-                    provisional?.takeIf {
-                        it.command.attempt == item.attempt && basis.editable && !stale &&
-                            item.serverDisposition == ItemDisposition.Applicable
-                    }?.reference())
-            }
-            OfflineTransactionResult(LocalItemDispositionDraft(basis.draftVersion, catalog().localEditVersion,
-                projection, basis.samples, state, basis.historicalItemRemovals, stale))
+            OfflineTransactionResult(projectItemRemovals(profile.basis, owner,
+                sampleBasisProblem(profile.basis, sampleHistory(profile)) == WorkProblem.StaleGrant))
         }
+
+    suspend fun itemRemovalWorkbench(access: WorkAccess, basis: OfflineSampleBasis): WorkbenchRemoval {
+        workCheck(access.task == basis.task && access.serverDraftVersion == basis.draftVersion, WorkProblem.ScopeMismatch)
+        if (access.session.canContribute) {
+            transact(access) { projectItemRemovals(basis, null).forWorkbench() }?.let { return it }
+        }
+        return WorkbenchRemoval(
+            basis.attempts.map { WorkbenchRemoval.Item(it.attempt, it.serverDisposition,
+                it.serverRemoval?.warnsLastApplicableItemRemoval == true) },
+            emptyList(), emptySet(), false, false,
+            basis.attempts.isNotEmpty() && basis.attempts.all { it.serverDisposition == ItemDisposition.Removed }, false)
+    }
+
+    private suspend fun WorkTransaction.projectItemRemovals(basis: OfflineSampleBasis, owner: SessionIdentity?,
+                                                           sampleStale: Boolean = false): LocalItemDispositionDraft {
+        val byAttempt = basis.attempts.associateBy { it.attempt }
+        val observed = (basis.historicalItemRemovals + basis.attempts.mapNotNull { it.serverRemoval })
+            .associateBy { it.operationId }
+        val stored = itemRemovals(basis.task)
+        val stale = itemRemovalVersionProblem(stored, basis.draftVersion) != null || sampleStale
+        val turn = itemRemovalTurn(stored, basis.draftVersion)?.takeIf { candidate ->
+            stored.none { it.state in uncertainItemRemovalStates && it != candidate }
+        }
+        // Only an authenticated contribution grant may project the shared queue.
+        // The online projection exposes references and status, never originals or proofs.
+        val state = stored.filter { owner == null || it.removal.command.owner == owner || it.state == WorkState.Accepted }
+            .map { entry ->
+                val cmd = entry.removal.command
+                val current = byAttempt[cmd.attempt]
+                val evidence = entry.serverEvidence ?: observed[cmd.operationId]?.takeIf { entry.removal.matches(it) }
+                val status = when {
+                    entry.state != WorkState.Queued || evidence != null -> entry.state
+                    sourceRevoked(cmd.contextId) -> WorkState.Quarantined
+                    stale || turn?.removal?.command?.operationId != cmd.operationId ||
+                        current?.serverDisposition != ItemDisposition.Applicable -> WorkState.Conflict
+                    else -> WorkState.Queued
+                }
+                LocalItemRemovalHistory(entry.removal, status, current != null, entry.batch, evidence)
+            }
+        val provisional = turn?.removal?.takeIf { owner == null || it.command.owner == owner }
+        val projection = basis.attempts.map { item ->
+            ProjectedItemDisposition(item.attempt, item.required, item.serverDisposition, item.serverRemoval,
+                provisional?.takeIf {
+                    it.command.attempt == item.attempt && basis.editable && !stale &&
+                        item.serverDisposition == ItemDisposition.Applicable
+                }?.reference())
+        }
+        val blocksNew = turn != null || stored.any {
+            it.state in uncertainItemRemovalStates || (it.state == WorkState.Queued &&
+                it.removal.command.expectedDraftVersion > basis.draftVersion && !sourceRevoked(it.removal.command.contextId))
+        }
+        return LocalItemDispositionDraft(basis.draftVersion, catalog().localEditVersion, projection, basis.samples, state,
+            basis.historicalItemRemovals, stale, sampleItemRemovalBlocks(stored, basis.draftVersion), blocksNew)
+    }
 
     suspend fun prepareItemRemovalBatch(task: WorkTask, owner: SessionIdentity, id: String,
                                         operation: OperationReference): ItemRemovalBatch =
@@ -474,8 +494,9 @@ internal class SharedWorkStore(private val rows: ProtectedWorkRows, private val 
             val history = sampleHistory(profile)
             val board = sampleBoard(profile.basis, history)
             val block = captureProblem(profile, observe) ?: sampleBasisProblem(profile.basis, history)
+            val removal = projectItemRemovals(profile.basis, profile.owner, block == WorkProblem.StaleGrant)
             OfflineTransactionResult(LocalSampleDraft(profile.basis.draftVersion, catalog().localEditVersion,
-                profile.basis.samples, board.values(), history, board.progress(), block))
+                profile.basis.samples, board.values(), history, board.progress(), block, removal.forWorkbench()))
         }
 
     // Reuse the same clock, source and task-wide version checks as the draft projection.
