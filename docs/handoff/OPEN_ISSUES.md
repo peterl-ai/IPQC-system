@@ -1,6 +1,6 @@
 # Open issues and known limitations
 
-Updated 2026-11-24. A pending gate applies to its named scope. Keep verified closed findings closed unless new evidence supports reopening them.
+Updated 2026-11-25. A pending gate applies to its named scope. Keep verified closed findings closed unless new evidence supports reopening them.
 
 | ID | Priority and status | Owner or responsible role | Evidence, dependency and next action |
 | --- | --- | --- | --- |
@@ -14,9 +14,10 @@ Updated 2026-11-24. A pending gate applies to its named scope. Keep verified clo
 | O-008 | Compatibility watch, separately scoped | Backend and Android maintainers | Existing A02 validator expects the exact earlier of verification +72h and session expiry. Approved direction allows a shorter deadline. Current matching server/client contract is in use. Coordinate client acceptance and precise tests before any server policy shortening. [A03-01 compatibility note](https://github.com/peterl-ai/IPQC-system/blob/4c74c1000c7c30997c4877dcfb693b354d80fba5/docs/37_ANDROID_V1_A03_01_SHARED_WORK_OUTBOX_FOUNDATION.md) |
 | O-009 | Historical unknown, observe on recurrence | API maintainer | PR #31 historical Windows HTTP 500/503 stack/stage was unrecoverable. Fixed the confirmed CAS admission test defect. If naturally recurring, capture exact correlated provider/lifecycle failure. Merged PR and green runs alone do not establish the old root cause. [Review History](REVIEW_HISTORY.md) |
 | O-010 | Recovery gap, reconcile as supplied | Peter and independent reviewer | The exhausted historical review conversation is unavailable in full. Missing items include many independent exact-HEAD verdicts, external architecture reviewer attachments and QA/IT approvals outside traced sources. Preserve UNKNOWN until Peter supplies exact excerpts. The supplied PR #43 exact-HEAD final report is now recorded. [Review History](REVIEW_HISTORY.md) |
-| O-011 | Documentation integration, pending independent review | Peter, Codex and independent reviewer | The authorized integration brings the staged Project Memory into `codex/project-memory-handoff-foundation`. It is pending independent review and Peter's manual merge. [Current state](CURRENT_PROJECT_STATE.md) |
+| O-011 | Documentation integration, pending independent re-review | Peter, Codex and independent reviewer | The authorized integration is in Draft PR #44 on `codex/project-memory-handoff-foundation`. It is pending independent re-review of the R44-P3-01 repair and Peter's manual merge. [Current state](CURRENT_PROJECT_STATE.md) |
 | O-012 | Deferred | MES vendor / Peter | Material Verification, work-order/BOM integration and legacy GQMS migration excluded from current scope. Preserve placeholder and independent backend boundary. [Project scope](https://github.com/peterl-ai/IPQC-system/blob/4c74c1000c7c30997c4877dcfb693b354d80fba5/docs/01_PROJECT_SCOPE.md) |
 | O-013 | Owner merge, **VERIFIED CLOSED** | Peter | Peter merged PR #43 on 2026-11-24 as `cadd0973795aaecd4143c96de44ffd80f2ed356a`. The merge contains the exact reviewed HEAD and matches the reviewed Tree. [Merged-main CI 45489357549, attempt 1](https://github.com/peterl-ai/IPQC-system/actions/runs/45489357549/attempts/1) |
+| R44-P3-01 | P3, **FIXED — AWAITING INDEPENDENT RE-REVIEW** | Codex for repair and Independent ChatGPT for closure | Initial HOLD on 2026-11-25 identified missing bounded CI monitoring and safe fetch guidance. Both operating protocols now record the same continuation rule. [Review record and repair](REVIEW_HISTORY.md#2026-11-25-initial-independent-review) |
 
 ## PR #43 evidence gaps closed
 

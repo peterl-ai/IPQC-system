@@ -154,7 +154,7 @@ Implementation is complete for the reviewed A04-02 scope. On 2026-11-24, Indepen
 
 ## Project Memory integration in progress
 
-Documentation-only source of continuity on `codex/project-memory-handoff-foundation`, pending independent review. The merged history above ends at PR #43. [Current project state](CURRENT_PROJECT_STATE.md)
+Documentation-only [Draft PR #44](https://github.com/peterl-ai/IPQC-system/pull/44) on `codex/project-memory-handoff-foundation`. Independent ChatGPT reviewed HEAD `2947e1dbba46e0e71470fe9118b6c53ba89d52c5` on 2026-11-25 and issued **HOLD — MINOR DOCUMENTATION REPAIR** (P1=0, P2=0, P3=1). R44-P3-01 is **FIXED — AWAITING INDEPENDENT RE-REVIEW**. PR #44 remains unmerged. [Review record and repair](REVIEW_HISTORY.md#2026-11-25-initial-independent-review) · [Current project state](CURRENT_PROJECT_STATE.md)
 
 ## Additional primary evidence for the R32 foundations
 

@@ -1,8 +1,8 @@
 # Current IPQC project state
 
-**Verified 2026-11-24 · A04-02 merged · Project Memory integration pending independent review**
+**Verified 2026-11-25 · A04-02 merged · PR #44 awaiting independent re-review**
 
-The authorized work in progress is the documentation-only Project Memory integration on `codex/project-memory-handoff-foundation`. Review that change against the Base below. Verify its current PR, HEAD, Tree and CI in GitHub before taking further action. Peter retains final merge and deployment authority. Subsequent Android implementation requires separately scoped authorization.
+Independent ChatGPT reviewed the initial PR #44 revision on 2026-11-25 and issued **HOLD — MINOR DOCUMENTATION REPAIR** with one P3 finding. Codex corrected R44-P3-01 within the documentation-only integration. Its current status is **FIXED — AWAITING INDEPENDENT RE-REVIEW**. Verify the current PR Base, HEAD, Tree and CI in GitHub. Peter retains final merge and deployment authority. Subsequent Android implementation requires separately scoped authorization. [Initial independent review and repair](REVIEW_HISTORY.md#2026-11-25-initial-independent-review)
 
 ## Product and milestone
 
@@ -17,7 +17,7 @@ JAX Power IPQC replaces the Line Patrol portion of legacy GQMS for new operation
 | PR #43 reviewed Tree | `a8522ab82078837bc57604a9e7e84dd0bedfa85d` |
 | PR #43 pre-merge CI checkout | `3a87c3c883accbbd102840b02a229143c98d5310` · synthetic merge with approved Base and HEAD as ordered parents |
 | PR #43 independent verdict | 2026-11-24 · **PASS — R43-P2-02 VERIFIED CLOSED**. Earlier P2/P3 remain closed. No new actionable P1/P2/P3 in the inspected repair and adjacent scope. |
-| Project Memory integration | Documentation-only branch `codex/project-memory-handoff-foundation`, pending independent review. |
+| Project Memory integration | [Open Draft PR #44](https://github.com/peterl-ai/IPQC-system/pull/44) · `codex/project-memory-handoff-foundation` · P3 repair pending independent re-review. |
 
 The actual PR #43 merge has the approved Base and reviewed HEAD as its ordered parents and exactly matches the reviewed Tree. [Independent review disposition and verification limits](REVIEW_HISTORY.md#2026-11-24-final-independent-re-review)
 

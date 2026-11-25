@@ -2,6 +2,18 @@
 
 Append records by reviewed revision. Preserve findings and status when a later round revises the disposition. Peter owns approval/merge. Author validation and review are recorded separately. Recovered evidence is limited to authoritative GitHub discussion, supplied review excerpts, exact source and preserved evidence packets. Historic independently reviewed material without the original receipt is marked accordingly.
 
+## #44 Project Memory integration
+
+### 2026-11-25 initial independent review
+
+Independent ChatGPT issued **HOLD — MINOR DOCUMENTATION REPAIR** at Base `cadd0973795aaecd4143c96de44ffd80f2ed356a`, HEAD `2947e1dbba46e0e71470fe9118b6c53ba89d52c5` and Tree `7a6a4128876659541dffe225cfd3cb40e1c4265d`. Findings were P1=0, P2=0 and P3=1. The reviewer verified the exact revision, documentation-only scope, attachment hashes, Git blob identity, synthetic merge parents and tree, and all twelve live CI job statuses. Archived historical test results and protected Windows checkout integrity remain developer evidence. [PR #44](https://github.com/peterl-ai/IPQC-system/pull/44) · [Reviewed Push CI](https://github.com/peterl-ai/IPQC-system/actions/runs/45494488172/attempts/1) · [Reviewed PR CI](https://github.com/peterl-ai/IPQC-system/actions/runs/45494503296/attempts/1)
+
+**R44-P3-01 — Missing bounded CI monitoring and safe fetch continuation rule.** Step 5 in AGENTS.md and the Project Memory index did not tell agents to monitor existing nonterminal merged-main CI or safely fetch a behind local origin/main. It caused an unnecessary stop during the PR #43 to #44 transition.
+
+### 2026-11-25 developer repair
+
+**R44-P3-01 · FIXED — AWAITING INDEPENDENT RE-REVIEW.** Both Step 5 entries now use the same 45-minute monitoring deadline, require successful terminal CI and inspection of the actual job logs, and require a safe fetch and revalidation of a behind remote-tracking ref. Codex reviewed the instructions for queued or running CI, success, failure, timeout, a behind ref, and revision or tree drift. The initial independent HOLD remains the latest independent verdict. [AGENTS.md](../../AGENTS.md) · [Project Memory index](README.md)
+
 ## #43 Android A04-02
 
 ### Earlier review rounds and pre-final status
