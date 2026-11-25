@@ -4,11 +4,21 @@ import com.jaxpower.ipqc.patrol.api.Issue
 import com.jaxpower.ipqc.patrol.auth.SessionIdentity
 import com.jaxpower.ipqc.patrol.work.*
 import java.time.Instant
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonNull
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import okhttp3.mockwebserver.MockResponse
+import okhttp3.mockwebserver.SocketPolicy
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import org.junit.Assert.*
@@ -275,12 +285,373 @@ class OfflineItemRemovalCoordinatorTest {
         }
     }
 
+
+    @Test fun foregroundUploadUsesExactSealedBytesWithCurrentBearerAndOriginalContributor() = runBlocking<Unit> {
+        for (reason in listOf(null, "")) TestServer().use { server ->
+            val e = RemovalFixture(server)
+            val prepared = e.prepare(reason)
+            e.f.work.sessions.logout(attemptRemote = false)
+            e.f.work.offline.advance(61_000)
+            val b = e.f.work.b
+            val token = "synthetic-removal-uploader-b"
+            e.f.login(b, token)
+            val grant = e.open(b, token)
+            val receipt = testItemReceipt(prepared.saved, prepared.batch, b)
+            e.queueAttempt(prepared, b)
+            server.enqueue(removalUploadResponse(testItemBatchReceipt(prepared.batch, receipt), receipt))
+
+            assertEquals(ItemRemovalUploadResult.Accepted(testItemBatchReceipt(prepared.batch, receipt), false),
+                e.coordinator.uploadItemRemovalBatch(grant, prepared.batch.batchId))
+            val body = e.consumeAttempt(prepared, token)
+            assertEquals(setOf("batchId", "canonicalizationVersion", "expectedTaskLineId",
+                "expectedWorkflowVersion", "expectedEnvironmentId", "expectedDraftVersion", "operation", "sourceProof"), body.keys)
+            val cmd = prepared.saved.command
+            assertEquals(JsonPrimitive(prepared.batch.batchId), body["batchId"])
+            assertEquals(JsonPrimitive(1), body["canonicalizationVersion"])
+            assertEquals(JsonPrimitive(cmd.task.lineId), body["expectedTaskLineId"])
+            assertEquals(JsonPrimitive(cmd.task.environmentId), body["expectedEnvironmentId"])
+            assertEquals(JsonPrimitive(cmd.task.workflowVersion), body["expectedWorkflowVersion"])
+            assertEquals(JsonPrimitive(cmd.expectedDraftVersion), body["expectedDraftVersion"])
+            val op = body.getValue("operation").jsonObject
+            assertEquals(setOf("operationId", "canonicalizationVersion", "kind", "taskItemId", "inspectionAttemptId",
+                "sourceWorkContextId", "contributorUserIdAssertion", "baseDraftVersion", "originLocalEditVersion",
+                "confirmedAbsentOrNotApplicable", "confirmationSource", "reason"), op.keys)
+            assertEquals(JsonPrimitive(cmd.operationId), op["operationId"])
+            assertEquals(JsonPrimitive(1), op["canonicalizationVersion"])
+            assertEquals(JsonPrimitive("RemoveItem"), op["kind"])
+            assertEquals(JsonPrimitive(cmd.attempt.taskItemId), op["taskItemId"])
+            assertEquals(JsonPrimitive(cmd.attempt.inspectionAttemptId), op["inspectionAttemptId"])
+            assertEquals(JsonPrimitive(cmd.contextId), op["sourceWorkContextId"])
+            assertEquals(JsonPrimitive(cmd.owner.userId), op["contributorUserIdAssertion"])
+            assertEquals(JsonPrimitive(cmd.expectedDraftVersion), op["baseDraftVersion"])
+            assertEquals(JsonPrimitive(prepared.saved.localEditVersion), op["originLocalEditVersion"])
+            assertEquals(JsonPrimitive(true), op["confirmedAbsentOrNotApplicable"])
+            assertEquals(JsonPrimitive("Production"), op["confirmationSource"])
+            assertEquals(if (reason == null) JsonNull else JsonPrimitive(reason), op["reason"])
+            assertEquals(mapOf("workContextId" to JsonPrimitive(cmd.contextId),
+                "proofSecret" to JsonPrimitive(e.f.proof)), body.getValue("sourceProof").jsonObject)
+            assertEquals(prepared.saved, e.entry(prepared).removal)
+            assertEquals(receipt, e.entry(prepared).serverEvidence)
+            assertEquals(WorkState.Accepted, e.entry(prepared).state)
+        }
+    }
+
+    @Test fun replayPreservesServerActorAndIndividualProofNeverSettlesTheLocalBatch() = runBlocking<Unit> {
+        for (complete in listOf(true, false)) TestServer().use { server ->
+            val e = RemovalFixture(server)
+            val prepared = e.prepare()
+            val historical = e.f.work.b
+            val base = testItemReceipt(prepared.saved, prepared.batch, historical)
+            val operation = if (complete) base else base.copy(batchId = testId(99))
+            val full = if (complete) testItemBatchReceipt(prepared.batch, operation) else null
+            e.queueAttempt(prepared)
+            server.enqueue(removalUploadResponse(full, operation, replay = true))
+            val resolved = e.coordinator.uploadItemRemovalBatch(prepared.grant, prepared.batch.batchId)
+            e.consumeAttempt(prepared)
+            if (full != null) assertEquals(ItemRemovalUploadResult.Accepted(full, true), resolved)
+            else assertEquals(ItemRemovalUploadResult.NeedsBatchReceipt(operation), resolved)
+            assertEquals(if (complete) WorkState.Accepted else WorkState.OutcomeUnknown, e.entry(prepared).state)
+            assertEquals(operation, e.entry(prepared).serverEvidence)
+            assertEquals(prepared.saved, e.entry(prepared).removal)
+            if (!complete) {
+                server.enqueue("{}", 404)
+                val lookup = ReceiptLookup(ReceiptKind.Batch, prepared.batch.batchId)
+                assertEquals(ItemRemovalReceiptRecovery.Unresolved(ReceiptUncertainty.NotObserved),
+                    e.coordinator.recoverItemRemovalReceipt(prepared.grant, lookup))
+                server.request("${e.f.path}/operation-batches/${prepared.batch.batchId}/receipt", "GET", Fixture.ACCESS)
+                assertEquals(WorkState.OutcomeUnknown, e.entry(prepared).state)
+            }
+        }
+    }
+
+    @Test fun malformedAndInconsistentPostReceiptsNeverSettleTheAttempt() = runBlocking<Unit> {
+        val badOperation: List<(ItemRemovalReceipt) -> ItemRemovalReceipt> = listOf(
+            { it.copy(operationId = testId(92)) }, { it.copy(batchId = testId(93)) },
+            { it.copy(lineId = testId(94)) }, { it.copy(inspectionAttemptId = testId(95)) },
+            { it.copy(contentHash = "A".repeat(64)) }, { it.copy(draftVersion = it.draftVersion + 1) },
+            { it.copy(uploadedByUserId = testId(96)) }, { it.copy(uploadedPersonalSessionId = testId(97)) },
+            { it.copy(remainingApplicableItemCount = 23, warnsLastApplicableItemRemoval = false) },
+            { it.copy(minimumSampleCount = 10) },
+        )
+        val transforms: List<(ItemRemovalBatchReceipt, ItemRemovalReceipt) -> String> =
+            badOperation.map { change -> { full: ItemRemovalBatchReceipt, op: ItemRemovalReceipt ->
+                val altered = change(op)
+                removalUploadResponse(full.copy(itemOperations = listOf(altered), draftVersion = altered.draftVersion,
+                    uploadedByUserId = altered.uploadedByUserId, uploadedPersonalSessionId = altered.uploadedPersonalSessionId), altered)
+            } } + listOf(
+                { full, op -> removalUploadResponse(full.copy(requestFingerprint = "A".repeat(64)), op) },
+                { full, op -> removalUploadResponse(full.copy(receiptVersion = 3), op) },
+                { full, op -> removalUploadResponse(full, op.copy(reason = "different")) },
+                { full, op -> removalUploadResponse(full, op).replace("\"replayOnly\":false", "\"replayOnly\":false,\"replayOnly\":true") },
+                { _, op -> removalUploadResponse(null, op) },
+                { full, op -> removalUploadResponse(full, op) + " ".repeat(512 * 1024) },
+                { _, _ -> "{" },
+            )
+        for ((index, transform) in transforms.withIndex()) TestServer().use { server ->
+            val e = RemovalFixture(server)
+            val p = e.prepare()
+            val op = testItemReceipt(p.saved, p.batch, e.f.work.a)
+            e.queueAttempt(p)
+            server.enqueue(transform(testItemBatchReceipt(p.batch, op), op))
+            assertEquals("Invalid receipt $index", ItemRemovalUploadResult.OutcomeUnknown(Issue.RESPONSE),
+                e.coordinator.uploadItemRemovalBatch(p.grant, p.batch.batchId))
+            e.consumeAttempt(p)
+            assertEquals(WorkState.OutcomeUnknown, e.entry(p).state)
+            assertNull(e.entry(p).serverEvidence)
+        }
+    }
+
+    @Test fun onlyValidatedTerminalErrorsChangeTheLedgerToConflictOrQuarantine() = runBlocking<Unit> {
+        for (mode in listOf("version", "scope", "revoke", "wrong-revoke", "unknown", "throttle", "server", "redirect",
+            "disconnect", "unauthorized", "forbidden")) TestServer().use { server ->
+            val e = RemovalFixture(server)
+            val p = e.prepare()
+            e.queueAttempt(p)
+            val operation = p.saved.command
+            val revocation = ""","preserveOriginals":true,"quarantineRequired":true,
+                "sourceContextIds":["${operation.contextId}"],"operationIds":["${operation.operationId}"]"""
+            val expected = when (mode) {
+                "version" -> {
+                    enqueueRemovalProblem(server, 409, "DraftVersionConflict")
+                    ItemRemovalUploadResult.Rejected(WorkConflict.DraftVersionConflict)
+                }
+                "scope" -> {
+                    enqueueRemovalProblem(server, 409, "DraftItemAlreadyRemoved")
+                    ItemRemovalUploadResult.Rejected(WorkConflict.TaskScopeConflict)
+                }
+                "revoke" -> {
+                    enqueueRemovalProblem(server, 409, "SourceSecurityRevoked", revocation)
+                    ItemRemovalUploadResult.Rejected(WorkConflict.SourceSecurityRevoked)
+                }
+                "wrong-revoke" -> {
+                    enqueueRemovalProblem(server, 409, "SourceSecurityRevoked", revocation.replace(operation.operationId, testId(89)))
+                    ItemRemovalUploadResult.OutcomeUnknown(Issue.RESPONSE)
+                }
+                "unknown" -> {
+                    server.enqueue("{}", 409)
+                    ItemRemovalUploadResult.OutcomeUnknown(Issue.CONFLICT)
+                }
+                "throttle" -> {
+                    server.enqueue("{}", 429)
+                    ItemRemovalUploadResult.OutcomeUnknown(Issue.RATE_LIMITED)
+                }
+                "server" -> {
+                    server.web.enqueue(MockResponse().setResponseCode(503).setHeader("Retry-After", "0"))
+                    ItemRemovalUploadResult.OutcomeUnknown(Issue.UNAVAILABLE)
+                }
+                "redirect" -> {
+                    server.web.enqueue(MockResponse().setResponseCode(307).setHeader("Location", "/must-not-follow"))
+                    ItemRemovalUploadResult.OutcomeUnknown(Issue.RESPONSE)
+                }
+                "disconnect" -> {
+                    server.web.enqueue(MockResponse().setSocketPolicy(SocketPolicy.DISCONNECT_AFTER_REQUEST))
+                    ItemRemovalUploadResult.OutcomeUnknown(Issue.CONNECTION)
+                }
+                else -> { server.enqueue("{}", if (mode == "unauthorized") 401 else 403); null }
+            }
+            if (expected == null) expectIssue(if (mode == "unauthorized") Issue.UNAUTHENTICATED else Issue.FORBIDDEN) {
+                e.coordinator.uploadItemRemovalBatch(p.grant, p.batch.batchId)
+            } else assertEquals(mode, expected, e.coordinator.uploadItemRemovalBatch(p.grant, p.batch.batchId))
+            e.consumeAttempt(p)
+            assertEquals(when (mode) {
+                "version", "scope" -> WorkState.Conflict
+                "revoke" -> WorkState.Quarantined
+                else -> WorkState.OutcomeUnknown
+            }, e.entry(p).state)
+            assertEquals(p.saved, e.entry(p).removal)
+            assertNull(server.web.takeRequest(100, TimeUnit.MILLISECONDS))
+        }
+    }
+
+    @Test fun badOrRevokedSourcePreflightCannotAdmitABusinessPost() = runBlocking<Unit> {
+        for (revoked in listOf(true, false)) TestServer().use { server ->
+            val e = RemovalFixture(server)
+            val p = e.prepare()
+            e.queue(e.f.work.a, 7, "Applicable")
+            if (revoked) enqueueRemovalProblem(server, 409, "SourceSecurityRevoked",
+                ""","sourceContextIds":["${p.saved.command.contextId}"]""")
+            else server.enqueue(e.f.preflight(p.saved.source.copy(contributorUserId = e.f.work.b.userId)))
+            if (revoked) assertEquals(ItemRemovalUploadResult.Rejected(WorkConflict.SourceSecurityRevoked),
+                e.coordinator.uploadItemRemovalBatch(p.grant, p.batch.batchId))
+            else expectIssue(Issue.RESPONSE) { e.coordinator.uploadItemRemovalBatch(p.grant, p.batch.batchId) }
+            e.f.readRequests()
+            e.f.preflightRequest(Fixture.ACCESS)
+            assertEquals(if (revoked) WorkState.Quarantined else WorkState.Queued, e.entry(p).state)
+            assertNull(server.web.takeRequest(100, TimeUnit.MILLISECONDS))
+        }
+    }
+
+    @Test fun sharedSendLeaseAndAuthorityRacesPreserveTheExactAttempt() = runBlocking<Unit> {
+        for (race in listOf("cancel", "logout", "selection", "rotated", "replacement")) TestServer().use { server ->
+            val e = RemovalFixture(server)
+            val p = e.prepare()
+            val other = e.f.coordinator()
+            e.queue(e.f.work.a, 7, "Applicable")
+            val otherGrant = other.open(e.f.selected())
+            e.f.readRequests()
+            e.queueAttempt(p)
+            if (race == "rotated") e.f.work.stageRotation(server.clock.instant().plusSeconds(300))
+            val replacement = e.f.work.b
+            val replacementBearer = "synthetic-new-removal-session"
+            if (race == "replacement") server.admit(Fixture.auth(user = replacement.userId,
+                family = replacement.familyId, access = replacementBearer), Fixture.receipt(replacement.userId, replacement.familyId))
+            val operation = testItemReceipt(p.saved, p.batch, e.f.work.a)
+            val finalResponse = MockResponse().setHeader("Content-Type", "application/json")
+                .setBody(removalUploadResponse(testItemBatchReceipt(p.batch, operation), operation))
+            withHeldResponse(server, e.uploadPath, finalResponse) { release ->
+                val pending = async(Dispatchers.IO) { runCatching { e.coordinator.uploadItemRemovalBatch(p.grant, p.batch.batchId) } }
+                e.consumeAttempt(p)
+                // A separate coordinator cannot enter the sample send path while removal holds the lease.
+                expectWork(WorkProblem.InvalidState) { other.uploadBatch(otherGrant, testId(77)) }
+                assertEquals(WorkState.InFlight, e.entry(p).state)
+                when (race) {
+                    "cancel" -> pending.cancelAndJoin()
+                    "logout" -> e.f.work.sessions.logout(attemptRemote = false)
+                    "selection" -> e.coordinator.clearSelection()
+                    "rotated" -> {
+                        e.f.work.offline.advance(300_000)
+                        e.f.work.sessions.read { _, _ -> Unit }
+                        server.request("/api/auth/refresh")
+                        server.request("/api/line-patrol/access/verify", bearer = "synthetic-access-rotated")
+                    }
+                    "replacement" -> {
+                        e.f.work.sessions.logout(attemptRemote = false)
+                        e.f.work.sessions.login("synthetic-replacement", "test-only")
+                        server.request("/api/auth/login")
+                        server.request("/api/line-patrol/access/verify", bearer = replacementBearer)
+                    }
+                }
+                release()
+                if (race != "cancel") assertTrue(pending.await().isFailure)
+            }
+            assertEquals(WorkState.OutcomeUnknown, e.entry(p).state)
+            assertEquals(p.saved, e.entry(p).removal)
+            assertNull(e.entry(p).serverEvidence)
+        }
+    }
+
+
+    @Test fun missingOriginalProofOrStickyRevocationStopsBeforePreflight() = runBlocking<Unit> {
+        for (revoked in listOf(true, false)) TestServer().use { server ->
+            val e = RemovalFixture(server)
+            val p = e.prepare()
+            e.f.work.rewriteFixture {
+                if (revoked) rememberSourceRevoked(p.saved.source.contextId)
+                else save(StoredWorkSource(p.saved.source, ""))
+            }
+            e.queue(e.f.work.a, 7, "Applicable")
+            expectWork(WorkProblem.SourceUnavailable) { e.coordinator.uploadItemRemovalBatch(p.grant, p.batch.batchId) }
+            e.f.readRequests()
+            assertEquals(p.saved, e.entry(p).removal)
+            assertNull(server.web.takeRequest(100, TimeUnit.MILLISECONDS))
+        }
+    }
+
+    @Test fun lastNetworkHopFencesRotationAndSelectionAfterDurableRemovalAdmission() = runBlocking<Unit> {
+        for (rotate in listOf(true, false)) {
+            val entered = CountDownLatch(1)
+            val release = CountDownLatch(1)
+            TestServer { request ->
+                if (request.url.encodedPath.endsWith("/item-removal-batches")) {
+                    entered.countDown()
+                    check(release.await(10, TimeUnit.SECONDS))
+                }
+            }.use { server ->
+                val e = RemovalFixture(server)
+                val p = e.prepare()
+                e.queueAttempt(p)
+                if (rotate) e.f.work.stageRotation(server.clock.instant().plusSeconds(300))
+                val pending = async(Dispatchers.IO) { runCatching { e.coordinator.uploadItemRemovalBatch(p.grant, p.batch.batchId) } }
+                try {
+                    assertTrue(entered.await(5, TimeUnit.SECONDS))
+                    e.f.readRequests()
+                    e.f.preflightRequest(Fixture.ACCESS)
+                    assertEquals(WorkState.InFlight, e.entry(p).state)
+                    if (rotate) {
+                        e.f.work.offline.advance(300_000)
+                        e.f.work.sessions.read { _, _ -> Unit }
+                        server.request("/api/auth/refresh")
+                        server.request("/api/line-patrol/access/verify", bearer = "synthetic-access-rotated")
+                    } else e.coordinator.clearSelection()
+                } finally {
+                    release.countDown()
+                }
+                assertTrue(pending.await().isFailure)
+                assertEquals(WorkState.OutcomeUnknown, e.entry(p).state)
+                assertNull(server.web.takeRequest(100, TimeUnit.MILLISECONDS))
+            }
+        }
+    }
+
+
+    @Test fun selectingAnotherTaskOrLineDuringPreflightLeavesThePreparedRemovalQueued() = runBlocking<Unit> {
+        for (changeLine in listOf(false, true)) TestServer().use { server ->
+            val e = RemovalFixture(server)
+            val p = e.prepare()
+            e.queue(e.f.work.a, 7, "Applicable")
+            val alternate = e.f.task.copy(taskId = testId(98),
+                lineId = if (changeLine) Fixture.SECOND_LINE else e.f.task.lineId)
+            e.f.enqueueRead(body = e.f.draft(alternate), scope = alternate)
+            val response = MockResponse().setHeader("Content-Type", "application/json")
+                .setBody(e.f.preflight(p.saved.source))
+            withHeldResponse(server, "${e.f.path}/work-contexts/validate-sources", response) { release ->
+                val upload = async(Dispatchers.IO) { runCatching {
+                    e.coordinator.uploadItemRemovalBatch(p.grant, p.batch.batchId)
+                } }
+                e.f.readRequests()
+                e.f.preflightRequest(Fixture.ACCESS)
+                // open changes selection before acquiring the coordinator mutex held by the upload.
+                val selected = async(start = CoroutineStart.UNDISPATCHED) {
+                    e.coordinator.open(e.f.selected(alternate))
+                }
+                release()
+                assertEquals(WorkProblem.StaleGrant, (upload.await().exceptionOrNull() as? WorkFailure)?.problem)
+                assertEquals(alternate, selected.await().draft.task)
+                e.f.readRequests(scope = alternate)
+            }
+            assertEquals(WorkState.Queued, e.entry(p).state)
+            assertNull(server.web.takeRequest(100, TimeUnit.MILLISECONDS))
+        }
+    }
+
+    private data class PreparedRemoval(val grant: OnlineWorkCoordinator.Grant, val saved: ItemRemovalEnvelope,
+                                       val batch: ItemRemovalBatch)
+
     private class RemovalFixture(val server: TestServer) {
         val f = OnlineWorkFixture(server, canContribute = true)
         val coordinator = f.coordinator()
         val local = coordinator.offlineItemRemovals
 
-        private fun queue(owner: SessionIdentity, version: Long, disposition: String, attempt: WorkAttempt = f.attempt,
+
+        val uploadPath = "${f.path}/item-removal-batches"
+
+        suspend fun prepare(reason: String? = null): PreparedRemoval {
+            val grant = arm()
+            val saved = local.save(command().copy(reason = reason))
+            val batch = local.prepareBatch(f.task, saved.command.owner, testId(82), saved.reference())
+            return PreparedRemoval(grant, saved, batch)
+        }
+
+        fun queueAttempt(removal: PreparedRemoval, actor: SessionIdentity = f.work.a) {
+            queue(actor, 7, "Applicable")
+            server.enqueue(f.preflight(removal.saved.source))
+        }
+
+        fun consumeAttempt(removal: PreparedRemoval, token: String = Fixture.ACCESS): JsonObject {
+            f.readRequests(token)
+            val source = f.preflightRequest(token).getValue("sources").jsonArray.single().jsonObject
+            assertEquals(JsonPrimitive(removal.saved.command.contextId), source["workContextId"])
+            assertEquals(JsonPrimitive(removal.saved.command.owner.userId), source["contributorUserIdAssertion"])
+            return Json.parseToJsonElement(server.request(uploadPath, "POST", token).body.readUtf8()).jsonObject
+        }
+
+        suspend fun entry(removal: PreparedRemoval): ItemRemovalEntry {
+            lateinit var stored: ItemRemovalEntry
+            f.work.rewriteFixture { stored = requireNotNull(itemRemoval(removal.saved.command.operationId)) }
+            return stored
+        }
+
+        fun queue(owner: SessionIdentity, version: Long, disposition: String, attempt: WorkAttempt = f.attempt,
                           removal: ItemRemovalReceipt? = null) {
             val pairs = f.pair.replace(f.attempt.inspectionAttemptId, attempt.inspectionAttemptId)
             val pair = Json.parseToJsonElement(pairs).jsonArray.single().jsonObject.toString().dropLast(1)
@@ -318,6 +689,16 @@ class OfflineItemRemovalCoordinatorTest {
 
         suspend fun command() = local.newRemoval(f.task, f.work.a, f.attempt, true, RemovalConfirmation.Production)
     }
+}
+
+
+private fun removalUploadResponse(batch: ItemRemovalBatchReceipt?, operation: ItemRemovalReceipt, replay: Boolean = false) =
+    """{"batchReceipt":${Json.encodeToString(batch)},"operation":${Json.encodeToString(operation)},
+        "replayOnly":$replay,"canExecute":false,"acceptsFormalInspection":false}"""
+
+private fun enqueueRemovalProblem(server: TestServer, status: Int, code: String, extra: String = "") {
+    server.web.enqueue(MockResponse().setResponseCode(status).setHeader("Content-Type", "application/problem+json")
+        .setBody("""{"status":$status,"title":"$code","code":"$code"$extra}"""))
 }
 
 private fun testItemReceipt(saved: ItemRemovalEnvelope, batch: ItemRemovalBatch, uploader: SessionIdentity): ItemRemovalReceipt {

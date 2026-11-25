@@ -23,6 +23,8 @@ import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonPrimitive
+import okhttp3.MediaType.Companion.toMediaType
+import okio.Buffer
 import kotlinx.serialization.json.encodeToJsonElement
 import kotlinx.serialization.json.jsonObject
 import okhttp3.RequestBody
@@ -99,6 +101,11 @@ internal class WorkbenchDeviceFixture : AutoCloseable {
         val sends = AtomicInteger()
         val removalPreflights = AtomicInteger()
         val removalReceiptReads = AtomicInteger()
+        val removalPosts = AtomicInteger()
+        var removalUploadTestEnabled = false
+        var beforeRemovalAdmission: () -> Unit = {}
+        var removalResponse: suspend (kotlinx.serialization.json.JsonObject) -> String = { error("Unexpected item removal POST") }
+        var missingRemovalReceipt = false
         var explicitRemovalSource: WorkSource? = null
         var explicitRemovalReceipt: ItemRemovalBatchReceipt? = null
         var explicitIndividualRemovalReceipt: ItemRemovalReceipt? = null
@@ -172,19 +179,47 @@ internal class WorkbenchDeviceFixture : AutoCloseable {
                 "SourcePreflightOnly", false))
         }
 
-        override suspend fun preflightSampleBatch(bearer: String, taskId: String, input: WorkContextPreflightInputWire,
-                                                  guard: GuardedSampleExchange): Response<ResponseBody> {
-            sends.incrementAndGet()
-            error("Unexpected sample preflight")
+        override suspend fun uploadItemRemovalBatch(bearer: String, taskId: String, input: RequestBody,
+                                                    guard: GuardedUploadExchange): Response<ResponseBody> {
+            check(removalUploadTestEnabled && guard.maySend())
+            val source = checkNotNull(explicitRemovalSource)
+            val body = Json.parseToJsonElement(Buffer().also(input::writeTo).readUtf8()).jsonObject
+            val proofPassed = body.getValue("sourceProof").jsonObject
+            check(source.task.taskId == taskId && proofPassed["workContextId"] == JsonPrimitive(source.contextId) &&
+                proofPassed["proofSecret"] == JsonPrimitive(proof))
+            removalPosts.incrementAndGet()
+            return Response.success(removalResponse(body).toResponseBody("application/json".toMediaType()))
+        }
+
+        override suspend fun preflightUploadSources(bearer: String, taskId: String, input: WorkContextPreflightInputWire,
+                                                  guard: GuardedUploadExchange): Response<ResponseBody> {
+            if (!removalUploadTestEnabled) {
+                sends.incrementAndGet()
+                error("Unexpected sample preflight")
+            }
+            check(guard.maySend())
+            val source = checkNotNull(explicitRemovalSource) { "Missing removal preflight fixture source" }
+            val sent = input.sources.single()
+            check(taskId == source.task.taskId && input.expectedTaskLineId == source.task.lineId &&
+                input.expectedWorkflowVersion == source.task.workflowVersion &&
+                input.expectedEnvironmentId == source.task.environmentId &&
+                sent.workContextId == source.contextId && sent.proofSecret == proof &&
+                sent.contributorUserIdAssertion == source.contributorUserId)
+            beforeRemovalAdmission()
+            val response = WorkContextPreflightWire(NOW,
+                listOf(WorkContextValidatedWire(source.contextId, source.contributorUserId, source.captureUntilUtc)),
+                "SourcePreflightOnly", false)
+            return Response.success(Json.encodeToString(response).toResponseBody("application/json".toMediaType()))
         }
 
         override suspend fun uploadSampleBatch(bearer: String, taskId: String, input: RequestBody,
-                                               guard: GuardedSampleExchange): Response<ResponseBody> {
+                                               guard: GuardedUploadExchange): Response<ResponseBody> {
             sends.incrementAndGet()
             error("Unexpected sample upload")
         }
 
         override suspend fun batchReceipt(bearer: String, taskId: String, batchId: String): Response<ResponseBody> {
+            if (missingRemovalReceipt) return Response.error(404, "{}".toResponseBody())
             val receipt = checkNotNull(explicitRemovalReceipt) { "Unexpected batch receipt query" }
             check(device.api.loginSubject.userId == receipt.uploadedByUserId && receipt.taskId == taskId && receipt.batchId == batchId)
             removalReceiptReads.incrementAndGet()

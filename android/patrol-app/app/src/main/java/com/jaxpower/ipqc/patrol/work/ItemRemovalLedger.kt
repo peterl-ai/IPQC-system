@@ -90,7 +90,9 @@ internal fun ItemRemovalEnvelope.matches(receipt: ItemRemovalReceipt): Boolean =
 
 internal fun verifyItemRemovalReceipt(entry: ItemRemovalEntry, receipt: ItemRemovalReceipt,
                                       problem: WorkProblem = WorkProblem.ReceiptMismatch) {
-    workCheck(receipt.batchId == entry.batch?.batchId && entry.removal.matches(receipt), problem)
+    // An exact operation replay can refer to its original, different batch.
+    // Only verification of a complete receipt binds the prepared batch identity.
+    workCheck(entry.removal.matches(receipt), problem)
 }
 
 internal fun verifyItemRemovalBatchReceipt(entry: ItemRemovalEntry, receipt: ItemRemovalBatchReceipt,
@@ -101,6 +103,7 @@ internal fun verifyItemRemovalBatchReceipt(entry: ItemRemovalEntry, receipt: Ite
     verifyItemRemovalReceipt(entry, operation, problem)
     workCheck(receipt.receiptVersion == 2 && receipt.operations.isEmpty() &&
         receipt.taskId == cmd.task.taskId && receipt.batchId == batch.batchId &&
+        operation.batchId == batch.batchId &&
         receipt.requestFingerprint == batch.fingerprint && receipt.previousDraftVersion == batch.expectedDraftVersion &&
         receipt.draftVersion == operation.draftVersion && receipt.uploadedByUserId == operation.uploadedByUserId &&
         receipt.uploadedPersonalSessionId == operation.uploadedPersonalSessionId &&

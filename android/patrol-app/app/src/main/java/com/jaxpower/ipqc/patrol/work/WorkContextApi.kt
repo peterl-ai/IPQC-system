@@ -1,6 +1,6 @@
 package com.jaxpower.ipqc.patrol.work
 
-import com.jaxpower.ipqc.patrol.api.GuardedSampleExchange
+import com.jaxpower.ipqc.patrol.api.GuardedUploadExchange
 import com.jaxpower.ipqc.patrol.api.OfflineAccessReceipt
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonObject
@@ -20,13 +20,18 @@ internal interface WorkContextApi {
     @Streaming
     @POST("api/line-patrol/tasks/{taskId}/operation-batches")
     suspend fun uploadSampleBatch(@Header("Authorization") bearer: String, @Path("taskId") taskId: String,
-                                  @Body input: RequestBody, @Tag guard: GuardedSampleExchange): Response<ResponseBody>
+                                  @Body input: RequestBody, @Tag guard: GuardedUploadExchange): Response<ResponseBody>
+
+    @Streaming
+    @POST("api/line-patrol/tasks/{taskId}/item-removal-batches")
+    suspend fun uploadItemRemovalBatch(@Header("Authorization") bearer: String, @Path("taskId") taskId: String,
+                                       @Body input: RequestBody, @Tag guard: GuardedUploadExchange): Response<ResponseBody>
 
     @Streaming
     @POST("api/line-patrol/tasks/{taskId}/work-contexts/validate-sources")
-    suspend fun preflightSampleBatch(@Header("Authorization") bearer: String, @Path("taskId") taskId: String,
+    suspend fun preflightUploadSources(@Header("Authorization") bearer: String, @Path("taskId") taskId: String,
                                      @Body input: WorkContextPreflightInputWire,
-                                     @Tag guard: GuardedSampleExchange): Response<ResponseBody>
+                                     @Tag guard: GuardedUploadExchange): Response<ResponseBody>
 
     @Streaming
     @GET("api/line-patrol/tasks/{taskId}/operation-batches/{batchId}/receipt")

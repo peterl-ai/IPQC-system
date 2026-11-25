@@ -1,4 +1,4 @@
-# IPQC PR history through #43
+# IPQC PR history through #44
 
 Recovered and reconciled through the PR #43 merge on 2026-11-24 against live GitHub metadata, main first-parent history, scoped docs and recovered reports. PR #17 merged before #16. The table is ordered by PR number. A merge date comes from GitHub UTC. Main CI links point to runs indexed by the actual merge commit. Early #1–7 evidence is the PR-local implementation/validation record or Web v1 handoff, where available. See [Review History](REVIEW_HISTORY.md) for supported findings and gaps. GitHub draft description text is historical and may describe a past hold even when the authoritative state is merged.
 
@@ -49,6 +49,7 @@ Recovered and reconciled through the PR #43 merge on 2026-11-24 against live Git
 | [#41 feat(android): add guarded offline sample capture coordinator](https://github.com/peterl-ai/IPQC-system/pull/41) | Android A03-05 | Verified offline sample arm/capture/correction/removal and projection, history and eligible seal | No photo/NG/Submit UX |
 | [#42 feat(android): add feature-gated offline sample inspection workbench](https://github.com/peterl-ai/IPQC-system/pull/42) | Android A04-01 | Feature-gated Workbench for actual task and eligible frozen attempt, durable ack, local history and two layouts | Public/Release stay read-only, pilot synthetic evidence |
 | [#43 feat(android): add protected offline inspection item removal foundation](https://github.com/peterl-ai/IPQC-system/pull/43) | Android A04-02 | Local protected per-item removal preparation and recovery, same-attempt exclusion and task-wide DraftVersion fence | Merged. Targeted final re-review passed. Production transport/UI deferred |
+| [#44 Permanent Project Memory and Handoff Integration](https://github.com/peterl-ai/IPQC-system/pull/44) | Documentation | Shared Project Memory, handoffs and bounded CI and safe fetch operating rules | Merged. Final independent PASS |
 
 ## Verified PR revisions, outcomes and CI
 
@@ -97,8 +98,9 @@ Recovered and reconciled through the PR #43 merge on 2026-11-24 against live Git
 | [#41](https://github.com/peterl-ai/IPQC-system/pull/41) | `codex/android-v1-a03-05-offline-sample-capture` | [`39a0b4819b20ffef5aaf261272e3406dba0676db`](https://github.com/peterl-ai/IPQC-system/commit/39a0b4819b20ffef5aaf261272e3406dba0676db) | [`e71177b70451c95e824b639ed7ba164691a24126`](https://github.com/peterl-ai/IPQC-system/commit/e71177b70451c95e824b639ed7ba164691a24126) | 2026-11-23 | Independent Final Review reported by Peter; merge verified | [45265139545, attempt 1](https://github.com/peterl-ai/IPQC-system/actions/runs/45265139545/attempts/1) |
 | [#42](https://github.com/peterl-ai/IPQC-system/pull/42) | `codex/android-v1-a04-01-offline-sample-workbench` | [`7132d18571bd08f4475db332046f721ab9e88e22`](https://github.com/peterl-ai/IPQC-system/commit/7132d18571bd08f4475db332046f721ab9e88e22) | [`4c74c1000c7c30997c4877dcfb693b354d80fba5`](https://github.com/peterl-ai/IPQC-system/commit/4c74c1000c7c30997c4877dcfb693b354d80fba5) | 2026-11-24 | Independent Final Review reported by Peter; merge verified | [45413041721, attempt 1](https://github.com/peterl-ai/IPQC-system/actions/runs/45413041721/attempts/1) |
 | [#43](https://github.com/peterl-ai/IPQC-system/pull/43) | `codex/android-v1-a04-02-offline-item-removal-foundation` | [`a0050619fb74226eb72ccac2d22da140a9fefbd2`](https://github.com/peterl-ai/IPQC-system/commit/a0050619fb74226eb72ccac2d22da140a9fefbd2) | [`cadd0973795aaecd4143c96de44ffd80f2ed356a`](https://github.com/peterl-ai/IPQC-system/commit/cadd0973795aaecd4143c96de44ffd80f2ed356a) | 2026-11-24 | Independent PASS, R43-P2-02 verified closed. Merge tree matches reviewed Tree | [Merged-main CI 45489357549, attempt 1](https://github.com/peterl-ai/IPQC-system/actions/runs/45489357549/attempts/1) |
+| [#44](https://github.com/peterl-ai/IPQC-system/pull/44) | `codex/project-memory-handoff-foundation` | `273a0631b10652c5968e5f7adff8e5dbb458d3d3` | `cddea323146ec3685b91a941fbc31fa87becdeb2` | 2026-11-25 | Independent PASS, R44-P3-01 verified closed. Reviewed and merged Tree `eeaf2bea0f903136e3c4a8b95ce423feb96ea559` | [PR #44 merged-main CI 45642806832, attempt 1](https://github.com/peterl-ai/IPQC-system/actions/runs/45642806832/attempts/1) |
 
-## Detailed continuation history #31–43
+## Detailed continuation history #31–44
 
 ### #31 R32-05 PIC
 
@@ -152,9 +154,13 @@ Opt-in Debug-only Workbench with frozen values, landscape/portrait layouts, save
 
 Implementation is complete for the reviewed A04-02 scope. On 2026-11-24, Independent ChatGPT issued a targeted **PASS — R43-P2-02 VERIFIED CLOSED** at HEAD `a0050619fb74226eb72ccac2d22da140a9fefbd2`, Tree `a8522ab82078837bc57604a9e7e84dd0bedfa85d`. The original P2/P3 remain closed, and the reviewer established no new actionable P1/P2/P3 in scope. Developer evidence includes 129 JVM tests, 46 instrumentation tests each on API 30 and API 35, and four successful jobs on each final-HEAD CI event. Peter merged PR #43 as `cadd0973795aaecd4143c96de44ffd80f2ed356a`. The merged-main Tree `a8522ab82078837bc57604a9e7e84dd0bedfa85d` equals the reviewed Tree. Codex inspected all four successful merged-main job logs. [Merged-main CI 45489357549, attempt 1](https://github.com/peterl-ai/IPQC-system/actions/runs/45489357549/attempts/1) [Final independent re-review](REVIEW_HISTORY.md#2026-11-24-final-independent-re-review) [Implementation reference](https://github.com/peterl-ai/IPQC-system/blob/a0050619fb74226eb72ccac2d22da140a9fefbd2/docs/43_ANDROID_V1_A04_02_OFFLINE_ITEM_REMOVAL_FOUNDATION.md) · [PR #43](https://github.com/peterl-ai/IPQC-system/pull/43)
 
-## Project Memory integration in progress
+### #44 Project Memory integration
 
-Documentation-only [Draft PR #44](https://github.com/peterl-ai/IPQC-system/pull/44) on `codex/project-memory-handoff-foundation`. Independent ChatGPT reviewed HEAD `2947e1dbba46e0e71470fe9118b6c53ba89d52c5` on 2026-11-25 and issued **HOLD — MINOR DOCUMENTATION REPAIR** (P1=0, P2=0, P3=1). R44-P3-01 is **FIXED — AWAITING INDEPENDENT RE-REVIEW**. PR #44 remains unmerged. [Review record and repair](REVIEW_HISTORY.md#2026-11-25-initial-independent-review) · [Current project state](CURRENT_PROJECT_STATE.md)
+The initial independent HOLD, developer repair and final **PASS — R44-P3-01 VERIFIED CLOSED** are recorded separately. Peter merged the reviewed revision on 2026-11-25. [Final independent re-review](REVIEW_HISTORY.md#2026-11-25-final-independent-re-review-of-pr-44) · [PR #44 merged-main CI 45642806832, attempt 1](https://github.com/peterl-ai/IPQC-system/actions/runs/45642806832/attempts/1)
+
+## Foreground item-removal transport
+
+Peter authorized the internal foreground transport slice on `codex/android-v1-a04-03-item-removal-batch-transport`. A04-03 is the working label introduced by this authorization. The transport Draft is pending independent review. Verify its PR number and exact revision from the [implementation branch PRs](https://github.com/peterl-ai/IPQC-system/pulls?q=is%3Apr+head%3Acodex%2Fandroid-v1-a04-03-item-removal-batch-transport) and pinned review evidence. [Current project state](CURRENT_PROJECT_STATE.md)
 
 ## Additional primary evidence for the R32 foundations
 

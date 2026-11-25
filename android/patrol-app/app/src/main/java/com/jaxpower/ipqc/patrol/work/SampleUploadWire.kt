@@ -1,8 +1,8 @@
 package com.jaxpower.ipqc.patrol.work
 
-import com.jaxpower.ipqc.patrol.api.GuardedSampleExchange
+import com.jaxpower.ipqc.patrol.api.GuardedUploadExchange
 import com.jaxpower.ipqc.patrol.api.Issue
-import com.jaxpower.ipqc.patrol.api.MAX_SAMPLE_ERROR_BYTES
+import com.jaxpower.ipqc.patrol.api.MAX_UPLOAD_ERROR_BYTES
 import com.jaxpower.ipqc.patrol.api.PatrolFailure
 import com.jaxpower.ipqc.patrol.api.ensureResponse
 import java.io.IOException
@@ -39,10 +39,10 @@ internal class UploadRejection(
     val operations: Set<String> = emptySet(),
 )
 
-internal sealed interface SampleExchange<out T> {
-    data class Success<T>(val body: T) : SampleExchange<T>
-    data class Rejected(val rejection: UploadRejection) : SampleExchange<Nothing>
-    data class Unknown(val issue: Issue) : SampleExchange<Nothing>
+internal sealed interface UploadExchange<out T> {
+    data class Success<T>(val body: T) : UploadExchange<T>
+    data class Rejected(val rejection: UploadRejection) : UploadExchange<Nothing>
+    data class Unknown(val issue: Issue) : UploadExchange<Nothing>
 }
 
 internal class SampleBatchResult(val receipt: ServerBatchReceipt?, val replayOnly: Boolean)
@@ -57,7 +57,7 @@ private class SampleBatchInput(
     val expectedDraftVersion: Long,
     val operations: List<SampleOperationInput>,
     val acceptedReferences: List<OperationReference>,
-    val sourceProofs: List<SampleSourceProof>,
+    val sourceProofs: List<UploadSourceProof>,
 )
 
 @Serializable
@@ -80,7 +80,7 @@ private class SampleOperationInput(
 private class SampleValueInput(val judgment: String?, val inspectionValue: JsonPrimitive?, val barcode: String?)
 
 @Serializable
-private class SampleSourceProof(val workContextId: String, val proofSecret: String)
+internal class UploadSourceProof(val workContextId: String, val proofSecret: String)
 
 // The ledger has already validated these exact canonical decimal tokens.
 // JsonPrimitive(Number) can pass large decimals through binary floating point on encode.
@@ -95,7 +95,7 @@ internal fun UploadCandidate.encodeBatch(): RequestBody {
             SampleOperationInput(op.operationId, entry.canonicalizationVersion, op.kind, op.attempt.taskItemId,
                 op.attempt.inspectionAttemptId, op.clientSampleId, entry.source.contextId, entry.source.contributorUserId,
                 op.baseDraftVersion, entry.originLocalEditVersion, data, op.dependencies)
-        }, batch.acceptedReferences, sources.map { SampleSourceProof(it.source.contextId, it.proof) })
+        }, batch.acceptedReferences, sources.map { UploadSourceProof(it.source.contextId, it.proof) })
     val bytes = Json.encodeToString(input).encodeToByteArray()
     workCheck(bytes.size <= 131_072, WorkProblem.InvalidState)
     return bytes.toRequestBody("application/json".toMediaType())
@@ -109,22 +109,22 @@ internal fun UploadCandidate.preflightInput(): WorkContextPreflightInputWire {
 }
 
 internal suspend fun WorkContextApi.sendSampleBatch(bearer: String, taskId: String, body: RequestBody,
-                                                    guard: GuardedSampleExchange): SampleExchange<SampleBatchResult> =
-    sampleExchange({ uploadSampleBatch(bearer, taskId, body, guard) }, JsonObject::decodeUploadResult, ::batchRejection)
+                                                    guard: GuardedUploadExchange): UploadExchange<SampleBatchResult> =
+    uploadExchange({ uploadSampleBatch(bearer, taskId, body, guard) }, JsonObject::decodeUploadResult, ::batchRejection)
 
-internal suspend fun WorkContextApi.checkSampleSources(bearer: String, input: UploadCandidate,
-                                                       guard: GuardedSampleExchange): SampleExchange<WorkContextPreflightWire> =
-    sampleExchange({ preflightSampleBatch(bearer, input.target.task.taskId, input.preflightInput(), guard) },
+internal suspend fun WorkContextApi.checkUploadSources(bearer: String, taskId: String,
+    input: WorkContextPreflightInputWire, guard: GuardedUploadExchange): UploadExchange<WorkContextPreflightWire> =
+    uploadExchange({ preflightUploadSources(bearer, taskId, input, guard) },
         { Json.decodeFromJsonElement(it) }, ::preflightRejection)
 
-private suspend fun <T> sampleExchange(call: suspend () -> Response<ResponseBody>, decode: (JsonObject) -> T,
-                                       classify: (Int, JsonObject) -> UploadRejection?): SampleExchange<T> = try {
+internal suspend fun <T> uploadExchange(call: suspend () -> Response<ResponseBody>, decode: (JsonObject) -> T,
+                                       classify: (Int, JsonObject) -> UploadRejection?): UploadExchange<T> = try {
     val reply = call()
     if (reply.isSuccessful) {
         val body = reply.body() ?: throw PatrolFailure(Issue.RESPONSE)
         body.use {
             ensureResponse(reply.code() == 200 && it.contentType()?.subtype == "json")
-            SampleExchange.Success(withContext(Dispatchers.IO) { decode(it.readWorkJson()) })
+            UploadExchange.Success(withContext(Dispatchers.IO) { decode(it.readWorkJson()) })
         }
     } else {
         val status = reply.code()
@@ -134,13 +134,13 @@ private suspend fun <T> sampleExchange(call: suspend () -> Response<ResponseBody
                 403 -> throw PatrolFailure(Issue.FORBIDDEN)
             }
             val rejection = if (status in setOf(400, 409) && body?.contentType()?.subtype == "problem+json") {
-                val problem = body.readWorkJson(MAX_SAMPLE_ERROR_BYTES)
+                val problem = body.readWorkJson(MAX_UPLOAD_ERROR_BYTES)
                 val code = problem["code"] as? JsonPrimitive
                 if (problem["status"] == JsonPrimitive(status) && code?.isString == true && problem["title"] == code)
                     classify(status, problem)
                 else null
             } else null
-            if (rejection != null) SampleExchange.Rejected(rejection) else SampleExchange.Unknown(when (status) {
+            if (rejection != null) UploadExchange.Rejected(rejection) else UploadExchange.Unknown(when (status) {
                 400 -> Issue.BAD_REQUEST
                 409 -> Issue.CONFLICT
                 429 -> Issue.RATE_LIMITED
@@ -151,13 +151,13 @@ private suspend fun <T> sampleExchange(call: suspend () -> Response<ResponseBody
     }
 } catch (failure: PatrolFailure) {
     if (failure.issue in setOf(Issue.UNAUTHENTICATED, Issue.FORBIDDEN)) throw failure
-    SampleExchange.Unknown(failure.issue)
+    UploadExchange.Unknown(failure.issue)
 } catch (_: IOException) {
-    SampleExchange.Unknown(Issue.CONNECTION)
+    UploadExchange.Unknown(Issue.CONNECTION)
 } catch (_: SerializationException) {
-    SampleExchange.Unknown(Issue.RESPONSE)
+    UploadExchange.Unknown(Issue.RESPONSE)
 } catch (_: IllegalArgumentException) {
-    SampleExchange.Unknown(Issue.RESPONSE)
+    UploadExchange.Unknown(Issue.RESPONSE)
 }
 
 private fun JsonObject.decodeUploadResult(): SampleBatchResult {
@@ -208,7 +208,7 @@ private fun batchRejection(status: Int, body: JsonObject): UploadRejection? {
     }
 }
 
-private fun JsonObject.ids(key: String): Set<String>? {
+internal fun JsonObject.ids(key: String): Set<String>? {
     val values = get(key) as? JsonArray ?: return null
     if (values.size !in 1..50) return null
     val distinct = mutableSetOf<String>()

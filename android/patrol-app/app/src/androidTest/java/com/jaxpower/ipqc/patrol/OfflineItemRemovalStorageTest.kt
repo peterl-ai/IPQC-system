@@ -12,10 +12,14 @@ import com.jaxpower.ipqc.patrol.offline.RoomCacheRows
 import com.jaxpower.ipqc.patrol.offline.TaskCacheDatabase
 import com.jaxpower.ipqc.patrol.work.*
 import java.io.File
+import java.io.IOException
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.jsonObject
 import org.junit.Assert.*
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -448,6 +452,121 @@ class OfflineItemRemovalStorageTest {
                 offline.save(scope, offline.newCapture(fixture.attempt(scope.taskId, 1), SampleInput.Quantitative("1.75")))
             }
             assertTrue(app.rows.transaction(scope) { catalog().operationIds.isEmpty() && catalog().itemRemovalIds.isEmpty() } == true)
+        }
+    }
+
+
+    @Test fun roomAdmissionFailureOrLostAcknowledgementNeverStartsRemovalPost() = runBlocking<Unit>(Dispatchers.IO) {
+        for (rollback in listOf(true, false)) WorkbenchDeviceFixture().use { fixture ->
+            val faults = RemovalFaultRows(fixture.device.rows)
+            val app = fixture.workServices(rows = faults)
+            val grant = activate(app, IDENTITY)
+            val scope = fixture.scope()
+            val local = app.online.offlineItemRemovals
+            val command = local.newRemoval(scope, IDENTITY, fixture.attempt(scope.taskId, 1),
+                true, RemovalConfirmation.Equipment, SECRET_REASON)
+            val saved = local.save(command)
+            val batch = local.prepareBatch(scope, IDENTITY, benchId(90), saved.reference())
+            fixture.wire.explicitRemovalSource = saved.source
+            fixture.wire.removalUploadTestEnabled = true
+            fixture.wire.beforeRemovalAdmission = {
+                if (rollback) faults.rollback.set(true) else faults.dropAck.set(true)
+            }
+            assertWorkFailure(WorkProblem.StorageUnavailable) { app.online.uploadItemRemovalBatch(grant, batch.batchId) }
+            assertEquals(0, fixture.wire.removalPosts.get())
+            val expected = if (rollback) WorkState.Queued else WorkState.OutcomeUnknown
+            assertEquals(expected, local.draft(scope, IDENTITY).history.single().state)
+            fixture.device.database.close()
+            val db = TaskCacheDatabase.open(fixture.device.context, fixture.device.databaseFile)
+            try {
+                val reopened = fixture.workServices(cache = fixture.device.openCache(db), rows = RoomCacheRows(db))
+                assertEquals(saved, reopened.online.offlineItemRemovals.save(command))
+                val history = reopened.online.offlineItemRemovals.draft(scope, IDENTITY).history.single()
+                assertEquals(expected, history.state)
+                assertEquals(batch, history.batch)
+                assertEquals(0, fixture.wire.removalPosts.get())
+            } finally {
+                db.close()
+            }
+        }
+    }
+
+    @Test fun exactPostAndReceiptRecoveryPreserveTheOriginalThroughRoomReopen() = runBlocking<Unit>(Dispatchers.IO) {
+        for (lostSettlementAck in listOf(true, false)) WorkbenchDeviceFixture().use { fixture ->
+            val faults = RemovalFaultRows(fixture.device.rows)
+            val app = fixture.workServices(rows = faults)
+            activate(app, IDENTITY)
+            val scope = fixture.scope()
+            val local = app.online.offlineItemRemovals
+            val command = local.newRemoval(scope, IDENTITY, fixture.attempt(scope.taskId, 1),
+                true, RemovalConfirmation.Production, SECRET_REASON)
+            val saved = local.save(command)
+            val batch = local.prepareBatch(scope, IDENTITY, benchId(91), saved.reference())
+            app.sessions.logout(attemptRemote = false)
+            fixture.device.api.loginSubject = fixture.b
+            val grant = activate(app, fixture.b)
+            val accepted = acceptance(saved, batch, fixture.b)
+            val receipt = accepted.itemOperations.single()
+            fixture.wire.explicitRemovalSource = saved.source
+            fixture.wire.removalUploadTestEnabled = true
+            fixture.wire.removalResponse = { request ->
+                assertEquals(WorkState.InFlight, app.rows.transaction(scope) { itemRemoval(command.operationId)?.state })
+                assertEquals(JsonPrimitive(batch.batchId), request["batchId"])
+                val operation = request.getValue("operation").jsonObject
+                assertEquals(JsonPrimitive(command.owner.userId), operation["contributorUserIdAssertion"])
+                assertEquals(JsonPrimitive(command.operationId), operation["operationId"])
+                assertEquals(JsonPrimitive(command.reason), operation["reason"])
+                if (!lostSettlementAck) throw IOException("Synthetic disconnect after request")
+                faults.dropAck.set(true)
+                """{"batchReceipt":${Json.encodeToString(accepted)},"operation":${Json.encodeToString(receipt)},
+                    "replayOnly":false,"canExecute":false,"acceptsFormalInspection":false}"""
+            }
+            if (lostSettlementAck) {
+                assertWorkFailure(WorkProblem.StorageUnavailable) { app.online.uploadItemRemovalBatch(grant, batch.batchId) }
+            } else {
+                assertEquals(ItemRemovalUploadResult.OutcomeUnknown(Issue.CONNECTION),
+                    app.online.uploadItemRemovalBatch(grant, batch.batchId))
+            }
+            assertEquals(1, fixture.wire.removalPosts.get())
+            fixture.device.database.close()
+            val db = TaskCacheDatabase.open(fixture.device.context, fixture.device.databaseFile)
+            try {
+                val fresh = fixture.workServices(cache = fixture.device.openCache(db), rows = RoomCacheRows(db))
+                val current = activate(fresh, fixture.b)
+                val lookup = ReceiptLookup(ReceiptKind.Batch, batch.batchId)
+                val id = command.operationId
+                val pendingState = if (lostSettlementAck) WorkState.Accepted else WorkState.OutcomeUnknown
+                assertEquals(pendingState, fresh.rows.transaction(scope) { itemRemoval(id)?.state })
+                assertWorkFailure(WorkProblem.InvalidState) { fresh.online.uploadItemRemovalBatch(current, batch.batchId) }
+                val recovery = fresh.online.open(fixture.task(), fixture.b)
+                if (!lostSettlementAck) {
+                    fixture.wire.missingRemovalReceipt = true
+                    assertEquals(ItemRemovalReceiptRecovery.Unresolved(ReceiptUncertainty.NotObserved),
+                        fresh.online.recoverItemRemovalReceipt(recovery, lookup))
+                    fixture.wire.missingRemovalReceipt = false
+                    fixture.wire.explicitIndividualRemovalReceipt = receipt
+                    assertEquals(ItemRemovalReceiptRecovery.OperationObserved(receipt), fresh.online.recoverItemRemovalReceipt(
+                        recovery, ReceiptLookup(ReceiptKind.Operation, id)))
+                    assertEquals(WorkState.OutcomeUnknown, fresh.rows.transaction(scope) { itemRemoval(id)?.state })
+                    assertWorkFailure(WorkProblem.StaleGrant) {
+                        val sample = fresh.online.offlineSamples.newCapture(fixture.attempt(scope.taskId, 0),
+                            SampleInput.Qualitative(QualitativeJudgment.OK))
+                        fresh.online.offlineSamples.save(scope, sample)
+                    }
+                }
+                fixture.wire.explicitRemovalReceipt = accepted
+                assertEquals(ItemRemovalReceiptRecovery.BatchConfirmed(accepted),
+                    fresh.online.recoverItemRemovalReceipt(recovery, lookup))
+                val item = fresh.rows.transaction(scope) { requireNotNull(itemRemoval(id)) }
+                assertEquals(saved, item?.removal)
+                assertEquals(receipt, item?.serverEvidence)
+                assertEquals(WorkState.Accepted, item?.state)
+                assertEquals("1.25", fresh.online.offlineItemRemovals.draft(scope, fixture.b).samples.single().value.inspectionValue)
+                assertEquals(1, fixture.wire.removalPosts.get())
+                assertEncrypted(fixture.device.databaseFile)
+            } finally {
+                db.close()
+            }
         }
     }
 

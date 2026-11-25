@@ -109,8 +109,8 @@ interface PatrolApi {
 
 private val wireJson = Json { ignoreUnknownKeys = true }
 
-internal class GuardedSampleExchange(val maySend: () -> Boolean)
-internal const val MAX_SAMPLE_ERROR_BYTES = 16L * 1024
+internal class GuardedUploadExchange(val maySend: () -> Boolean)
+internal const val MAX_UPLOAD_ERROR_BYTES = 16L * 1024
 
 fun patrolHttpClient(builder: OkHttpClient.Builder = OkHttpClient.Builder()): OkHttpClient = builder
     .cookieJar(CookieJar.NO_COOKIES)
@@ -136,27 +136,27 @@ fun patrolHttpClient(builder: OkHttpClient.Builder = OkHttpClient.Builder()): Ok
             request.newBuilder().method(request.method, once).build()
         } else request
         val reply = chain.proceed(outbound)
-        if (outbound.tag(GuardedSampleExchange::class.java) != null && !reply.isSuccessful)
-            reply.boundedSampleError()
+        if (outbound.tag(GuardedUploadExchange::class.java) != null && !reply.isSuccessful)
+            reply.boundedUploadError()
         else reply
     }
     .addNetworkInterceptor { chain ->
         val request = chain.request()
-        if (request.tag(GuardedSampleExchange::class.java)?.maySend?.invoke() == false)
-            throw IOException("Sample exchange authority changed")
+        if (request.tag(GuardedUploadExchange::class.java)?.maySend?.invoke() == false)
+            throw IOException("Upload authority changed")
         chain.proceed(request)
     }
     .build()
 
 // Retrofit buffers error bodies even with @Streaming. Bound them after OkHttp
 // decodes HTTP content and before Retrofit can allocate the whole body.
-private fun okhttp3.Response.boundedSampleError(): okhttp3.Response {
+private fun okhttp3.Response.boundedUploadError(): okhttp3.Response {
     val type = body?.contentType()
     val bytes = try {
         body?.use {
             if (code == 401 || code == 403) return@use null
             val source = it.source()
-            if (source.request(MAX_SAMPLE_ERROR_BYTES + 1)) null else source.readByteArray()
+            if (source.request(MAX_UPLOAD_ERROR_BYTES + 1)) null else source.readByteArray()
         }
     } catch (_: IOException) {
         null
