@@ -588,9 +588,9 @@ class SampleWorkbenchTest {
             captureRemovalLayouts(size, "read-only")
             activate(app)
             captureRemovalLayouts(size, "eligible")
+            captureRemovalConfirmationLayouts(size)
             openRemovalDialog()
             compose.onNodeWithText("This is the last applicable item.", substring = true).assertIsDisplayed()
-            captureRemovalLayouts(size, "confirmation", "item-removal-confirmation")
             confirmRemoval("Equipment")
             button("Save removal").performClick()
             val row = awaitRemoval(app, WorkState.Queued)
@@ -769,14 +769,30 @@ class SampleWorkbenchTest {
         """{"batchReceipt":${Json.encodeToString(accepted)},"operation":${Json.encodeToString(accepted.itemOperations.single())},
             "replayOnly":false,"canExecute":false,"acceptsFormalInspection":false}"""
 
-    private fun captureRemovalLayouts(size: MutableState<DpSize>, name: String, tag: String = "sample-workbench") {
+    private fun captureRemovalLayouts(size: MutableState<DpSize>, name: String) {
+        captureLayouts(size, name) { compose.onNodeWithTag("sample-workbench").captureToImage().asAndroidBitmap() }
+    }
+
+    private fun captureRemovalConfirmationLayouts(size: MutableState<DpSize>) {
+        captureLayouts(size, "confirmation") {
+            // Open after applying that layout. Changing the host viewport can
+            // dispose a modal window while its content is being captured.
+            openRemovalDialog()
+            compose.waitForIdle()
+            val image = checkNotNull(InstrumentationRegistry.getInstrumentation().uiAutomation.takeScreenshot())
+            button("Cancel").performClick()
+            image
+        }
+    }
+
+    private fun captureLayouts(size: MutableState<DpSize>, name: String, capture: () -> Bitmap) {
         if (InstrumentationRegistry.getArguments().getString("ipqcWorkbenchScreenshots") != "true") return
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val dir = File(context.cacheDir, "item-removal-evidence").apply { mkdirs() }
         for ((layout, viewport) in listOf("portrait" to DpSize(680.dp, 910.dp), "landscape" to DpSize(1000.dp, 710.dp))) {
             compose.runOnIdle { size.value = viewport }
             compose.waitForIdle()
-            val image = compose.onNodeWithTag(tag).captureToImage().asAndroidBitmap()
+            val image = capture()
             File(dir, "synthetic-item-removal-$layout-$name.png").outputStream().use {
                 check(image.compress(Bitmap.CompressFormat.PNG, 100, it))
             }
