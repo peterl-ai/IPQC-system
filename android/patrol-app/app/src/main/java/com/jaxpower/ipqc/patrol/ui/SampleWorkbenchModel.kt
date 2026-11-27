@@ -5,6 +5,7 @@ import com.jaxpower.ipqc.patrol.api.LineTaskDetail
 import com.jaxpower.ipqc.patrol.api.PatrolFailure
 import com.jaxpower.ipqc.patrol.auth.SessionIdentity
 import com.jaxpower.ipqc.patrol.work.BasicInformationCommand
+import com.jaxpower.ipqc.patrol.work.BasicInformationEnvelope
 import com.jaxpower.ipqc.patrol.work.BasicInformationField
 import com.jaxpower.ipqc.patrol.work.BasicInformationReceiptRecovery
 import com.jaxpower.ipqc.patrol.work.BasicInformationUploadResult
@@ -64,6 +65,8 @@ internal class WorkbenchTarget private constructor(val detail: LineTaskDetail, v
     }
 }
 
+internal data class BasicInformationActionResult(val field: BasicInformationField, val message: String)
+
 internal data class WorkbenchUi(
     val target: WorkbenchTarget? = null,
     val draft: LocalSampleDraft? = null,
@@ -84,18 +87,18 @@ internal data class WorkbenchUi(
     val header: WorkbenchBasicInformation? = null,
     val headerRefreshRequired: Boolean = false,
     val headerSavePending: Boolean = false,
-    val headerResult: String? = null,
+    val headerResult: BasicInformationActionResult? = null,
     val headerSavedId: String? = null,
 ) {
     val blocksNavigation get() = busy || retryPending || removalSavePending || headerSavePending
     val canEdit get() = hasLocalAccess && draft != null && !blocksNavigation && blocked == null
 
     fun canEditSamples(attempt: WorkAttempt): Boolean =
-        canEdit && (draft?.itemRemoval?.let { attempt !in it.sampleBlocks } ?: !removalRefreshRequired)
+        !showBasicInformation && canEdit && (draft?.itemRemoval?.let { attempt !in it.sampleBlocks } ?: !removalRefreshRequired)
 
     fun canStartRemoval(attempt: WorkAttempt): Boolean {
         val local = draft?.itemRemoval ?: return false
-        return canEdit && attempt.taskItemId == selectedItemId && !local.blocksNewRemoval &&
+        return !showBasicInformation && canEdit && attempt.taskItemId == selectedItemId && !local.blocksNewRemoval &&
             !local.requiresRefresh && local.items.any { it.attempt == attempt && it.server == ItemDisposition.Applicable }
     }
 
@@ -114,6 +117,7 @@ internal class SampleWorkbenchModel(private val scope: CoroutineScope, private v
     private var pending: OfflineSampleEdit? = null
     private var pendingRemoval: ItemRemovalCommand? = null
     private var pendingHeader: BasicInformationCommand? = null
+    private var headerGrant: OnlineWorkCoordinator.Grant? = null
 
     fun open(target: WorkbenchTarget, canReachServer: Boolean) {
         close()
@@ -122,7 +126,8 @@ internal class SampleWorkbenchModel(private val scope: CoroutineScope, private v
         observer = scope.launch {
             while (ui.value.target === target) {
                 delay(1_000)
-                observe(target)
+                observeSamples(target)
+                observeHeader(target)
             }
         }
     }
@@ -143,11 +148,13 @@ internal class SampleWorkbenchModel(private val scope: CoroutineScope, private v
         pending = null
         pendingRemoval = null
         pendingHeader = null
+        headerGrant = null
         mutable.value = WorkbenchUi()
     }
 
     fun selectItem(target: WorkbenchTarget, id: String) {
-        if (ui.value.target !== target || ui.value.blocksNavigation || target.detail.items.none { it.id == id }) return
+        if (ui.value.target !== target || ui.value.showBasicInformation || ui.value.blocksNavigation ||
+            target.detail.items.none { it.id == id }) return
         update(target) { it.copy(selectedItemId = id) }
     }
 
@@ -222,6 +229,8 @@ internal class SampleWorkbenchModel(private val scope: CoroutineScope, private v
     fun showBasicInformation(target: WorkbenchTarget, enabled: Boolean, canReachServer: Boolean) {
         val state = ui.value
         if (state.target !== target || state.blocksNavigation || state.showBasicInformation == enabled) return
+        invalidateRemovalProjection(target)
+        headerGrant = null
         update(target) { it.copy(showBasicInformation = enabled, header = null, headerRefreshRequired = enabled,
             headerResult = null, headerSavedId = null) }
         reload(target, canReachServer)
@@ -236,19 +245,33 @@ internal class SampleWorkbenchModel(private val scope: CoroutineScope, private v
     // The prior facts can stay visible for reference, but every callback from the
     // replaced projection loses eligibility until a new authorized read succeeds.
     private fun invalidateHeaderProjection(target: WorkbenchTarget) {
-        update(target) { it.copy(headerRefreshRequired = true) }
+        headerGrant = null
+        update(target) { it.copy(header = it.header?.copy(canCapture = false), headerRefreshRequired = true) }
     }
 
     private suspend fun refreshHeader(target: WorkbenchTarget, canReachServer: Boolean) {
         if (!canReachServer) {
             val local = headers.workbench(target.task, target.owner)
-            update(target) { it.copy(header = local, headerRefreshRequired = false) }
+            publishHeader(target, local, null)
             return
         }
-        val verified = online.basicInformationWorkbench(open(target))
-        val capture = if (verified.canCapture) headers.draft(target.task, target.owner).captureProblem else null
-        update(target) { it.copy(header = verified.copy(canCapture = verified.canCapture && capture == null),
-            headerRefreshRequired = false) }
+        val grant = open(target)
+        publishHeader(target, checkHeaderCapture(target, online.basicInformationWorkbench(grant)), grant)
+    }
+
+    private fun publishHeader(target: WorkbenchTarget, verified: WorkbenchBasicInformation, grant: OnlineWorkCoordinator.Grant?) {
+        if (ui.value.target !== target) return
+        headerGrant = grant
+        update(target) { it.copy(header = verified, headerRefreshRequired = false) }
+    }
+
+    private suspend fun checkHeaderCapture(target: WorkbenchTarget, view: WorkbenchBasicInformation): WorkbenchBasicInformation {
+        if (!view.canCapture) return view
+        val problem = headers.draft(target.task, target.owner).captureProblem ?: return view
+        if (problem in headerRefreshProblems) throw WorkFailure(problem)
+        // Capture and transport have separate authority. A capture deadline
+        // does not invalidate a verified upload or exact receipt action.
+        return view.copy(canCapture = false)
     }
 
     fun loadOlderBasicInformation(target: WorkbenchTarget, expected: WorkbenchBasicInformation) {
@@ -261,8 +284,7 @@ internal class SampleWorkbenchModel(private val scope: CoroutineScope, private v
                 return@run
             }
             val history = online.basicInformationWorkbench(grant, expected.observation)
-            update(target) { it.copy(header = history.copy(canCapture = history.canCapture && expected.canCapture),
-                headerRefreshRequired = false) }
+            publishHeader(target, checkHeaderCapture(target, history), grant)
         }
     }
 
@@ -291,7 +313,7 @@ internal class SampleWorkbenchModel(private val scope: CoroutineScope, private v
             update(target) { it.copy(error = "No local save found. Retry uses the same Basic Information operation.") }
         } else {
             workCheck(saved.command == exact, WorkProblem.OperationIdentityConflict)
-            savedBasicInformation(target, saved.reference().operationId, canReachServer)
+            savedBasicInformation(target, saved, canReachServer)
         }
     }
 
@@ -309,14 +331,14 @@ internal class SampleWorkbenchModel(private val scope: CoroutineScope, private v
             if (ui.value.target === target && failure.problem != WorkProblem.StorageUnavailable) pendingHeader = null
             throw failure
         }
-        savedBasicInformation(target, saved.reference().operationId, canReachServer)
+        savedBasicInformation(target, saved, canReachServer)
     }
 
-    private suspend fun savedBasicInformation(target: WorkbenchTarget, id: String, canReachServer: Boolean) {
+    private suspend fun savedBasicInformation(target: WorkbenchTarget, saved: BasicInformationEnvelope, canReachServer: Boolean) {
         if (ui.value.target !== target) return
         pendingHeader = null
-        update(target) { it.copy(headerResult = "Basic Information saved locally.", headerSavedId = id,
-            headerSavePending = false) }
+        update(target) { it.copy(headerResult = BasicInformationActionResult(saved.command.operation.field,
+            "Basic Information saved locally."), headerSavedId = saved.reference().operationId, headerSavePending = false) }
         refreshHeader(target, canReachServer)
     }
 
@@ -336,7 +358,7 @@ internal class SampleWorkbenchModel(private val scope: CoroutineScope, private v
                 else "The source was quarantined. The field update was not sent."
                 is BasicInformationUploadResult.NotSent -> "The field update was not sent. ${result.issue.message}"
             }
-            update(target) { it.copy(headerResult = message) }
+            update(target) { it.copy(headerResult = BasicInformationActionResult(row.field, message)) }
             refreshHeader(target, true)
         }
     }
@@ -361,7 +383,7 @@ internal class SampleWorkbenchModel(private val scope: CoroutineScope, private v
                 is BasicInformationReceiptRecovery.Conflict -> "The receipt did not match. The upload remains unresolved."
                 is BasicInformationReceiptRecovery.Unavailable -> "Receipt check unavailable. The upload remains unresolved."
             }
-            update(target) { it.copy(headerResult = message) }
+            update(target) { it.copy(headerResult = BasicInformationActionResult(row.field, message)) }
             refreshHeader(target, true)
         }
     }
@@ -418,11 +440,13 @@ internal class SampleWorkbenchModel(private val scope: CoroutineScope, private v
     }
 
     fun retryItemRemovalSave(target: WorkbenchTarget) = run(target) {
+        if (ui.value.showBasicInformation) return@run
         val exact = pendingRemoval ?: return@run
         saveExactRemoval(target, exact)
     }
 
     fun checkItemRemovalSave(target: WorkbenchTarget) = run(target) {
+        if (ui.value.showBasicInformation) return@run
         val exact = pendingRemoval ?: return@run
         val stored = removals.draft(target.task, target.owner).history
             .singleOrNull { it.removal.command.operationId == exact.operationId }?.removal
@@ -461,7 +485,7 @@ internal class SampleWorkbenchModel(private val scope: CoroutineScope, private v
     fun uploadItemRemoval(target: WorkbenchTarget, row: WorkbenchRemoval.Row) {
         val state = ui.value
         val view = state.removalView(online = true) ?: return
-        if (state.target !== target || state.blocksNavigation || state.removalRefreshRequired ||
+        if (state.target !== target || state.showBasicInformation || state.blocksNavigation || state.removalRefreshRequired ||
             state.selectedItemId != row.attempt.taskItemId || row !in view.rows ||
             row.state != WorkState.Queued || !row.currentAttempt || row.operationConfirmed || view.requiresRefresh) return
         run(target, uploadingRemoval = true) {
@@ -490,7 +514,7 @@ internal class SampleWorkbenchModel(private val scope: CoroutineScope, private v
     fun checkItemRemovalReceipt(target: WorkbenchTarget, row: WorkbenchRemoval.Row) {
         val state = ui.value
         val batchId = row.batchId ?: return
-        if (state.target !== target || state.blocksNavigation || state.removalRefreshRequired ||
+        if (state.target !== target || state.showBasicInformation || state.blocksNavigation || state.removalRefreshRequired ||
             state.selectedItemId != row.attempt.taskItemId ||
             state.removalView(online = true)?.rows?.contains(row) != true || row.state !in uncertainItemRemovalStates) return
         run(target) {
@@ -521,11 +545,13 @@ internal class SampleWorkbenchModel(private val scope: CoroutineScope, private v
         }?.editablePredecessor
 
     fun retry(target: WorkbenchTarget) {
+        if (ui.value.showBasicInformation) return
         val command = pending ?: return
         submit(target, command)
     }
 
     fun checkSave(target: WorkbenchTarget) = run(target) {
+        if (ui.value.showBasicInformation) return@run
         val command = pending ?: return@run
         val result = samples.savedOperation(target.task, command.operationId, target.owner)
         if (result == null) {
@@ -565,7 +591,7 @@ internal class SampleWorkbenchModel(private val scope: CoroutineScope, private v
         }
     }
 
-    private suspend fun observe(target: WorkbenchTarget) {
+    private suspend fun observeSamples(target: WorkbenchTarget) {
         val before = ui.value
         if (before.target !== target || before.busy || !before.hasLocalAccess) return
         try {
@@ -584,6 +610,26 @@ internal class SampleWorkbenchModel(private val scope: CoroutineScope, private v
         }
     }
 
+    private suspend fun observeHeader(target: WorkbenchTarget) {
+        val before = ui.value
+        val previous = before.header ?: return
+        if (before.target !== target || !before.showBasicInformation || before.busy || before.headerRefreshRequired) return
+        try {
+            val grant = headerGrant
+            val verified = if (grant == null) headers.workbench(target.task, target.owner) else {
+                val checked = online.recheckBasicInformationWorkbench(grant, previous.observation)
+                checkHeaderCapture(target, checked)
+            }
+            if (before === ui.value && verified != previous) publishHeader(target, verified, grant)
+        } catch (failure: Exception) {
+            if (failure is CancellationException) throw failure
+            if (before === ui.value) {
+                invalidateHeaderProjection(target)
+                recordFailure(target, failure)
+            }
+        }
+    }
+
     private fun showProtected(target: WorkbenchTarget, draft: LocalSampleDraft,
                               shared: WorkbenchRemoval? = null, sharedVersion: Long? = null) {
         val verified = shared?.takeIf { sharedVersion == draft.observedServerDraftVersion &&
@@ -591,7 +637,9 @@ internal class SampleWorkbenchModel(private val scope: CoroutineScope, private v
         update(target) {
             val superseded = it.onlineRemoval != null && (it.draft?.observedServerDraftVersion != draft.observedServerDraftVersion ||
                 it.draft?.itemRemoval != draft.itemRemoval || draft.itemRemoval?.requiresRefresh == true)
-            it.copy(draft = draft, hasLocalAccess = true, blocked = draft.captureProblem,
+            val header = if (draft.captureProblem == WorkProblem.CaptureWindowClosed)
+                it.header?.copy(canCapture = false) else it.header
+            it.copy(draft = draft, hasLocalAccess = true, blocked = draft.captureProblem, header = header,
                 onlineRemoval = verified ?: it.onlineRemoval.takeUnless { superseded },
                 removalRefreshRequired = verified == null && (it.removalRefreshRequired || superseded))
         }
@@ -619,6 +667,8 @@ internal class SampleWorkbenchModel(private val scope: CoroutineScope, private v
         val issue = (failure as? PatrolFailure)?.issue
         val problem = (failure as? WorkFailure)?.problem
         val lost = issue in closedScopeIssues || problem == WorkProblem.SourceUnavailable
+        if (ui.value.showBasicInformation && (lost || problem in headerRefreshProblems))
+            invalidateHeaderProjection(target)
         if (lost) {
             pending = null
             pendingRemoval = null
@@ -647,6 +697,7 @@ internal class SampleWorkbenchModel(private val scope: CoroutineScope, private v
     private companion object {
         val captureBlocks = setOf(WorkProblem.CaptureWindowClosed, WorkProblem.CaptureTimeUnavailable,
             WorkProblem.ScopeMismatch, WorkProblem.StaleGrant, WorkProblem.StorageUnavailable)
+        val headerRefreshProblems = setOf(WorkProblem.ScopeMismatch, WorkProblem.StaleGrant, WorkProblem.StorageUnavailable)
         val closedScopeIssues = setOf(Issue.UNAUTHENTICATED, Issue.FORBIDDEN, Issue.OFFLINE_EXPIRED, Issue.OFFLINE_CLOCK,
             Issue.CACHE_STORAGE, Issue.LINE_MISMATCH, Issue.NOT_FOUND, Issue.TASK_DETAIL_CHANGED, Issue.UNSUPPORTED_TASK, Issue.RESPONSE)
     }

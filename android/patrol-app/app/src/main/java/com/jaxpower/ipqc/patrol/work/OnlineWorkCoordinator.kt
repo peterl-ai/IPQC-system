@@ -139,6 +139,9 @@ internal class OnlineWorkCoordinator(
         store.basicInformationWorkbench(access, read)
     }
 
+    suspend fun recheckBasicInformationWorkbench(grant: Grant, observation: BasicInformationRead): WorkbenchBasicInformation =
+        withGrant(grant) { store.basicInformationWorkbench(grant.access, observation) }
+
     suspend fun sendWorkbenchBasicInformation(
         grant: Grant, selected: WorkbenchBasicInformation.Row,
     ): BasicInformationUploadResult = withGrant(grant) {

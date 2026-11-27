@@ -275,11 +275,12 @@ internal class SharedWorkStore(private val rows: ProtectedWorkRows, private val 
         val empty = WorkbenchBasicInformation(observation, emptyList(), false)
         if (!access.session.canContribute) return empty
         return transact(access) {
+            requireCurrentTaskDraftVersion(itemRemovals(basis.task), basis.draftVersion)
             val blocked = try {
                 requireBasicInformationTransportBasis(access, basis)
                 false
             } catch (failure: WorkFailure) {
-                if (failure.problem !in setOf(WorkProblem.InvalidState, WorkProblem.ScopeMismatch, WorkProblem.StaleGrant))
+                if (failure.problem !in setOf(WorkProblem.InvalidState, WorkProblem.ScopeMismatch))
                     throw failure
                 true
             }

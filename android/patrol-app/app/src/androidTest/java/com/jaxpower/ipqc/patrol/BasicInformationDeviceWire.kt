@@ -45,10 +45,13 @@ internal fun headerUploadJson(full: BasicInformationBatchReceipt, replay: Boolea
     put("acceptsFormalInspection", false)
 }
 
-internal fun WorkbenchDeviceFixture.respondBasicInformation(version: Long, vararg accepted: BasicInformationReceipt) {
+internal fun WorkbenchDeviceFixture.respondBasicInformation(
+    version: Long, vararg accepted: BasicInformationReceipt, history: List<BasicInformationReceipt> = accepted.toList(),
+    beforeRead: (Long?) -> Unit = {},
+) {
     val task = scope()
     val facts = BasicInformationField.entries.map { name -> BasicInformationFact(name, accepted.singleOrNull { it.operation.field == name }) }
-    val raw = buildJsonObject {
+    val snapshot = buildJsonObject {
         put("taskId", task.taskId); put("lineId", task.lineId); put("workflowVersion", task.workflowVersion)
         put("draftVersion", version); put("availability", if (version == 0L) "FoundationOnly" else "DraftFoundation")
         put("values", buildJsonObject { facts.forEach { put(it.field.name.replaceFirstChar(Char::lowercaseChar), it.value) } })
@@ -61,14 +64,19 @@ internal fun WorkbenchDeviceFixture.respondBasicInformation(version: Long, varar
         }))
         put("acceptedFieldCount", accepted.size)
         put("nonblankFieldCount", facts.count { it.presence == BasicInformationPresence.Provided })
-        put("history", JsonArray(accepted.sortedByDescending { it.draftVersion }.map(::wireBasicInformationReceipt)))
-        put("historyBeforeDraftVersion", JsonNull)
         put("canExecute", false); put("canSubmit", false); put("acceptsFormalInspection", false)
         put("completeness", "OptionalHeaderFactsOnly"); put("observation", "ReadOnlyPointInTime")
-    }.toString()
+    }
     wire.headerReply = { expected, before, limit ->
-        check((expected == null || expected == version) && before == null && limit == 20)
-        Response.success(raw.toResponseBody())
+        check(expected == null || expected == version)
+        beforeRead(before)
+        val eligible = history.filter { before == null || it.draftVersion < before }.sortedByDescending { it.draftVersion }
+        val page = eligible.take(limit)
+        val body = JsonObject(snapshot + buildJsonObject {
+            put("history", JsonArray(page.map(::wireBasicInformationReceipt)))
+            put("historyBeforeDraftVersion", page.lastOrNull()?.draftVersion.takeIf { page.size < eligible.size })
+        })
+        Response.success(body.jsonResponse())
     }
 }
 

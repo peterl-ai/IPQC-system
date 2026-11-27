@@ -51,7 +51,10 @@ internal fun BasicInformationEditor(
     val focus = LocalFocusManager.current
 
     Column(modifier.testTag("basic-information-editor"), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        state.headerResult?.let { Text(it, modifier = Modifier.testTag("basic-information-result")) }
+        state.headerResult?.let {
+            Text("Last action · ${it.field.label()}", style = MaterialTheme.typography.labelMedium)
+            Text(it.message, modifier = Modifier.testTag("basic-information-result"))
+        }
         if (state.headerRefreshRequired && !state.busy)
             Text("Reload the draft to verify Basic Information.", modifier = Modifier.testTag("basic-information-refresh-required"))
         if (state.headerSavePending) {
