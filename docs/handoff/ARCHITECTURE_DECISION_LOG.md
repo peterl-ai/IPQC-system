@@ -28,3 +28,7 @@ Peter authorized a feature-gated Item Removal Workbench UI after verified PR #45
 ### A04-05A owner-authorized implementation sequencing
 
 On 2026-11-27 Peter authorized the Android Basic Information foundation after verified PR #46 merged-main preflight. Implement the scoped GET, typed V1 identity and local protected operations before foreground Header POST, complete ReceiptVersion 6 settlement or editable Workbench UI. Reuse encrypted Room rows, task-wide version fencing and the existing contributor/session authority. Local proposed fields remain separate from accepted facts; correction targets an exact accepted same-field predecessor, and subsequent edits of a pending same-version field are deferred. This sequencing adds no business or material architecture policy. [Prior Backend contract](../29_R3205_BASIC_INFORMATION_DRAFT.md) · [Roadmap](PROJECT_ROADMAP.md)
+
+### A04-05B owner-authorized Basic Information integration
+
+On 2026-11-27 Peter authorized protected single-field Basic Information batches, explicit foreground POST with the shared task-wide upload lease, exact ReceiptVersion 6 recovery, and the editable development-pilot Workbench after verified PR #47 merged-main preflight. Preserve original contributor and source, shared DraftVersion CAS and immutable stale proposals. Explicit fresh proposals follow the existing reapply policy. The sequencing preserves the existing business and architecture decisions. [Backend contract](../29_R3205_BASIC_INFORMATION_DRAFT.md) · [Current state](CURRENT_PROJECT_STATE.md)

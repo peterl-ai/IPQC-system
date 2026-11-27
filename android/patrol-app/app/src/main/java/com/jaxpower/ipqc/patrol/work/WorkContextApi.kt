@@ -24,6 +24,17 @@ internal interface WorkContextApi {
                                   @Body input: RequestBody, @Tag guard: GuardedUploadExchange): Response<ResponseBody>
 
     @Streaming
+    @POST("api/line-patrol/tasks/{taskId}/basic-information-batches")
+    suspend fun uploadBasicInformationBatch(@Header("Authorization") bearer: String, @Path("taskId") taskId: String,
+                                            @Body input: RequestBody,
+                                            @Tag guard: GuardedUploadExchange): Response<ResponseBody>
+
+    @Streaming
+    @GET("api/line-patrol/tasks/{taskId}/basic-information-operations/{operationId}/receipt")
+    suspend fun basicInformationOperationReceipt(@Header("Authorization") bearer: String, @Path("taskId") taskId: String,
+                                                 @Path("operationId") operationId: String): Response<ResponseBody>
+
+    @Streaming
     @POST("api/line-patrol/tasks/{taskId}/item-removal-batches")
     suspend fun uploadItemRemovalBatch(@Header("Authorization") bearer: String, @Path("taskId") taskId: String,
                                        @Body input: RequestBody, @Tag guard: GuardedUploadExchange): Response<ResponseBody>

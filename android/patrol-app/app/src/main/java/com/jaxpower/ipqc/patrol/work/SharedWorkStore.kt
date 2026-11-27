@@ -143,6 +143,11 @@ internal class SharedWorkStore(private val rows: ProtectedWorkRows, private val 
         workCheck(access.task == basis.task, WorkProblem.ScopeMismatch)
         transact(access, create = true) {
             requireCurrentTaskDraftVersion(itemRemovals(basis.task), basis.draftVersion)
+            for ((_, transport) in basicInformationTransports(basis.task)) {
+                val known = transport.confirmed ?: continue
+                val remote = basis.field(known.operation.field).accepted
+                workCheck(remote == known || (remote?.draftVersion ?: 0L) > known.draftVersion, WorkProblem.ReceiptMismatch)
+            }
             val owner = access.session.identity
             if (access.session.canContribute) {
                 basicInformationBasis(owner)?.let { old ->
@@ -163,11 +168,13 @@ internal class SharedWorkStore(private val rows: ProtectedWorkRows, private val 
     // the server's replacement version or discarding any accepted facts.
     suspend fun recordBasicInformationVersionConflict(access: WorkAccess, version: Long) {
         workCheck(version == access.serverDraftVersion, WorkProblem.ScopeMismatch)
-        transact(access, create = true) {
-            val ledger = catalog()
-            if (version > (ledger.staleThroughDraftVersion ?: -1L)) {
-                save(ledger.copy(staleThroughDraftVersion = version, tracksBasicInformation = true))
-            }
+        transact(access, create = true) { rememberBasicInformationStaleVersion(version) }
+    }
+
+    private suspend fun WorkTransaction.rememberBasicInformationStaleVersion(version: Long) {
+        val ledger = catalog()
+        if (version > (ledger.staleThroughDraftVersion ?: -1L)) {
+            save(ledger.copy(staleThroughDraftVersion = version, tracksBasicInformation = true))
         }
     }
 
@@ -237,7 +244,7 @@ internal class SharedWorkStore(private val rows: ProtectedWorkRows, private val 
         workCheck(basis.task == task && basis.availability.editable && profile.basis.editable, WorkProblem.ScopeMismatch)
         val version = basis.draftVersion
         workCheck(version == profile.basis.draftVersion, WorkProblem.StaleGrant)
-        checkItemRemovalBarrier(task, version)
+        checkOtherTaskBatchBarriers(task, version)
         checkSampleBatchBarrier(version)
         workCheck(catalog().operationIds.none { (individualReceipt(it)?.draftVersion ?: 0) > version }, WorkProblem.StaleGrant)
         return basis
@@ -257,8 +264,221 @@ internal class SharedWorkStore(private val rows: ProtectedWorkRows, private val 
                 .none { it.operationId == op.operationId }, WorkProblem.OperationIdentityConflict)
         workCheck(basicInformationHistory(task, profile.owner).none {
             val pending = it.command.operation
-            pending.field == op.field && pending.baseDraftVersion == version && !sourceRevoked(pending.sourceWorkContextId)
+            pending.field == op.field && pending.baseDraftVersion == version && !sourceRevoked(pending.sourceWorkContextId) &&
+                checkedBasicInformationTransport(it)?.state !in setOf(WorkState.Conflict, WorkState.Quarantined)
         }, WorkProblem.InvalidState)
+    }
+
+    suspend fun basicInformationWorkbench(access: WorkAccess, observation: BasicInformationRead): WorkbenchBasicInformation {
+        val basis = observation.basis
+        workCheck(basis.task == access.task && basis.draftVersion == access.serverDraftVersion, WorkProblem.ScopeMismatch)
+        val empty = WorkbenchBasicInformation(observation, emptyList(), false)
+        if (!access.session.canContribute) return empty
+        return transact(access) {
+            val blocked = try {
+                requireBasicInformationTransportBasis(access, basis)
+                false
+            } catch (failure: WorkFailure) {
+                if (failure.problem !in setOf(WorkProblem.InvalidState, WorkProblem.ScopeMismatch, WorkProblem.StaleGrant))
+                    throw failure
+                true
+            }
+            val profile = offlineProfile(access.session.identity.userId)?.takeIf { it.owner == access.session.identity }
+            val captureSource = profile?.let { source(it.contextId)?.source }
+            val captureReady = !blocked && profile?.basis?.editable == true &&
+                profile.basis.draftVersion == basis.draftVersion && captureSource != null && !sourceRevoked(profile.contextId)
+            projectBasicInformation(observation, captureReady, canUpload = !blocked)
+        } ?: empty
+    }
+
+    suspend fun offlineBasicInformationWorkbench(task: WorkTask, owner: SessionIdentity): WorkbenchBasicInformation =
+        offlineTransaction(task, owner) { profile, observe ->
+            val basis = basicInformationBasis(owner) ?: throw WorkFailure(WorkProblem.SourceUnavailable)
+            val block = captureProblem(profile, observe) ?: try {
+                requireBasicInformationBasis(profile)
+                null
+            } catch (failure: WorkFailure) {
+                failure.problem
+            }
+            val last = BasicInformationRead(basis, basis.fields.mapNotNull { it.accepted }.sortedByDescending { it.draftVersion }, null)
+            OfflineTransactionResult(projectBasicInformation(last, block == null, canUpload = false, owner = owner))
+        }
+
+    private suspend fun WorkTransaction.projectBasicInformation(
+        observation: BasicInformationRead, canCapture: Boolean, canUpload: Boolean, owner: SessionIdentity? = null,
+    ): WorkbenchBasicInformation {
+        val basis = observation.basis
+        val observations = (basis.fields.mapNotNull { it.accepted } + observation.history)
+            .associateBy { it.operation.operationId }
+        val proposals = catalog().basicInformationIds.mapNotNull { id ->
+            val original = checkedBasicInformation(basis.task, id) ?: throw WorkFailure(WorkProblem.StorageUnavailable)
+            if (owner != null && owner != original.command.owner) return@mapNotNull null
+            val op = original.command.operation
+            val record = checkedBasicInformationTransport(original)
+            val known = record?.confirmed ?: observations[id]?.takeIf(original::matches)
+            val stale = op.baseDraftVersion != basis.draftVersion || !basis.hasOriginalPredecessor(op)
+            val state = when {
+                record != null && record.state != WorkState.Queued -> record.state
+                known != null -> WorkState.Accepted
+                sourceRevoked(op.sourceWorkContextId) -> WorkState.Quarantined
+                else -> WorkState.Queued
+            }
+            WorkbenchBasicInformation.Row(original.reference(), op.field, op.value, op.baseDraftVersion,
+                op.contributorUserId, state, record?.batch?.batchId, known, record?.conflict, stale,
+                canUpload && !stale && state == WorkState.Queued)
+        }
+        return WorkbenchBasicInformation(observation, proposals, canCapture)
+    }
+
+    suspend fun prepareBasicInformationUpload(
+        access: WorkAccess, basis: BasicInformationBasis, id: String, operation: OperationReference,
+    ): BasicInformationUploadCandidate = transact(access) {
+        workCheck(isWorkId(id), WorkProblem.BatchIdentityConflict)
+        val original = checkedBasicInformation(access.task, operation.operationId)
+            ?: throw WorkFailure(WorkProblem.InvalidState)
+        workCheck(original.reference() == operation, WorkProblem.OperationIdentityConflict)
+        val previous = checkedBasicInformationTransport(original)
+        val record = previous ?: BasicInformationTransport(BasicInformationBatch.seal(original, id))
+        workCheck(record.batch.batchId == id, WorkProblem.BatchIdentityConflict)
+        val candidate = basicInformationCandidate(access, basis, original, record)
+        if (previous == null) {
+            workCheck(batch(id) == null && itemRemovals(access.task).none { it.batch?.batchId == id } &&
+                basicInformationTransports(access.task).none { (_, other) -> other.batch.batchId == id },
+                WorkProblem.BatchIdentityConflict)
+            saveBasicInformationTransport(record)
+        }
+        candidate
+    } ?: throw WorkFailure(WorkProblem.StorageUnavailable)
+
+    private suspend fun WorkTransaction.requireBasicInformationTransportBasis(access: WorkAccess, basis: BasicInformationBasis) {
+        workCheck(access.session.canContribute && basis.task == access.task &&
+            basis.availability.editable && basicInformationBasis(access.session.identity) == basis, WorkProblem.ScopeMismatch)
+        workCheck(access.serverDraftVersion == basis.draftVersion, WorkProblem.StaleGrant)
+        checkOtherTaskBatchBarriers(access.task, basis.draftVersion)
+        checkSampleBatchBarrier(basis.draftVersion)
+        workCheck(catalog().operationIds.none { (individualReceipt(it)?.draftVersion ?: 0) > basis.draftVersion },
+            WorkProblem.StaleGrant)
+    }
+
+    private suspend fun WorkTransaction.basicInformationCandidate(
+        access: WorkAccess, basis: BasicInformationBasis, original: BasicInformationEnvelope, record: BasicInformationTransport,
+    ): BasicInformationUploadCandidate {
+        requireBasicInformationTransportBasis(access, basis)
+        val op = original.command.operation
+        workCheck(record.state == WorkState.Queued, WorkProblem.InvalidState)
+        workCheck(op.baseDraftVersion == basis.draftVersion, WorkProblem.StaleGrant)
+        workCheck(basis.hasOriginalPredecessor(op), WorkProblem.DependencyMismatch)
+        val stored = requireSource(op.sourceWorkContextId, access.task)
+        workCheck(stored.source == original.source && validProof(stored.proof) &&
+            op.sourceWorkContextId !in access.securityRevokedSources && !sourceRevoked(op.sourceWorkContextId),
+            WorkProblem.SourceUnavailable)
+        val batch = record.batch
+        return BasicInformationUploadCandidate(ReceiptTarget(ReceiptLookup(ReceiptKind.Batch, batch.batchId),
+            access.task, workspaceId, batch.batchId, batch.fingerprint), original, record, stored)
+    }
+
+    suspend fun beginBasicInformationUpload(
+        access: WorkAccess, basis: BasicInformationBasis, candidate: BasicInformationUploadCandidate,
+    ): RequestBody = transact(access) {
+        val original = checkedBasicInformation(access.task, candidate.original.reference().operationId)
+            ?: throw WorkFailure(WorkProblem.StaleGrant)
+        val record = checkedBasicInformationTransport(original) ?: throw WorkFailure(WorkProblem.StaleGrant)
+        val current = basicInformationCandidate(access, basis, original, record)
+        workCheck(current.target == candidate.target && original == candidate.original && record == candidate.transport &&
+            current.source.proof == candidate.source.proof, WorkProblem.StaleGrant)
+        workCheck(access.approves(current.source.source), WorkProblem.SourceUnavailable)
+        val request = current.encodeBatch()
+        saveBasicInformationTransport(record.copy(state = WorkState.InFlight))
+        request
+    } ?: throw WorkFailure(WorkProblem.StorageUnavailable)
+
+    suspend fun leaveBasicInformationUncertain(candidate: BasicInformationUploadCandidate) {
+        val target = candidate.target
+        rows.transaction(target.task) {
+            val original = checkedBasicInformation(target.task, candidate.original.reference().operationId) ?: return@transaction
+            if (original != candidate.original || workspaceId != target.workspaceId) return@transaction
+            val record = checkedBasicInformationTransport(original) ?: return@transaction
+            if (record.batch == candidate.transport.batch && record.state == WorkState.InFlight)
+                saveBasicInformationTransport(record.copy(state = WorkState.OutcomeUnknown))
+        }
+    }
+
+    suspend fun applyBasicInformationRejection(
+        access: WorkAccess, candidate: BasicInformationUploadCandidate, rejection: UploadRejection, preflight: Boolean,
+    ): Boolean = transact(access) {
+        val original = checkedBasicInformation(access.task, candidate.original.reference().operationId) ?: return@transact false
+        if (original != candidate.original || workspaceId != candidate.target.workspaceId) return@transact false
+        val record = checkedBasicInformationTransport(original) ?: return@transact false
+        val expectedState = if (preflight) WorkState.Queued else WorkState.InFlight
+        if (record.batch != candidate.transport.batch || record.state != expectedState || record.confirmed != null)
+            return@transact false
+        val reason = rejection.reason
+        val op = original.command.operation
+        if (reason.isSourceRejection()) {
+            if (rejection.contexts != setOf(op.sourceWorkContextId) ||
+                rejection.operations != (if (preflight) emptySet() else setOf(op.operationId))) return@transact false
+            if (reason == WorkConflict.SourceSecurityRevoked) rememberSourceRevoked(op.sourceWorkContextId)
+        } else if (preflight) return@transact false
+        if (reason == WorkConflict.DraftVersionConflict) rememberBasicInformationStaleVersion(op.baseDraftVersion)
+        val state = if (reason.isSourceRejection()) WorkState.Quarantined else WorkState.Conflict
+        saveBasicInformationTransport(record.copy(state = state, conflict = reason))
+        true
+    } == true
+
+    suspend fun locateBasicInformationReceipt(access: WorkAccess, lookup: ReceiptLookup): ReceiptTarget? =
+        transact(access) { basicInformationReceiptTarget(access.task, lookup) }
+
+    private suspend fun WorkTransaction.basicInformationReceiptTarget(task: WorkTask, lookup: ReceiptLookup): ReceiptTarget? {
+        if (!isWorkId(lookup.id)) return null
+        val (_, record) = basicInformationTransports(task).singleOrNull { (original, transport) ->
+            when (lookup.kind) {
+                ReceiptKind.Batch -> transport.batch.batchId == lookup.id
+                ReceiptKind.Operation -> original.reference().operationId == lookup.id
+            }
+        } ?: return null
+        if (!record.state.unresolvedAttempt() && record.state != WorkState.Accepted) return null
+        return ReceiptTarget(lookup, task, workspaceId, record.batch.batchId, record.batch.fingerprint)
+    }
+
+    suspend fun reconcileBasicInformationReceipt(
+        access: WorkAccess, target: ReceiptTarget, reply: BasicInformationReceiptReply,
+    ): BasicInformationReceiptRecovery = transact(access) {
+        workCheck(basicInformationReceiptTarget(access.task, target.lookup) == target, WorkProblem.StaleGrant)
+        val (original, record) = basicInformationTransports(access.task).single { (_, it) -> it.batch.batchId == target.batchId }
+        when (reply) {
+            is BasicInformationReceiptReply.Batch -> {
+                val receipt = reply.receipt
+                if (target.lookup.kind != ReceiptKind.Batch || !record.matches(original, receipt) ||
+                    (record.batchReceipt != null && record.batchReceipt != receipt)) {
+                    basicInformationReceiptConflict(target.lookup, ReceiptConflictReason.ResponseMismatch)
+                } else {
+                    if (record.batchReceipt == null)
+                        saveBasicInformationTransport(record.copy(state = WorkState.Accepted, batchReceipt = receipt))
+                    rememberBasicInformationDraftVersion(receipt.operation.draftVersion)
+                    BasicInformationReceiptRecovery.BatchConfirmed(receipt)
+                }
+            }
+            is BasicInformationReceiptReply.Operation -> {
+                val receipt = reply.receipt
+                if (target.lookup.kind != ReceiptKind.Operation || !original.matches(receipt) ||
+                    (record.confirmed != null && record.confirmed != receipt)) {
+                    basicInformationReceiptConflict(target.lookup, ReceiptConflictReason.ResponseMismatch)
+                } else {
+                    if (record.confirmed == null) saveBasicInformationTransport(record.copy(individualReceipt = receipt))
+                    rememberBasicInformationDraftVersion(receipt.draftVersion)
+                    BasicInformationReceiptRecovery.OperationObserved(receipt)
+                }
+            }
+            BasicInformationReceiptReply.Missing -> BasicInformationReceiptRecovery.Unresolved(ReceiptUncertainty.NotObserved)
+            BasicInformationReceiptReply.Conflict -> basicInformationReceiptConflict(target.lookup, ReceiptConflictReason.QueryConflict)
+            is BasicInformationReceiptReply.Unavailable -> BasicInformationReceiptRecovery.Unavailable(reply.issue)
+        }
+    } ?: BasicInformationReceiptRecovery.Unresolved(ReceiptUncertainty.NoLocalAttempt)
+
+    private suspend fun WorkTransaction.basicInformationReceiptConflict(lookup: ReceiptLookup, reason: ReceiptConflictReason):
+        BasicInformationReceiptRecovery.Conflict {
+        rememberReceiptConflict(lookup, reason)
+        return BasicInformationReceiptRecovery.Conflict(reason)
     }
 
     suspend fun newItemRemoval(task: WorkTask, owner: SessionIdentity, attempt: WorkAttempt, id: String,
@@ -407,10 +627,11 @@ internal class SharedWorkStore(private val rows: ProtectedWorkRows, private val 
         }
         workCheck(entry.state == WorkState.Queued && cmd.expectedDraftVersion == basis.draftVersion, WorkProblem.StaleGrant)
         workCheck(basis.requireItemRemovalAttempt(cmd.attempt).required == entry.removal.minimumSampleCount, WorkProblem.ScopeMismatch)
-        checkItemRemovalBarrier(task, basis.draftVersion)
+        checkOtherTaskBatchBarriers(task, basis.draftVersion)
         checkSampleBatchBarrier(basis.draftVersion)
         val entries = itemRemovals(task)
-        workCheck(batch(id) == null && entries.none { it.batch?.batchId == id }, WorkProblem.BatchIdentityConflict)
+        workCheck(batch(id) == null && entries.none { it.batch?.batchId == id } &&
+            basicInformationTransports(task).none { (_, it) -> it.batch.batchId == id }, WorkProblem.BatchIdentityConflict)
         val original = requireSource(cmd.contextId, task)
         workCheck(original.source == entry.removal.source && validProof(original.proof) &&
             !sourceRevoked(cmd.contextId), WorkProblem.SourceUnavailable)
@@ -461,6 +682,7 @@ internal class SharedWorkStore(private val rows: ProtectedWorkRows, private val 
             cmd.attempt in access.currentAttempts, WorkProblem.InvalidState)
         workCheck(observed.requireItemRemovalAttempt(cmd.attempt).required == entry.removal.minimumSampleCount,
             WorkProblem.ScopeMismatch)
+        checkBasicInformationBarrier(access.task)
         workCheck(entries.none { it.state in uncertainItemRemovalStates }, WorkProblem.InvalidState)
         requireCurrentTaskDraftVersion(entries, access.serverDraftVersion)
         checkSampleBatchBarrier(access.serverDraftVersion)
@@ -879,10 +1101,11 @@ internal class SharedWorkStore(private val rows: ProtectedWorkRows, private val 
 
     private suspend fun WorkTransaction.sealBatch(task: WorkTask, id: String, entries: List<OperationEntry>): BatchRecord {
         val expected = entries.first().envelope.operation.baseDraftVersion
-        checkItemRemovalBarrier(task, expected)
+        checkOtherTaskBatchBarriers(task, expected)
         val removals = itemRemovals(task)
         checkSampleItemRemovals(removals, expected, entries.map { it.envelope.operation.attempt }.toSet())
-        workCheck(removals.none { it.batch?.batchId == id }, WorkProblem.BatchIdentityConflict)
+        workCheck(removals.none { it.batch?.batchId == id } &&
+            basicInformationTransports(task).none { (_, it) -> it.batch.batchId == id }, WorkProblem.BatchIdentityConflict)
         val members = entries.map { it.envelope.reference() }
         val ids = members.map { it.operationId }.toSet()
         val accepted = entries.flatMap { it.envelope.operation.dependencies }.distinct()
@@ -908,7 +1131,7 @@ internal class SharedWorkStore(private val rows: ProtectedWorkRows, private val 
 
     suspend fun startAttempt(access: WorkAccess, id: String) {
         transition(access, id) { batch ->
-            checkItemRemovalBarrier(access.task, access.serverDraftVersion)
+            checkOtherTaskBatchBarriers(access.task, access.serverDraftVersion)
             workCheck(batch.state == WorkState.Queued && catalog().batchIds.none { other ->
                 other != id && requireBatch(other).state in setOf(WorkState.InFlight, WorkState.OutcomeUnknown)
             }, WorkProblem.InvalidState)
@@ -932,6 +1155,10 @@ internal class SharedWorkStore(private val rows: ProtectedWorkRows, private val 
             }
             for (entry in itemRemovals(access.task)) {
                 if (entry.state == WorkState.InFlight) saveItemRemoval(entry.copy(state = WorkState.OutcomeUnknown))
+            }
+            for ((_, transport) in basicInformationTransports(access.task)) {
+                if (transport.state == WorkState.InFlight)
+                    saveBasicInformationTransport(transport.copy(state = WorkState.OutcomeUnknown))
             }
         }
     }
@@ -1024,7 +1251,7 @@ internal class SharedWorkStore(private val rows: ProtectedWorkRows, private val 
     }
 
     private suspend fun WorkTransaction.uploadCandidate(access: WorkAccess, id: String): UploadCandidate {
-        checkItemRemovalBarrier(access.task, access.serverDraftVersion)
+        checkOtherTaskBatchBarriers(access.task, access.serverDraftVersion)
         val batch = requireBatch(id)
         workCheck(batch.state == WorkState.Queued && catalog().batchIds.none { other ->
             other != id && requireBatch(other).state in setOf(WorkState.InFlight, WorkState.OutcomeUnknown)

@@ -77,7 +77,7 @@ internal fun JsonObject.decodeBasicInformation(task: WorkTask, query: BasicInfor
         field.requireFalse("isRequired")
         field.requireFalse("blocksSubmit")
         val name = field.named<BasicInformationField>("field")
-        val receipt = field["lastOperation"].let { if (it == JsonNull) null else it.asObject().receipt(task, version) }
+        val receipt = field["lastOperation"].let { if (it == JsonNull) null else it.asObject().decodeBasicInformationReceipt(task, version) }
         val fact = BasicInformationFact(name, receipt)
         ensureResponse((receipt == null || receipt.operation.field == name) &&
             field["hasAcceptedFact"] == JsonPrimitive(receipt != null) &&
@@ -91,7 +91,7 @@ internal fun JsonObject.decodeBasicInformation(task: WorkTask, query: BasicInfor
 
     val entries = array("history")
     ensureResponse(entries.size <= query.limit)
-    val history = entries.map { it.asObject().receipt(task, version) }
+    val history = entries.map { it.asObject().decodeBasicInformationReceipt(task, version) }
     val cursor = if (this["historyBeforeDraftVersion"] == JsonNull) null else number("historyBeforeDraftVersion")
     validateBasicInformationHistory(facts, history, cursor, query)
     return BasicInformationRead(BasicInformationBasis(task, version, availability, facts), history, cursor)
@@ -126,7 +126,7 @@ private fun validateBasicInformationHistory(
     }
 }
 
-private fun JsonObject.receipt(task: WorkTask, version: Long): BasicInformationReceipt {
+internal fun JsonObject.decodeBasicInformationReceipt(task: WorkTask, version: Long = Long.MAX_VALUE): BasicInformationReceipt {
     exactKeys("taskId", "operationId", "batchId", "canonicalizationVersion", "contentHash", "kind", "field", "value",
         "sourceWorkContextId", "contributorUserId", "actorUserId", "actorPersonalSessionId", "environmentId", "lineId",
         "workflowVersion", "baseDraftVersion", "originLocalEditVersion", "acceptedAtUtc", "draftVersion", "predecessor")
@@ -149,15 +149,15 @@ private fun JsonObject.receipt(task: WorkTask, version: Long): BasicInformationR
     return receipt
 }
 
-private fun JsonElement?.asObject() = this as? JsonObject ?: throw PatrolFailure(Issue.RESPONSE)
-private fun JsonObject.exactKeys(vararg names: String) = ensureResponse(keys == names.toSet())
-private fun JsonObject.array(name: String) = this[name] as? JsonArray ?: throw PatrolFailure(Issue.RESPONSE)
-private fun JsonObject.requireFalse(name: String) = ensureResponse(this[name] == JsonPrimitive(false))
-private fun JsonObject.text(name: String) = (this[name] as? JsonPrimitive)?.takeIf { it.isString }?.content
+internal fun JsonElement?.asObject() = this as? JsonObject ?: throw PatrolFailure(Issue.RESPONSE)
+internal fun JsonObject.exactKeys(vararg names: String) = ensureResponse(keys == names.toSet())
+internal fun JsonObject.array(name: String) = this[name] as? JsonArray ?: throw PatrolFailure(Issue.RESPONSE)
+internal fun JsonObject.requireFalse(name: String) = ensureResponse(this[name] == JsonPrimitive(false))
+internal fun JsonObject.text(name: String) = (this[name] as? JsonPrimitive)?.takeIf { it.isString }?.content
     ?: throw PatrolFailure(Issue.RESPONSE)
 private fun JsonObject.nullableText(name: String) = if (this[name] == JsonNull) null else text(name)
 private val integerText = Regex("""-?(0|[1-9][0-9]*)""")
-private fun JsonObject.number(name: String) = (this[name] as? JsonPrimitive)
+internal fun JsonObject.number(name: String) = (this[name] as? JsonPrimitive)
     ?.takeIf { !it.isString && integerText.matches(it.content) }?.longOrNull
     ?: throw PatrolFailure(Issue.RESPONSE)
 private inline fun <reified T : Enum<T>> JsonObject.named(name: String): T {

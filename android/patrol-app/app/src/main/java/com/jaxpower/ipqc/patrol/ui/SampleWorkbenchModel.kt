@@ -4,6 +4,13 @@ import com.jaxpower.ipqc.patrol.api.Issue
 import com.jaxpower.ipqc.patrol.api.LineTaskDetail
 import com.jaxpower.ipqc.patrol.api.PatrolFailure
 import com.jaxpower.ipqc.patrol.auth.SessionIdentity
+import com.jaxpower.ipqc.patrol.work.BasicInformationCommand
+import com.jaxpower.ipqc.patrol.work.BasicInformationField
+import com.jaxpower.ipqc.patrol.work.BasicInformationReceiptRecovery
+import com.jaxpower.ipqc.patrol.work.BasicInformationUploadResult
+import com.jaxpower.ipqc.patrol.work.WorkbenchBasicInformation
+import com.jaxpower.ipqc.patrol.work.unresolvedAttempt
+import com.jaxpower.ipqc.patrol.work.validBasicInformationValue
 import com.jaxpower.ipqc.patrol.work.DraftOperationCanonical
 import com.jaxpower.ipqc.patrol.work.FrozenSampleType
 import com.jaxpower.ipqc.patrol.work.ItemDisposition
@@ -72,8 +79,15 @@ internal data class WorkbenchUi(
     val removalRefreshRequired: Boolean = false,
     val removalSavePending: Boolean = false,
     val uploadingRemoval: Boolean = false,
+    val showBasicInformation: Boolean = false,
+    val headerField: BasicInformationField = BasicInformationField.Customer,
+    val header: WorkbenchBasicInformation? = null,
+    val headerRefreshRequired: Boolean = false,
+    val headerSavePending: Boolean = false,
+    val headerResult: String? = null,
+    val headerSavedId: String? = null,
 ) {
-    val blocksNavigation get() = busy || retryPending || removalSavePending
+    val blocksNavigation get() = busy || retryPending || removalSavePending || headerSavePending
     val canEdit get() = hasLocalAccess && draft != null && !blocksNavigation && blocked == null
 
     fun canEditSamples(attempt: WorkAttempt): Boolean =
@@ -92,12 +106,14 @@ internal data class WorkbenchUi(
 internal class SampleWorkbenchModel(private val scope: CoroutineScope, private val online: OnlineWorkCoordinator) {
     private val samples = online.offlineSamples
     private val removals = online.offlineItemRemovals
+    private val headers = online.offlineBasicInformation
     private val mutable = MutableStateFlow(WorkbenchUi())
     val ui = mutable.asStateFlow()
     private var action: Job? = null
     private var observer: Job? = null
     private var pending: OfflineSampleEdit? = null
     private var pendingRemoval: ItemRemovalCommand? = null
+    private var pendingHeader: BasicInformationCommand? = null
 
     fun open(target: WorkbenchTarget, canReachServer: Boolean) {
         close()
@@ -111,6 +127,14 @@ internal class SampleWorkbenchModel(private val scope: CoroutineScope, private v
         }
     }
 
+    fun pauseBasicInformation() {
+        val target = ui.value.target ?: return
+        if (ui.value.showBasicInformation) {
+            action?.cancel()
+            invalidateHeaderProjection(target)
+        }
+    }
+
     fun close() {
         observer?.cancel()
         action?.cancel()
@@ -118,6 +142,7 @@ internal class SampleWorkbenchModel(private val scope: CoroutineScope, private v
         action = null
         pending = null
         pendingRemoval = null
+        pendingHeader = null
         mutable.value = WorkbenchUi()
     }
 
@@ -127,6 +152,11 @@ internal class SampleWorkbenchModel(private val scope: CoroutineScope, private v
     }
 
     fun reload(target: WorkbenchTarget, canReachServer: Boolean) = run(target) {
+        if (ui.value.showBasicInformation) {
+            invalidateHeaderProjection(target)
+            refreshHeader(target, canReachServer)
+            return@run
+        }
         if (canReachServer) {
             invalidateRemovalProjection(target)
         } else {
@@ -180,11 +210,166 @@ internal class SampleWorkbenchModel(private val scope: CoroutineScope, private v
 
     fun arm(target: WorkbenchTarget) = run(target) {
         invalidateRemovalProjection(target)
+        if (ui.value.showBasicInformation) invalidateHeaderProjection(target)
         val grant = open(target)
         workCheck(grant.access.session.canContribute, WorkProblem.SourceUnavailable)
         workCheck(grant.draft.sampleBasis.editable, WorkProblem.ScopeMismatch)
         val (version, shared) = online.armWorkbench(online.issueOrReuse(grant))
         showProtected(target, samples.draft(target.task, target.owner), shared, version)
+        if (ui.value.showBasicInformation) refreshHeader(target, true)
+    }
+
+    fun showBasicInformation(target: WorkbenchTarget, enabled: Boolean, canReachServer: Boolean) {
+        val state = ui.value
+        if (state.target !== target || state.blocksNavigation || state.showBasicInformation == enabled) return
+        update(target) { it.copy(showBasicInformation = enabled, header = null, headerRefreshRequired = enabled,
+            headerResult = null, headerSavedId = null) }
+        reload(target, canReachServer)
+    }
+
+    fun selectBasicInformationField(target: WorkbenchTarget, field: BasicInformationField) {
+        val state = ui.value
+        if (state.target === target && state.showBasicInformation && !state.blocksNavigation && field != state.headerField)
+            update(target) { it.copy(headerField = field, header = it.header?.copy()) }
+    }
+
+    // The prior facts can stay visible for reference, but every callback from the
+    // replaced projection loses eligibility until a new authorized read succeeds.
+    private fun invalidateHeaderProjection(target: WorkbenchTarget) {
+        update(target) { it.copy(headerRefreshRequired = true) }
+    }
+
+    private suspend fun refreshHeader(target: WorkbenchTarget, canReachServer: Boolean) {
+        if (!canReachServer) {
+            val local = headers.workbench(target.task, target.owner)
+            update(target) { it.copy(header = local, headerRefreshRequired = false) }
+            return
+        }
+        val verified = online.basicInformationWorkbench(open(target))
+        val capture = if (verified.canCapture) headers.draft(target.task, target.owner).captureProblem else null
+        update(target) { it.copy(header = verified.copy(canCapture = verified.canCapture && capture == null),
+            headerRefreshRequired = false) }
+    }
+
+    fun loadOlderBasicInformation(target: WorkbenchTarget, expected: WorkbenchBasicInformation) {
+        if (expected.observation.historyBeforeDraftVersion == null || !currentHeader(target, expected)) return
+        run(target) {
+            invalidateHeaderProjection(target)
+            val grant = open(target)
+            if (grant.draft.version != expected.observation.basis.draftVersion) {
+                refreshHeader(target, true)
+                return@run
+            }
+            val history = online.basicInformationWorkbench(grant, expected.observation)
+            update(target) { it.copy(header = history.copy(canCapture = history.canCapture && expected.canCapture),
+                headerRefreshRequired = false) }
+        }
+    }
+
+    fun saveBasicInformation(
+        target: WorkbenchTarget, expected: WorkbenchBasicInformation, field: BasicInformationField,
+        value: String?, canReachServer: Boolean,
+    ) {
+        if (!currentHeader(target, expected) || ui.value.headerField != field || !expected.canSave(field)) return
+        if (!validBasicInformationValue(value)) return
+        run(target) {
+            invalidateHeaderProjection(target)
+            val version = expected.observation.basis.draftVersion
+            val predecessor = expected.observation.basis.field(field).accepted?.reference()
+            val command = headers.newEdit(target.task, target.owner, field, value, predecessor)
+            workCheck(command.operation.baseDraftVersion == version, WorkProblem.StaleGrant)
+            pendingHeader = command
+            saveExactBasicInformation(target, command, canReachServer)
+        }
+    }
+
+    fun checkBasicInformationSave(target: WorkbenchTarget, canReachServer: Boolean) = run(target) {
+        val exact = pendingHeader ?: return@run
+        val saved = headers.draft(target.task, target.owner).proposals
+            .singleOrNull { it.original.command.operation.operationId == exact.operation.operationId }?.original
+        if (saved == null) {
+            update(target) { it.copy(error = "No local save found. Retry uses the same Basic Information operation.") }
+        } else {
+            workCheck(saved.command == exact, WorkProblem.OperationIdentityConflict)
+            savedBasicInformation(target, saved.reference().operationId, canReachServer)
+        }
+    }
+
+    fun retryBasicInformationSave(target: WorkbenchTarget, canReachServer: Boolean) = run(target) {
+        val exact = pendingHeader ?: return@run
+        saveExactBasicInformation(target, exact, canReachServer)
+    }
+
+    private suspend fun saveExactBasicInformation(
+        target: WorkbenchTarget, command: BasicInformationCommand, canReachServer: Boolean,
+    ) {
+        val saved = try {
+            headers.save(command)
+        } catch (failure: WorkFailure) {
+            if (ui.value.target === target && failure.problem != WorkProblem.StorageUnavailable) pendingHeader = null
+            throw failure
+        }
+        savedBasicInformation(target, saved.reference().operationId, canReachServer)
+    }
+
+    private suspend fun savedBasicInformation(target: WorkbenchTarget, id: String, canReachServer: Boolean) {
+        if (ui.value.target !== target) return
+        pendingHeader = null
+        update(target) { it.copy(headerResult = "Basic Information saved locally.", headerSavedId = id,
+            headerSavePending = false) }
+        refreshHeader(target, canReachServer)
+    }
+
+    fun uploadBasicInformation(target: WorkbenchTarget, expected: WorkbenchBasicInformation, row: WorkbenchBasicInformation.Row) {
+        if (!currentHeader(target, expected) || ui.value.headerField != row.field ||
+            row !in expected.proposals || !row.canUpload) return
+        run(target) {
+            invalidateHeaderProjection(target)
+            update(target) { it.copy(headerResult = null) }
+            val result = online.sendWorkbenchBasicInformation(open(target), row)
+            val message = when (result) {
+                is BasicInformationUploadResult.Accepted -> "Server confirmed the Basic Information field and its batch."
+                is BasicInformationUploadResult.NeedsBatchReceipt -> "The field receipt is verified. Check the exact batch receipt."
+                is BasicInformationUploadResult.OutcomeUnknown -> "Upload outcome unknown. Check the exact receipt."
+                is BasicInformationUploadResult.Rejected -> if (result.submitted)
+                    "The server rejected the field update. The original is retained."
+                else "The source was quarantined. The field update was not sent."
+                is BasicInformationUploadResult.NotSent -> "The field update was not sent. ${result.issue.message}"
+            }
+            update(target) { it.copy(headerResult = message) }
+            refreshHeader(target, true)
+        }
+    }
+
+    fun checkBasicInformationReceipt(
+        target: WorkbenchTarget, expected: WorkbenchBasicInformation, row: WorkbenchBasicInformation.Row, kind: ReceiptKind,
+    ) {
+        val id = when (kind) {
+            ReceiptKind.Batch -> row.batchId ?: return
+            ReceiptKind.Operation -> row.operation.operationId
+        }
+        if (!currentHeader(target, expected) || ui.value.headerField != row.field ||
+            row !in expected.proposals || !row.state.unresolvedAttempt()) return
+        run(target) {
+            invalidateHeaderProjection(target)
+            update(target) { it.copy(headerResult = null) }
+            val result = online.recoverBasicInformationReceipt(open(target), ReceiptLookup(kind, id))
+            val message = when (result) {
+                is BasicInformationReceiptRecovery.BatchConfirmed -> "Server confirmed the Basic Information field and its batch."
+                is BasicInformationReceiptRecovery.OperationObserved -> "The field receipt is verified. Check the exact batch receipt."
+                is BasicInformationReceiptRecovery.Unresolved -> "Receipt not found yet. The upload outcome remains unknown."
+                is BasicInformationReceiptRecovery.Conflict -> "The receipt did not match. The upload remains unresolved."
+                is BasicInformationReceiptRecovery.Unavailable -> "Receipt check unavailable. The upload remains unresolved."
+            }
+            update(target) { it.copy(headerResult = message) }
+            refreshHeader(target, true)
+        }
+    }
+
+    private fun currentHeader(target: WorkbenchTarget, expected: WorkbenchBasicInformation): Boolean {
+        val state = ui.value
+        return state.target === target && state.showBasicInformation && !state.blocksNavigation &&
+            !state.headerRefreshRequired && state.header === expected
     }
 
     private suspend fun open(target: WorkbenchTarget): OnlineWorkCoordinator.Grant =
@@ -423,7 +608,8 @@ internal class SampleWorkbenchModel(private val scope: CoroutineScope, private v
                 recordFailure(target, failure)
             } finally {
                 update(target) { it.copy(busy = false, retryPending = pending != null,
-                    removalSavePending = pendingRemoval != null, uploadingRemoval = false) }
+                    removalSavePending = pendingRemoval != null, headerSavePending = pendingHeader != null,
+                    uploadingRemoval = false) }
             }
         }
     }
@@ -436,14 +622,18 @@ internal class SampleWorkbenchModel(private val scope: CoroutineScope, private v
         if (lost) {
             pending = null
             pendingRemoval = null
+            pendingHeader = null
         }
         val message = when {
             pending != null -> "Local save could not be confirmed. Check the saved operation or retry it exactly."
             pendingRemoval != null -> "Removal save could not be confirmed. Check the local save or retry the same removal."
+            pendingHeader != null -> "Basic Information save could not be confirmed. Check the local save or retry the same field."
             else -> issue?.message ?: problem?.label() ?: "The local draft is unavailable."
         }
         update(target) { it.copy(
             error = message, retryPending = pending != null, removalSavePending = pendingRemoval != null,
+            headerSavePending = pendingHeader != null, header = it.header.takeUnless { lost },
+            headerRefreshRequired = it.headerRefreshRequired || (lost && it.showBasicInformation),
             draft = it.draft.takeUnless { lost }, onlineRemoval = it.onlineRemoval.takeUnless { lost },
             hasLocalAccess = it.hasLocalAccess && !lost, saved = it.saved.takeUnless { lost },
             blocked = when {

@@ -113,6 +113,11 @@ internal class WorkTransaction(
     suspend fun saveBasicInformation(envelope: BasicInformationEnvelope) =
         write("basic-information", envelope.command.operation.operationId, envelope)
 
+    suspend fun basicInformationTransport(id: String): BasicInformationTransport? = read("basic-information-transport", id)
+
+    suspend fun saveBasicInformationTransport(record: BasicInformationTransport) =
+        write("basic-information-transport", record.batch.operation.operationId, record)
+
     suspend fun basicInformationBasis(owner: SessionIdentity): BasicInformationBasis? =
         read("basic-information-basis", "${owner.userId}:${owner.familyId}")
 

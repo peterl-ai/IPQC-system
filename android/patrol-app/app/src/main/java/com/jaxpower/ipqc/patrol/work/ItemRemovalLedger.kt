@@ -90,7 +90,8 @@ internal suspend fun WorkTransaction.requireCurrentTaskDraftVersion(entries: Lis
     taskDraftVersionProblem(entries, observedVersion)?.let { throw WorkFailure(it) }
 }
 
-internal suspend fun WorkTransaction.checkItemRemovalBarrier(task: WorkTask, observedVersion: Long) {
+internal suspend fun WorkTransaction.checkOtherTaskBatchBarriers(task: WorkTask, observedVersion: Long) {
+    checkBasicInformationBarrier(task)
     val entries = itemRemovals(task)
     workCheck(entries.none { it.state in uncertainItemRemovalStates }, WorkProblem.InvalidState)
     requireCurrentTaskDraftVersion(entries, observedVersion)
