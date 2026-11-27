@@ -1,4 +1,4 @@
-# IPQC PR history through #46
+# IPQC PR history
 
 Recovered and reconciled through the PR #43 merge on 2026-11-24 against live GitHub metadata, main first-parent history, scoped docs and recovered reports. PR #17 merged before #16. The table is ordered by PR number. A merge date comes from GitHub UTC. Main CI links point to runs indexed by the actual merge commit. Early #1–7 evidence is the PR-local implementation/validation record or Web v1 handoff, where available. See [Review History](REVIEW_HISTORY.md) for supported findings and gaps. GitHub draft description text is historical and may describe a past hold even when the authoritative state is merged.
 
@@ -212,3 +212,11 @@ A04-05B is the authorized Android Draft scope for one protected optional-field b
 [PR #48](https://github.com/peterl-ai/IPQC-system/pull/48) is an Open Draft. On 2026-11-27, Independent ChatGPT issued **HOLD — FOCUSED REPAIR REQUIRED** at Base `2c85ca164815999bd2ea0aeee4f9d6779af85474`, HEAD `b1222b66cf4f8177c02e3b2cfd38e779fcb1974e`, Tree `1598b72744c9692b1de2816b401ccde8e4629b37` and synthetic checkout `25c1ed4e4ce5e73b1cc6674d03f688cba3b90a41`. R48-P2-01 covers stale Header capture eligibility. R48-P3-01 covers the repeated screenshot-enabled Sample assertion. [Independent review](REVIEW_HISTORY.md#2026-11-27-initial-independent-review-of-pr-48)
 
 The focused Android repair is `6861c2fa7d450b89e0f559a44c34a2581c02d44b` (Tree `111db6ef0b352178260ee4641b1f09aef02a5d64`). The exact published Draft and final validation pins are in the focused re-review handoff. R48-P2-01 and R48-P3-01 await independent re-review. PR #47 is the latest verified merge. [Developer repair](REVIEW_HISTORY.md#2026-11-27-focused-developer-repair-of-pr-48)
+
+## PR #48 final independent review and verified merge
+
+[PR #48](https://github.com/peterl-ai/IPQC-system/pull/48) independently passed at Base `2c85ca164815999bd2ea0aeee4f9d6779af85474`, repaired HEAD `011b1bf09735142bb73cd9cc4ed853b0237ad504`, Tree `063f12899900fc2ffda102a3aca030c5d005e0e7` and synthetic merge `bd9d91b20f9f038b7baa8440e87022edc6d749c4`. R48-P2-01 and R48-P3-01 are verified closed. Peter merged `054d57711c8936f05306aca18497e334f931ab8f` on 2026-11-27. The reviewed Base and HEAD are the exact ordered parents and the tree matches. Codex confirmed the successful four actual merged-main jobs. [Independent review](REVIEW_HISTORY.md#2026-11-27-final-independent-re-review-of-pr-48) · [Merged-main CI](https://github.com/peterl-ai/IPQC-system/actions/runs/46066793596/attempts/1)
+
+## A04-06A Ordinary NG Details foundation
+
+Active Android Draft branch `codex/android-v1-a04-06a-ordinary-ng-details-foundation` from verified Base `054d57711c8936f05306aca18497e334f931ab8f`. Scope covers the existing authenticated pinned read, canonical operation and batch identities and immutable protected Set/Correct. Ordinary NG transport and UI remain separate. The review handoff carries the assigned Draft number and exact live HEAD, Tree, synthetic checkout and final CI pins. [Draft by branch](https://github.com/peterl-ai/IPQC-system/pulls?q=is%3Apr+head%3Acodex%2Fandroid-v1-a04-06a-ordinary-ng-details-foundation) · [Roadmap](PROJECT_ROADMAP.md)

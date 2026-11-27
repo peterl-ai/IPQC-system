@@ -24,6 +24,7 @@ internal class OnlineDraft(
     val allItemsRemoved: Boolean,
     val validPlanning: Boolean,
     val sampleBasis: OfflineSampleBasis,
+    val itemIds: List<String>,
 )
 
 internal fun SharedDraftWire.validate(detail: LineTaskDetail, session: SessionRepository.WorkSession): OnlineDraft {
@@ -122,8 +123,9 @@ internal fun SharedDraftWire.validate(detail: LineTaskDetail, session: SessionRe
             records.size <= MAX_CURRENT_SAMPLES && records.all { it.value.inspectionType == applicable[attempt]?.type?.name }
         }
     ensureResponse(frozen.mapNotNull { it.serverRemoval?.operationId }.let { it.distinct().size == it.size })
+    val itemIds = detail.items.sortedWith(compareBy({ it.sequenceNo }, { it.id })).map { it.id }
     return OnlineDraft(task, draftVersion, requireNotNull(state), frozen.map { it.attempt }.toSet(),
-        applicable.keys, allItemsRemoved, validPlanning, OfflineSampleBasis(task, draftVersion, editable, frozen, observed))
+        applicable.keys, allItemsRemoved, validPlanning, OfflineSampleBasis(task, draftVersion, editable, frozen, observed), itemIds)
 }
 
 internal fun WorkContextMetadataWire.validatedSource(task: WorkTask): WorkSource {

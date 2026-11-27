@@ -32,3 +32,7 @@ On 2026-11-27 Peter authorized the Android Basic Information foundation after ve
 ### A04-05B owner-authorized Basic Information integration
 
 On 2026-11-27 Peter authorized protected single-field Basic Information batches, explicit foreground POST with the shared task-wide upload lease, exact ReceiptVersion 6 recovery, and the editable development-pilot Workbench after verified PR #47 merged-main preflight. Preserve original contributor and source, shared DraftVersion CAS and immutable stale proposals. Explicit fresh proposals follow the existing reapply policy. The sequencing preserves the existing business and architecture decisions. [Backend contract](../29_R3205_BASIC_INFORMATION_DRAFT.md) · [Current state](CURRENT_PROJECT_STATE.md)
+
+### A04-06A owner-authorized Ordinary NG Details foundation
+
+After verified PR #48 merged-main preflight, Peter authorized A04-06A as the working label for the Android Ordinary NG read, V1 canonical identity and protected local Set/Correct foundation. Ordinary NG uses the existing authoritative matching task version, exact current accepted NG sample references, and retained applicable-scope predecessor. Transport and editable UI remain separate. The split maintains the approved business and material architecture. [Backend contract](../33_R3205_ORDINARY_NG_DETAILS_DRAFT.md) · [Current state](CURRENT_PROJECT_STATE.md)

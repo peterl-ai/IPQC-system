@@ -12,6 +12,8 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.decodeFromJsonElement
 import kotlinx.serialization.json.jsonObject
 
@@ -54,6 +56,9 @@ private data class WorkspaceTask(val origin: String, val workspaceId: String, va
 @Serializable
 private data class OperationIdClaim(val operationSlot: String?)
 
+@Serializable
+private data class OrdinaryNgIds(val ids: List<String>)
+
 internal class ProtectedWorkRows(
     private val rows: CacheRows,
     val origin: String,
@@ -84,7 +89,20 @@ internal class WorkTransaction(
     private val rows: CacheRows,
     private val cipher: CacheCipher,
 ) {
-    suspend fun catalog(): WorkCatalog = read("catalog") ?: WorkCatalog()
+    suspend fun existingCatalog(): WorkCatalog? = read("catalog")
+
+    suspend fun catalog(): WorkCatalog = existingCatalog() ?: WorkCatalog()
+
+    // Capture can be active without a catalog. Verify the
+    // exact task slot before retaining a version fence for that profile.
+    suspend fun hasProtectedCaptureProfile(): Boolean = rows.legacyWorkSlots().any { candidate ->
+        val sealed = rows.read(candidate) ?: return@any false
+        val owner = decode(cipher.open(candidate, sealed)) { text ->
+            val record = Json.parseToJsonElement(text) as? JsonObject
+            (record?.get("owner") as? JsonObject)?.get("userId") as? JsonPrimitive
+        } ?: return@any false
+        owner.isString && isWorkId(owner.content) && slot("offline-profile", owner.content) == candidate
+    }
     suspend fun save(catalog: WorkCatalog) = write("catalog", value = catalog)
 
     suspend fun operation(id: String): OperationEntry? = read<OperationEntry>("operation", id)?.also {
@@ -123,6 +141,39 @@ internal class WorkTransaction(
 
     suspend fun saveBasicInformationBasis(owner: SessionIdentity, basis: BasicInformationBasis) =
         write("basic-information-basis", "${owner.userId}:${owner.familyId}", basis)
+
+    suspend fun reserveOrdinaryNgId(id: String) = claimOperationId(id, slot("ordinary-ng-operation", id))
+
+    suspend fun ordinaryNgOperation(id: String): OrdinaryNgEnvelope? = read("ordinary-ng-operation", id)
+
+    suspend fun saveOrdinaryNg(record: OrdinaryNgEnvelope) =
+        write("ordinary-ng-operation", record.command.operation.operationId, record)
+
+    suspend fun ordinaryNgBasis(owner: SessionIdentity, attempt: WorkAttempt): OrdinaryNgCaptureBasis? =
+        read("ordinary-ng-basis", ordinaryNgScope(owner, attempt))
+
+    suspend fun saveOrdinaryNgBasis(owner: SessionIdentity, basis: OrdinaryNgCaptureBasis) =
+        write("ordinary-ng-basis", ordinaryNgScope(owner, basis.attempt), basis)
+
+    suspend fun ordinaryNgOperationIds(owner: SessionIdentity, attempt: WorkAttempt): List<String> =
+        read<OrdinaryNgIds>("ordinary-ng-operations", ordinaryNgScope(owner, attempt))?.ids.orEmpty()
+
+    suspend fun saveOrdinaryNgOperationIds(owner: SessionIdentity, attempt: WorkAttempt, ids: List<String>) =
+        write("ordinary-ng-operations", ordinaryNgScope(owner, attempt), OrdinaryNgIds(ids))
+
+    suspend fun ordinaryNgReceipt(id: String): OrdinaryNgReceipt? = read("ordinary-ng-receipt", id)
+
+    suspend fun saveOrdinaryNgReceipt(receipt: OrdinaryNgReceipt) =
+        write("ordinary-ng-receipt", receipt.operation.operationId, receipt)
+
+    suspend fun ordinaryNgReceiptIds(owner: SessionIdentity, attempt: WorkAttempt): List<String> =
+        read<OrdinaryNgIds>("ordinary-ng-receipts", ordinaryNgScope(owner, attempt))?.ids.orEmpty()
+
+    suspend fun saveOrdinaryNgReceiptIds(owner: SessionIdentity, attempt: WorkAttempt, ids: List<String>) =
+        write("ordinary-ng-receipts", ordinaryNgScope(owner, attempt), OrdinaryNgIds(ids))
+
+    private fun ordinaryNgScope(owner: SessionIdentity, attempt: WorkAttempt) =
+        "${owner.userId}:${owner.familyId}:${attempt.taskItemId}:${attempt.inspectionAttemptId}"
 
     private suspend fun claimOperationId(id: String, operationSlot: String) {
         val marker = registrySlot("ready")

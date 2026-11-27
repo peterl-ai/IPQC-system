@@ -269,6 +269,150 @@ internal class SharedWorkStore(private val rows: ProtectedWorkRows, private val 
         }, WorkProblem.InvalidState)
     }
 
+    // A page can advance an existing task ledger without allocating protected state on ordinary browse.
+    suspend fun observeOrdinaryNgVersion(access: WorkAccess) {
+        transact(access) {
+            requireCurrentTaskDraftVersion(itemRemovals(access.task), access.serverDraftVersion)
+            val existing = existingCatalog()
+            if (existing == null && !hasProtectedCaptureProfile()) return@transact
+            val ledger = existing ?: WorkCatalog()
+            if (access.serverDraftVersion > ledger.observedTaskDraftVersion)
+                save(ledger.copy(observedTaskDraftVersion = access.serverDraftVersion))
+        }
+    }
+
+    suspend fun recordOrdinaryNgVersionConflict(access: WorkAccess) {
+        transact(access, create = true) {
+            val ledger = catalog()
+            if (access.serverDraftVersion > (ledger.staleThroughDraftVersion ?: -1L))
+                save(ledger.copy(staleThroughDraftVersion = access.serverDraftVersion))
+        }
+    }
+
+    suspend fun protectOrdinaryNgBasis(
+        access: WorkAccess, basis: OrdinaryNgCaptureBasis, history: List<OrdinaryNgReceipt>,
+    ) {
+        val owner = access.session.identity
+        workCheck(access.session.canContribute && basis.task == access.task &&
+            basis.draftVersion == access.serverDraftVersion && basis.attempt in access.currentAttempts, WorkProblem.ScopeMismatch)
+        workCheck(transact(access) {
+            val profile = offlineProfile(owner.userId)?.takeIf { it.owner == owner }
+                ?: throw WorkFailure(WorkProblem.SourceUnavailable)
+            requireOfflineSource(profile)
+            requireCurrentTaskDraftVersion(itemRemovals(access.task), basis.draftVersion)
+            workCheck(basis.matches(profile.basis), WorkProblem.StaleGrant)
+            val prior = ordinaryNgBasis(owner, basis.attempt)
+            workCheck(prior == null || prior.draftVersion < basis.draftVersion || prior == basis, WorkProblem.ReceiptMismatch)
+            val previousReceipt = prior?.latest
+            if (previousReceipt != null) workCheck(basis.latest == previousReceipt ||
+                (basis.latest?.draftVersion ?: -1L) > previousReceipt.draftVersion, WorkProblem.ReceiptMismatch)
+            val ids = ordinaryNgReceiptIds(owner, basis.attempt).toMutableSet()
+            for (receipt in (history + listOfNotNull(basis.latest)).distinct()) {
+                workCheck(receipt.operation.attempt == basis.attempt && receipt.matches(access.task, basis.draftVersion),
+                    WorkProblem.ReceiptMismatch)
+                val id = receipt.operation.operationId
+                val saved = ordinaryNgReceipt(id)
+                workCheck(saved == null || saved == receipt, WorkProblem.ReceiptMismatch)
+                if (saved == null) saveOrdinaryNgReceipt(receipt)
+                ids.add(id)
+            }
+            saveOrdinaryNgReceiptIds(owner, basis.attempt, ids.toList())
+            saveOrdinaryNgBasis(owner, basis)
+            true
+        } == true, WorkProblem.SourceUnavailable)
+    }
+
+    suspend fun newOrdinaryNgEdit(
+        task: WorkTask, owner: SessionIdentity, id: String, attempt: WorkAttempt,
+        text: OrdinaryNgText, predecessor: OperationReference?,
+    ): OrdinaryNgCommand = offlineTransaction(task, owner) { profile, observe ->
+        val source = requireOfflineSource(profile)
+        val kind = if (predecessor == null) OrdinaryNgKind.SetOrdinaryNgDetails else OrdinaryNgKind.CorrectOrdinaryNgDetails
+        val operation = OrdinaryNgOperation(id, kind, attempt, source.contextId, owner.userId, profile.basis.draftVersion, text, predecessor)
+        validateOrdinaryNgEdit(profile, operation)
+        val capture = CaptureGrant(source.contextId, Instant.parse(profile.captureUntilUtc))
+        requireCaptureTime(source, capture) { observe().apparentNow }
+        OfflineTransactionResult(OrdinaryNgCommand(task, owner, operation), capture.until)
+    }
+
+    suspend fun saveOrdinaryNg(command: OrdinaryNgCommand): OrdinaryNgEnvelope =
+        offlineTransaction(command.task, command.owner) { profile, observe ->
+            val operation = command.operation
+            checkedOrdinaryNg(command.task, operation.operationId)?.let { original ->
+                workCheck(original.command == command, WorkProblem.OperationIdentityConflict)
+                return@offlineTransaction OfflineTransactionResult(original)
+            }
+            val source = requireOfflineSource(profile)
+            workCheck(operation.sourceWorkContextId == source.contextId && operation.contributorUserId == source.contributorUserId,
+                WorkProblem.SourceUnavailable)
+            val basis = validateOrdinaryNgEdit(profile, operation)
+            val capture = CaptureGrant(source.contextId, Instant.parse(profile.captureUntilUtc))
+            val now = observe().apparentNow
+            requireCaptureTime(source, capture) { now }
+
+            val ledger = catalog()
+            val local = Math.addExact(ledger.localEditVersion, 1L)
+            val payload = OrdinaryNgCanonical.operation(command.task, operation, local)
+            val envelope = OrdinaryNgEnvelope(workspaceId, command, source, local, CANONICAL_VERSION, payload,
+                workHash(payload), OfflineCaptureEvidence(now.toString(), capture.until.toString()), basis.currentNgReferences)
+            reserveOrdinaryNgId(operation.operationId)
+            saveOrdinaryNg(envelope)
+            val ids = ordinaryNgOperationIds(command.owner, operation.attempt)
+            saveOrdinaryNgOperationIds(command.owner, operation.attempt, ids + operation.operationId)
+            save(ledger.copy(localEditVersion = local))
+            OfflineTransactionResult(envelope, capture.until)
+        }
+
+    suspend fun offlineOrdinaryNgDraft(task: WorkTask, owner: SessionIdentity, attempt: WorkAttempt): LocalOrdinaryNgDraft =
+        offlineTransaction(task, owner) { profile, observe ->
+            val problem = captureProblem(profile, observe) ?: try {
+                requireOrdinaryNgBasis(profile, attempt)
+                null
+            } catch (failure: WorkFailure) {
+                failure.problem
+            }
+            val accepted = ordinaryNgReceiptIds(owner, attempt).map { id ->
+                val receipt = ordinaryNgReceipt(id) ?: throw WorkFailure(WorkProblem.StorageUnavailable)
+                workCheck(receipt.operation.operationId == id && receipt.operation.attempt == attempt &&
+                    receipt.matches(task, Long.MAX_VALUE), WorkProblem.StorageUnavailable)
+                receipt
+            }.sortedByDescending { it.draftVersion }
+            OfflineTransactionResult(LocalOrdinaryNgDraft(accepted, ordinaryNgHistory(task, owner, attempt),
+                catalog().localEditVersion, problem))
+        }
+
+    private suspend fun WorkTransaction.requireOrdinaryNgBasis(
+        profile: OfflineSampleProfile, attempt: WorkAttempt,
+    ): OrdinaryNgCaptureBasis {
+        val basis = ordinaryNgBasis(profile.owner, attempt) ?: throw WorkFailure(WorkProblem.SourceUnavailable)
+        val task = profile.basis.task
+        val version = profile.basis.draftVersion
+        workCheck(basis.attempt == attempt && basis.matches(profile.basis), WorkProblem.StaleGrant)
+        checkOtherTaskBatchBarriers(task, version)
+        checkSampleBatchBarrier(version)
+        workCheck(catalog().operationIds.none { (individualReceipt(it)?.draftVersion ?: 0) > version }, WorkProblem.StaleGrant)
+        return basis
+    }
+
+    private suspend fun WorkTransaction.validateOrdinaryNgEdit(
+        profile: OfflineSampleProfile, operation: OrdinaryNgOperation,
+    ): OrdinaryNgCaptureBasis {
+        workCheck(operation.isValid(), WorkProblem.InvalidState)
+        val basis = requireOrdinaryNgBasis(profile, operation.attempt)
+        workCheck(operation.baseDraftVersion == basis.draftVersion, WorkProblem.StaleGrant)
+        workCheck(operation.predecessor == basis.latest?.reference(), WorkProblem.DependencyMismatch)
+        val id = operation.operationId
+        workCheck(ordinaryNgReceipt(id) == null &&
+            profile.basis.samples.none { it.valueOperationId == id || it.lastOperationId == id } &&
+            (profile.basis.historicalItemRemovals + profile.basis.attempts.mapNotNull { it.serverRemoval }).none { it.operationId == id } &&
+            basicInformationBasis(profile.owner)?.fields.orEmpty().none { it.accepted?.operation?.operationId == id },
+            WorkProblem.OperationIdentityConflict)
+        workCheck(ordinaryNgHistory(basis.task, profile.owner, basis.attempt).none {
+            it.command.operation.baseDraftVersion == basis.draftVersion && !sourceRevoked(it.source.contextId)
+        }, WorkProblem.InvalidState)
+        return basis
+    }
+
     suspend fun basicInformationWorkbench(access: WorkAccess, observation: BasicInformationRead): WorkbenchBasicInformation {
         val basis = observation.basis
         workCheck(basis.task == access.task && basis.draftVersion == access.serverDraftVersion, WorkProblem.ScopeMismatch)
