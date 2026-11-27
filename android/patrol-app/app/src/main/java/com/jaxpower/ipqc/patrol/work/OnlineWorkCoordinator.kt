@@ -36,6 +36,7 @@ internal class OnlineWorkCoordinator(
     private var active: Grant? = null
     internal val offlineSamples = OfflineSampleCoordinator(store)
     internal val offlineItemRemovals = OfflineItemRemovalCoordinator(store)
+    internal val offlineBasicInformation = OfflineBasicInformationCoordinator(store)
 
     internal class Grant internal constructor(
         val draft: OnlineDraft,
@@ -90,6 +91,29 @@ internal class OnlineWorkCoordinator(
             store.observeOfflineSamples(session, draft.sampleBasis)
         }
         return draft
+    }
+
+    suspend fun readBasicInformation(
+        grant: Grant, limit: Int = 20, beforeDraftVersion: Long? = null, pinToGrant: Boolean = true,
+    ): BasicInformationRead = withGrant(grant) {
+        val task = grant.draft.task
+        val query = BasicInformationQuery(limit, beforeDraftVersion, grant.draft.version.takeIf { pinToGrant })
+        val observed = try {
+            request(grant) { bearer -> api.readBasicInformation(bearer, task, query) }
+        } catch (_: BasicInformationVersionConflict) {
+            selectionCommit.withLock {
+                grant.access.requireCurrent()
+                store.recordBasicInformationVersionConflict(grant.access, requireNotNull(query.expectedDraftVersion))
+            }
+            throw PatrolFailure(Issue.CONFLICT)
+        }
+        workCheck(observed.basis.draftVersion >= (latestVersion[task] ?: 0L), WorkProblem.StaleGrant)
+        selectionCommit.withLock {
+            grant.access.requireCurrent()
+            store.observeBasicInformation(grant.access, observed.basis)
+            latestVersion[task] = observed.basis.draftVersion
+        }
+        observed
     }
 
     suspend fun uploadBatch(grant: Grant, batchId: String): SampleUploadResult = withGrant(grant) {

@@ -120,6 +120,20 @@ internal class WorkbenchDeviceFixture : AutoCloseable {
         var captureUntil = "2026-11-19T14:01:00Z"
         private val proof = Base64.getUrlEncoder().withoutPadding().encodeToString(ByteArray(32) { 29 })
 
+        val headerReads = AtomicInteger()
+        var lastHeaderPin: Long? = null
+        var sharedDraftVersionOverride: Long? = null
+        var headerReply: ((Long?, Long?, Int) -> Response<ResponseBody>)? = null
+
+        override suspend fun basicInformation(bearer: String, taskId: String, lineId: String,
+                                             expectedDraftVersion: Long?, beforeDraftVersion: Long?,
+                                             limit: Int): Response<ResponseBody> {
+            check(bearer == "Bearer fixture-access" && taskId == task().id && lineId == LINE.id)
+            headerReads.incrementAndGet()
+            lastHeaderPin = expectedDraftVersion
+            return requireNotNull(headerReply)(expectedDraftVersion, beforeDraftVersion, limit)
+        }
+
         override suspend fun sharedDraft(bearer: String, taskId: String): Response<SharedDraftWire> {
             reads.incrementAndGet()
             if (sharedDraftRateLimits.getAndUpdate { it.coerceAtLeast(1) - 1 } > 0)
@@ -136,7 +150,7 @@ internal class WorkbenchDeviceFixture : AutoCloseable {
                     DraftSampleValueWire("Quantitative", JsonPrimitive("1.25".toBigDecimal()), "OK", null),
                     false, benchId(32), IDENTITY.userId, benchId(32), removed.none { it.inspectionAttemptId == quant.inspectionAttemptId }))
             } else emptyList()
-            return Response.success(SharedDraftWire(taskId, line.id, 2, removed.maxOfOrNull { it.draftVersion } ?: if (includeRemote) 7 else 0,
+            return Response.success(SharedDraftWire(taskId, line.id, 2, sharedDraftVersionOverride ?: removed.maxOfOrNull { it.draftVersion } ?: if (includeRemote) 7 else 0,
                 if (includeRemote) "SharedDraftInitialized" else "AlreadyInitialized", attempts, remote, false,
                 "NotEvaluatedForFormalSubmission", items = attempts.map {
                     val receipt = removed.singleOrNull { r -> r.inspectionAttemptId == it.inspectionAttemptId }

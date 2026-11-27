@@ -61,7 +61,7 @@ This workflow does not authorize unscoped implementation, business changes or de
 
 Generate a self-contained dated handoff after every **3–5 completed PRs**, at milestone completion, after substantial approved business or architecture changes, before switching agents or review sessions, when Peter requests one and before conversation context exhaustion. Use repository memory, verified Git state and relevant evidence to restore context.
 
-Include current project state, latest merged milestone, active PR and exact revision, approved decisions and architecture, independent review history and outstanding findings, verified test baseline, known evidence gaps, open issues, immediate next authorized action and required references. Keep prior snapshots historical. [Consolidated handoff through PR #43](snapshots/IPQC_HANDOFF_THROUGH_PR43_2026-11-24.md) · [Historical PR #43 pre-review snapshot](snapshots/2026-11-24_PR43_A04-02_RE_REVIEW.md)
+Include current project state, latest merged milestone, active PR and exact revision, approved decisions and architecture, independent review history and outstanding findings, verified test baseline, known evidence gaps, open issues, immediate next authorized action and required references. Keep prior snapshots historical. [Consolidated handoff through PR #46](snapshots/IPQC_HANDOFF_THROUGH_PR46_2026-11-27.md) · [Consolidated handoff through PR #43](snapshots/IPQC_HANDOFF_THROUGH_PR43_2026-11-24.md) · [Historical PR #43 pre-review snapshot](snapshots/2026-11-24_PR43_A04-02_RE_REVIEW.md)
 
 ## Evidence to keep
 

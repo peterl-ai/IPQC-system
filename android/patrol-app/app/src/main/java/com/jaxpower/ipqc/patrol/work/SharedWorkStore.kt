@@ -89,7 +89,7 @@ internal class SharedWorkStore(private val rows: ProtectedWorkRows, private val 
     suspend fun observeOfflineSamples(session: SessionRepository.WorkSession, basis: OfflineSampleBasis) {
         sessions.withWorkSession(session, rows.origin) { requireCurrent ->
             rows.transaction(basis.task) {
-                rememberObservedItemRemovalVersion(basis)
+                rememberTaskDraftVersion(basis.draftVersion)
                 val profile = offlineProfile(session.identity.userId)?.takeIf { it.owner == session.identity }
                 if (profile != null) {
                     val observed = updateBasis(profile.basis, basis.copy(editable = basis.editable && session.canContribute))
@@ -129,7 +129,7 @@ internal class SharedWorkStore(private val rows: ProtectedWorkRows, private val 
                 workCheck(latest.sameObservation(basis), WorkProblem.StaleGrant)
                 val profile = OfflineSampleProfile(owner, source.contextId, deadline.toString(), latest)
                 workCheck(requireOfflineSource(profile) == source, WorkProblem.SourceUnavailable)
-                rememberObservedItemRemovalVersion(latest)
+                rememberTaskDraftVersion(latest.draftVersion)
                 requireCaptureTime(source, CaptureGrant(source.contextId, deadline), now)
                 saveOfflineProfile(profile)
                 requireCaptureTime(source, CaptureGrant(source.contextId, deadline), now)
@@ -137,6 +137,126 @@ internal class SharedWorkStore(private val rows: ProtectedWorkRows, private val 
                 true
             } == true, WorkProblem.StorageUnavailable)
         }
+    }
+
+    suspend fun observeBasicInformation(access: WorkAccess, basis: BasicInformationBasis) {
+        workCheck(access.task == basis.task, WorkProblem.ScopeMismatch)
+        transact(access, create = true) {
+            requireCurrentTaskDraftVersion(itemRemovals(basis.task), basis.draftVersion)
+            val owner = access.session.identity
+            if (access.session.canContribute) {
+                basicInformationBasis(owner)?.let { old ->
+                    workCheck(old.task == basis.task && old.draftVersion <= basis.draftVersion, WorkProblem.StaleGrant)
+                    for (oldField in old.fields) {
+                        val observed = basis.field(oldField.field)
+                        workCheck(oldField == observed ||
+                            (observed.accepted?.draftVersion ?: 0) > old.draftVersion, WorkProblem.ReceiptMismatch)
+                    }
+                }
+                saveBasicInformationBasis(owner, basis)
+            }
+            rememberTaskDraftVersion(basis.draftVersion)
+        }
+    }
+
+    // A pinned 409 establishes that this version is stale, without asserting
+    // the server's replacement version or discarding any accepted facts.
+    suspend fun recordBasicInformationVersionConflict(access: WorkAccess, version: Long) {
+        workCheck(version == access.serverDraftVersion, WorkProblem.ScopeMismatch)
+        transact(access, create = true) {
+            val ledger = catalog()
+            if (version > (ledger.staleThroughDraftVersion ?: -1L)) save(ledger.copy(staleThroughDraftVersion = version))
+        }
+    }
+
+    suspend fun newBasicInformationEdit(
+        task: WorkTask, owner: SessionIdentity, id: String, field: BasicInformationField,
+        value: String?, predecessor: OperationReference?,
+    ): BasicInformationCommand = offlineTransaction(task, owner) { profile, observe ->
+        val source = requireOfflineSource(profile)
+        val kind = if (predecessor == null) BasicInformationKind.CaptureBasicInformationField
+            else BasicInformationKind.CorrectBasicInformationField
+        val op = BasicInformationOperation(id, kind, field, value, source.contextId, source.contributorUserId,
+            profile.basis.draftVersion, predecessor)
+        validateBasicInformationEdit(profile, op)
+        val capture = CaptureGrant(source.contextId, Instant.parse(profile.captureUntilUtc))
+        requireCaptureTime(source, capture) { observe().apparentNow }
+        OfflineTransactionResult(BasicInformationCommand(task, owner, op), capture.until)
+    }
+
+    suspend fun saveBasicInformation(command: BasicInformationCommand): BasicInformationEnvelope =
+        offlineTransaction(command.task, command.owner) { profile, observe ->
+            val op = command.operation
+            workCheck(op.isValid(), WorkProblem.BasicInformationInputMismatch)
+            checkedBasicInformation(command.task, op.operationId)?.let { original ->
+                workCheck(original.command == command, WorkProblem.OperationIdentityConflict)
+                return@offlineTransaction OfflineTransactionResult(original)
+            }
+            val source = requireOfflineSource(profile)
+            workCheck(op.sourceWorkContextId == source.contextId && op.contributorUserId == source.contributorUserId,
+                WorkProblem.SourceUnavailable)
+            validateBasicInformationEdit(profile, op)
+            val capture = CaptureGrant(source.contextId, Instant.parse(profile.captureUntilUtc))
+            val now = observe().apparentNow
+            requireCaptureTime(source, capture) { now }
+
+            val ledger = catalog()
+            val next = Math.addExact(ledger.localEditVersion, 1L)
+            val bytes = BasicInformationCanonical.operation(command.task, op, next)
+            val entry = BasicInformationEnvelope(workspaceId, command, source, next, CANONICAL_VERSION, bytes,
+                workHash(bytes), OfflineCaptureEvidence(now.toString(), capture.until.toString()))
+            reserveBasicInformationId(op.operationId)
+            saveBasicInformation(entry)
+            save(ledger.copy(localEditVersion = next, basicInformationIds = ledger.basicInformationIds + op.operationId))
+            OfflineTransactionResult(entry, capture.until)
+        }
+
+    suspend fun offlineBasicInformationDraft(task: WorkTask, owner: SessionIdentity): LocalBasicInformationDraft =
+        offlineTransaction(task, owner) { profile, observe ->
+            val accepted = basicInformationBasis(owner)
+            val block = captureProblem(profile, observe) ?: try {
+                requireBasicInformationBasis(profile)
+                null
+            } catch (failure: WorkFailure) {
+                failure.problem
+            }
+            val version = profile.basis.draftVersion
+            val current = accepted?.draftVersion == version && block != WorkProblem.StaleGrant
+            val proposals = basicInformationHistory(task, owner).map {
+                LocalBasicInformationProposal(it, current && it.command.operation.baseDraftVersion == version,
+                    sourceRevoked(it.source.contextId))
+            }
+            OfflineTransactionResult(LocalBasicInformationDraft(accepted, proposals, catalog().localEditVersion, block))
+        }
+
+    private suspend fun WorkTransaction.requireBasicInformationBasis(profile: OfflineSampleProfile): BasicInformationBasis {
+        val task = profile.basis.task
+        val basis = basicInformationBasis(profile.owner) ?: throw WorkFailure(WorkProblem.SourceUnavailable)
+        workCheck(basis.task == task && basis.availability.editable && profile.basis.editable, WorkProblem.ScopeMismatch)
+        val version = basis.draftVersion
+        workCheck(version == profile.basis.draftVersion, WorkProblem.StaleGrant)
+        checkItemRemovalBarrier(task, version)
+        checkSampleBatchBarrier(version)
+        workCheck(catalog().operationIds.none { (individualReceipt(it)?.draftVersion ?: 0) > version }, WorkProblem.StaleGrant)
+        return basis
+    }
+
+    private suspend fun WorkTransaction.validateBasicInformationEdit(profile: OfflineSampleProfile, op: BasicInformationOperation) {
+        workCheck(op.isValid(), WorkProblem.BasicInformationInputMismatch)
+        val basis = requireBasicInformationBasis(profile)
+        val task = basis.task
+        val version = basis.draftVersion
+        workCheck(op.baseDraftVersion == version, WorkProblem.StaleGrant)
+        val accepted = basis.field(op.field).accepted
+        workCheck(op.predecessor == accepted?.reference(), WorkProblem.DependencyMismatch)
+        workCheck(basis.fields.none { it.accepted?.operation?.operationId == op.operationId } &&
+            profile.basis.samples.none { op.operationId == it.valueOperationId || op.operationId == it.lastOperationId } &&
+            (profile.basis.historicalItemRemovals + profile.basis.attempts.mapNotNull { it.serverRemoval })
+                .none { it.operationId == op.operationId }, WorkProblem.OperationIdentityConflict)
+        workCheck(basicInformationHistory(task, profile.owner).none {
+            val pending = it.command.operation
+            pending.field == op.field && pending.baseDraftVersion == version && !sourceRevoked(pending.sourceWorkContextId)
+        }, WorkProblem.InvalidState)
     }
 
     suspend fun newItemRemoval(task: WorkTask, owner: SessionIdentity, attempt: WorkAttempt, id: String,
@@ -169,7 +289,7 @@ internal class SharedWorkStore(private val rows: ProtectedWorkRows, private val 
             val now = observe().apparentNow
             requireCaptureTime(original, capture) { now }
             val entries = itemRemovals(command.task)
-            requireCurrentItemRemovalVersion(entries, basis.draftVersion)
+            requireCurrentTaskDraftVersion(entries, basis.draftVersion)
             val turn = itemRemovalTurn(entries, basis.draftVersion)
             workCheck(turn?.removal?.command?.attempt != command.attempt && entries.none {
                 it.state in uncertainItemRemovalStates && it.removal.command.attempt == command.attempt
@@ -216,7 +336,7 @@ internal class SharedWorkStore(private val rows: ProtectedWorkRows, private val 
         val observed = (basis.historicalItemRemovals + basis.attempts.mapNotNull { it.serverRemoval })
             .associateBy { it.operationId }
         val stored = itemRemovals(basis.task)
-        val stale = itemRemovalVersionProblem(stored, basis.draftVersion) != null || sampleStale
+        val stale = taskDraftVersionProblem(stored, basis.draftVersion) != null || sampleStale
         val turn = itemRemovalTurn(stored, basis.draftVersion)?.takeIf { candidate ->
             stored.none { it.state in uncertainItemRemovalStates && it != candidate }
         }
@@ -340,7 +460,7 @@ internal class SharedWorkStore(private val rows: ProtectedWorkRows, private val 
         workCheck(observed.requireItemRemovalAttempt(cmd.attempt).required == entry.removal.minimumSampleCount,
             WorkProblem.ScopeMismatch)
         workCheck(entries.none { it.state in uncertainItemRemovalStates }, WorkProblem.InvalidState)
-        requireCurrentItemRemovalVersion(entries, access.serverDraftVersion)
+        requireCurrentTaskDraftVersion(entries, access.serverDraftVersion)
         checkSampleBatchBarrier(access.serverDraftVersion)
         workCheck(itemRemovalTurn(entries, access.serverDraftVersion)?.removal?.reference() == entry.removal.reference(),
             WorkProblem.ItemRemovalReconciliationRequired)
@@ -468,7 +588,7 @@ internal class SharedWorkStore(private val rows: ProtectedWorkRows, private val 
             val op = edit.operation(source.contextId, profile.basis.draftVersion)
             workCheck(itemRemoval(op.operationId) == null, WorkProblem.OperationIdentityConflict)
             val removals = itemRemovals(task)
-            requireCurrentItemRemovalVersion(removals, profile.basis.draftVersion)
+            requireCurrentTaskDraftVersion(removals, profile.basis.draftVersion)
             checkSampleItemRemovals(removals, profile.basis.draftVersion, setOf(op.attempt))
             val board = sampleBoard(profile.basis, history)
             if (op.kind == SampleKind.CaptureSample) {
@@ -506,7 +626,7 @@ internal class SharedWorkStore(private val rows: ProtectedWorkRows, private val 
     private suspend fun WorkTransaction.captureProblem(profile: OfflineSampleProfile, observe: suspend () -> OfflineSession):
         WorkProblem? = try {
         val basis = profile.basis
-        requireCurrentItemRemovalVersion(itemRemovals(basis.task), basis.draftVersion)
+        requireCurrentTaskDraftVersion(itemRemovals(basis.task), basis.draftVersion)
         workCheck(basis.editable, WorkProblem.ScopeMismatch)
         val source = requireOfflineSource(profile)
         val cap = CaptureGrant(source.contextId, Instant.parse(profile.captureUntilUtc))
@@ -662,7 +782,7 @@ internal class SharedWorkStore(private val rows: ProtectedWorkRows, private val 
                 requireCaptureTime(context.source, access.captureGrant, captureTime)
                 workCheck(itemRemoval(op.operationId) == null, WorkProblem.OperationIdentityConflict)
                 val removals = itemRemovals(access.task)
-                requireCurrentItemRemovalVersion(removals, access.serverDraftVersion)
+                requireCurrentTaskDraftVersion(removals, access.serverDraftVersion)
                 checkSampleItemRemovals(removals, access.serverDraftVersion, setOf(op.attempt))
                 for (ref in op.dependencies) {
                     val prior = requireOperation(ref.operationId)
