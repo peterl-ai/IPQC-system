@@ -3,7 +3,7 @@
 Updated 2026-11-27 from verified Git, approved Rev3.2 and the retained F2/F3 sign-off. The roadmap is a planning record. Peter owns scope, final merge, release and deployment. [Current state](CURRENT_PROJECT_STATE.md) · [Approved Rev3.2](../architecture/IPQC_ANDROID_ARCHITECTURE_V1_REV3_2_2026-11-10.md) · [Rev3.2 supersession](../architecture/IPQC_ANDROID_ARCHITECTURE_V1_REV3_2_IMPLEMENTATION_HANDOFF_SUPERSESSION_2026-11-10.md) · [F2/F3 handoff](../architecture/IPQC_ANDROID_ARCHITECTURE_V1_IMPLEMENTATION_HANDOFF_2026-11-06.md)
 
 - **Latest verified merge.** PR #47, A04-05A Android Basic Information foundation, `2c85ca164815999bd2ea0aeee4f9d6779af85474` · Tree `db4f7ab494fbadc45ddd04a2464fa451c2135e4c`. [PR #47](https://github.com/peterl-ai/IPQC-system/pull/47) · [Merged-main CI, attempt 1](https://github.com/peterl-ai/IPQC-system/actions/runs/46040662582/attempts/1)
-- **Active Draft scope.** A04-05B Android Basic Information foreground transport and gated Workbench editor. Scope includes protected single-field batches, explicit POST, V6 acceptance and exact recovery. A04-05B is a newly authorized working label. [Draft by branch](https://github.com/peterl-ai/IPQC-system/pulls?q=is%3Apr+head%3Acodex%2Fandroid-v1-a04-05b-basic-information-transport-workbench)
+- **Active Draft scope.** A04-05B Android Basic Information foreground transport and gated Workbench editor. Scope includes protected single-field batches, explicit POST, V6 acceptance and exact recovery. PR #48 remains an Open Draft under the initial independent HOLD, with the focused repair awaiting independent re-review. PR #47 is the latest verified merge. [PR #48](https://github.com/peterl-ai/IPQC-system/pull/48)
 
 | V1 capability | Evidence or next work |
 | --- | --- |

@@ -1,6 +1,6 @@
 # Current IPQC project state
 
-**Verified 2026-11-27 · A04-05A merged · A04-05B foreground transport and Workbench editor authorized**
+**Verified 2026-11-27 · A04-05A merged · A04-05B Open Draft awaiting focused independent re-review**
 
 Peter merged PR #47 after independent ChatGPT issued **PASS — APPROVED FOR MERGE**. The merged Android foundation covers authenticated Basic Information observations, canonical V1 identity and exact protected local operations and replay. R43-P2-02, R44-P3-01 and R46-P2-01 remain verified closed. [PR #47](https://github.com/peterl-ai/IPQC-system/pull/47) · [Independent review and limits](REVIEW_HISTORY.md#2026-11-27-final-independent-review-of-pr-47)
 
@@ -19,6 +19,8 @@ Codex inspected all four actual logs at the exact merged-main commit. PR #47's A
 | [Backend 140647263225](https://github.com/peterl-ai/IPQC-system/actions/runs/46040662582/job/140647263225) | Release build passed, 1,187 passed, 767 opt-in PostgreSQL skips. |
 | [PostgreSQL 140647268623](https://github.com/peterl-ai/IPQC-system/actions/runs/46040662582/job/140647268623) | PostgreSQL 17.12, Release build passed, 767 passed, zero skipped or failed. |
 | [Frontend 140647263992](https://github.com/peterl-ai/IPQC-system/actions/runs/46040662582/job/140647263992) | Lint, 166 tests, typecheck and production build passed. |
+
+[PR #48](https://github.com/peterl-ai/IPQC-system/pull/48) is Open Draft with auto-merge disabled. Initial independent review returned **HOLD — FOCUSED REPAIR REQUIRED** at HEAD `b1222b66cf4f8177c02e3b2cfd38e779fcb1974e`, Tree `1598b72744c9692b1de2816b401ccde8e4629b37`. Codex completed the focused application repair in `6861c2fa7d450b89e0f559a44c34a2581c02d44b` with Tree `111db6ef0b352178260ee4641b1f09aef02a5d64`. The exact final Draft and CI pins are in the re-review handoff. The initial independent HOLD remains in effect pending independent re-review. [Independent review](REVIEW_HISTORY.md#2026-11-27-initial-independent-review-of-pr-48)
 
 ## Scope and release gates
 
