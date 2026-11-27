@@ -105,7 +105,13 @@ internal class WorkbenchDeviceFixture : AutoCloseable {
         var removalUploadTestEnabled = false
         var beforeRemovalAdmission: () -> Unit = {}
         var removalResponse: suspend (kotlinx.serialization.json.JsonObject) -> String = { error("Unexpected item removal POST") }
+        var removalProblem: Pair<Int, String>? = null
+        val sharedDraftRateLimits = AtomicInteger()
+        var afterRemovalPost: () -> Unit = {}
+        var afterFullReceipt: () -> Unit = {}
         var missingRemovalReceipt = false
+        var missingIndividualRemovalReceipt = false
+        var priorObservedRemoval: ItemRemovalReceipt? = null
         var explicitRemovalSource: WorkSource? = null
         var explicitRemovalReceipt: ItemRemovalBatchReceipt? = null
         var explicitIndividualRemovalReceipt: ItemRemovalReceipt? = null
@@ -116,25 +122,27 @@ internal class WorkbenchDeviceFixture : AutoCloseable {
 
         override suspend fun sharedDraft(bearer: String, taskId: String): Response<SharedDraftWire> {
             reads.incrementAndGet()
+            if (sharedDraftRateLimits.getAndUpdate { it.coerceAtLeast(1) - 1 } > 0)
+                return Response.error(429, "{}".toResponseBody())
             val line = if (taskId == TASK.id) LINE else SECOND_LINE
             val attempts = definitions.indices.map { index ->
                 val attempt = attempt(taskId, index)
                 DraftAttemptWire(attempt.taskItemId, attempt.inspectionAttemptId, if (index == 0) 1 else 50)
             }
-            val removed = observedRemoval?.takeIf { it.taskId == taskId }
+            val removed = listOfNotNull(priorObservedRemoval, observedRemoval).filter { it.taskId == taskId }
             val remote = if (includeRemote) {
                 val quant = attempts[1]
                 listOf(DraftSampleWire(benchId(30), quant.taskItemId, quant.inspectionAttemptId, benchId(31), 1,
                     DraftSampleValueWire("Quantitative", JsonPrimitive("1.25".toBigDecimal()), "OK", null),
-                    false, benchId(32), IDENTITY.userId, benchId(32), removed?.inspectionAttemptId != quant.inspectionAttemptId))
+                    false, benchId(32), IDENTITY.userId, benchId(32), removed.none { it.inspectionAttemptId == quant.inspectionAttemptId }))
             } else emptyList()
-            return Response.success(SharedDraftWire(taskId, line.id, 2, removed?.draftVersion ?: if (includeRemote) 7 else 0,
+            return Response.success(SharedDraftWire(taskId, line.id, 2, removed.maxOfOrNull { it.draftVersion } ?: if (includeRemote) 7 else 0,
                 if (includeRemote) "SharedDraftInitialized" else "AlreadyInitialized", attempts, remote, false,
                 "NotEvaluatedForFormalSubmission", items = attempts.map {
-                    val receipt = removed?.takeIf { r -> r.inspectionAttemptId == it.inspectionAttemptId }
+                    val receipt = removed.singleOrNull { r -> r.inspectionAttemptId == it.inspectionAttemptId }
                     DraftItemWire(it.taskItemId, it.inspectionAttemptId, it.minimumSampleCount,
                         receipt?.disposition?.name ?: "Applicable", receipt?.let { r -> Json.encodeToJsonElement(r).jsonObject })
-                }, allItemsRemoved = false))
+                }, allItemsRemoved = removed.size == attempts.size))
         }
 
         override suspend fun issue(bearer: String, taskId: String, input: WorkContextIssueWire): Response<WorkContextIssuedWire> {
@@ -167,7 +175,7 @@ internal class WorkbenchDeviceFixture : AutoCloseable {
         override suspend fun preflight(bearer: String, taskId: String, input: WorkContextPreflightInputWire):
             Response<WorkContextPreflightWire> {
             val original = checkNotNull(explicitRemovalSource) { "Unexpected upload preflight" }
-            check(device.api.loginSubject == b && original.task.taskId == taskId)
+            check(original.task.taskId == taskId && bearer == "Bearer fixture-access")
             check(input.expectedTaskLineId == original.task.lineId && input.expectedEnvironmentId == original.task.environmentId &&
                 input.expectedWorkflowVersion == original.task.workflowVersion)
             val submitted = input.sources.single()
@@ -188,6 +196,10 @@ internal class WorkbenchDeviceFixture : AutoCloseable {
             check(source.task.taskId == taskId && proofPassed["workContextId"] == JsonPrimitive(source.contextId) &&
                 proofPassed["proofSecret"] == JsonPrimitive(proof))
             removalPosts.incrementAndGet()
+            afterRemovalPost()
+            removalProblem?.let { (status, problem) ->
+                return Response.error(status, problem.toResponseBody("application/problem+json".toMediaType()))
+            }
             return Response.success(removalResponse(body).toResponseBody("application/json".toMediaType()))
         }
 
@@ -223,10 +235,12 @@ internal class WorkbenchDeviceFixture : AutoCloseable {
             val receipt = checkNotNull(explicitRemovalReceipt) { "Unexpected batch receipt query" }
             check(device.api.loginSubject.userId == receipt.uploadedByUserId && receipt.taskId == taskId && receipt.batchId == batchId)
             removalReceiptReads.incrementAndGet()
+            afterFullReceipt()
             return Response.success(Json.encodeToString(receipt).toResponseBody())
         }
 
         override suspend fun operationReceipt(bearer: String, taskId: String, operationId: String): Response<ResponseBody> {
+            if (missingIndividualRemovalReceipt) return Response.error(404, "{}".toResponseBody())
             val receipt = checkNotNull(explicitIndividualRemovalReceipt) { "Unexpected operation receipt query" }
             check(device.api.loginSubject.userId == receipt.uploadedByUserId && receipt.taskId == taskId && receipt.operationId == operationId)
             return Response.success(Json.encodeToString(receipt).toResponseBody())

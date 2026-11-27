@@ -336,6 +336,24 @@ class OfflineItemRemovalCoordinatorTest {
         }
     }
 
+    @Test fun workbenchCannotSendAnObsoleteOrDifferentItemRow() = runBlocking<Unit> {
+        TestServer().use { server ->
+            val e = RemovalFixture(server)
+            val prepared = e.prepare()
+            val row = e.coordinator.itemRemovalWorkbench(prepared.grant).rows.single()
+            val other = row.attempt.copy(inspectionAttemptId = testId(93))
+            expectWork(WorkProblem.ItemRemovalReconciliationRequired) {
+                e.coordinator.sendWorkbenchItemRemoval(prepared.grant, row.copy(attempt = other))
+            }
+            expectWork(WorkProblem.ItemRemovalReconciliationRequired) {
+                e.coordinator.sendWorkbenchItemRemoval(prepared.grant, row.copy(batchId = testId(94)))
+            }
+            assertEquals(WorkState.Queued, e.entry(prepared).state)
+            assertEquals(prepared.batch, e.entry(prepared).batch)
+            assertNull(server.web.takeRequest(100, TimeUnit.MILLISECONDS))
+        }
+    }
+
     @Test fun replayPreservesServerActorAndIndividualProofNeverSettlesTheLocalBatch() = runBlocking<Unit> {
         for (complete in listOf(true, false)) TestServer().use { server ->
             val e = RemovalFixture(server)

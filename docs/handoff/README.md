@@ -31,6 +31,7 @@ Use **APPROVED** for explicit authorization, **PROPOSED** for a candidate decisi
 Update the affected entries when a PR is created, implementation completes, a review or re-review completes, a finding is repaired, a PR is approved or merged, a business or architecture decision is approved or superseded, the CI/test baseline materially changes, a blocker appears or resolves, or a milestone ends. Record missing evidence as **UNKNOWN** or **UNVERIFIED**. Carry this maintenance in normal authorized PRs. Persist final review and merge status in the next authorized branch or a separately authorized documentation update. Preserve a reviewed application HEAD and keep snapshots historical.
 
 - [CURRENT_PROJECT_STATE.md](CURRENT_PROJECT_STATE.md) carries today's action, gate and exact refs.
+- [PROJECT_ROADMAP.md](PROJECT_ROADMAP.md) tracks merged capabilities, active Draft scope and remaining V1 gates.
 - [PR_HISTORY.md](PR_HISTORY.md) records scope, source and merge identity, outcomes and evidence.
 - [BUSINESS_DECISION_LOG.md](BUSINESS_DECISION_LOG.md) records approved product behavior and unresolved business policy.
 - [ARCHITECTURE_DECISION_LOG.md](ARCHITECTURE_DECISION_LOG.md) records approved engineering decisions and implementation boundaries.

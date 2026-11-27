@@ -13,6 +13,7 @@ import com.jaxpower.ipqc.patrol.auth.SessionRepository
 import com.jaxpower.ipqc.patrol.tasks.PatrolRepository
 import java.time.Instant
 import java.time.temporal.ChronoUnit
+import java.util.UUID
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 import kotlinx.coroutines.NonCancellable
@@ -301,6 +302,26 @@ internal class OnlineWorkCoordinator(
         }
     }
 
+    suspend fun itemRemovalWorkbench(grant: Grant): WorkbenchRemoval = withGrant(grant) {
+        store.itemRemovalWorkbench(grant.access, grant.draft.sampleBasis)
+    }
+
+    // Only the explicit foreground action calls this. Preflight grants permission
+    // to seal the original source; upload still makes its own current admission checks.
+    suspend fun sendWorkbenchItemRemoval(grant: Grant, selected: WorkbenchRemoval.Row): ItemRemovalUploadResult {
+        val candidate = itemRemovalWorkbench(grant).rows.singleOrNull { it.operation == selected.operation }
+            ?: throw WorkFailure(WorkProblem.ItemRemovalReconciliationRequired)
+        workCheck(candidate.attempt == selected.attempt && candidate.currentAttempt && !candidate.operationConfirmed &&
+            candidate.state == WorkState.Queued && (selected.batchId == null || candidate.batchId == selected.batchId),
+            WorkProblem.ItemRemovalReconciliationRequired)
+        candidate.batchId?.let { return uploadItemRemovalBatch(grant, it) }
+        val approved = preflight(grant, candidate.operation.operationId)
+        val proposedId = UUID.nameUUIDFromBytes(
+            ("ipqc:item-removal:batch:" + candidate.operation.operationId).encodeToByteArray()).toString()
+        val batch = prepareItemRemovalForReconciliation(approved, proposedId, candidate.operation)
+        return uploadItemRemovalBatch(approved, batch.batchId)
+    }
+
     // A different operator first obtains a matched source grant through explicit preflight.
     suspend fun prepareItemRemovalForReconciliation(grant: Grant, batchId: String, operation: OperationReference): ItemRemovalBatch =
         withGrant(grant) {
@@ -345,7 +366,16 @@ internal class OnlineWorkCoordinator(
 
     // Arming requires a current authenticated contribution grant and a fresh paired
     // task/detail read. Ordinary offline browse and merely fetching a task never arm it.
-    suspend fun armOfflineSamples(grant: Grant) = withGrant(grant) {
+    suspend fun armOfflineSamples(grant: Grant) {
+        withGrant(grant) { armSamples(grant) }
+    }
+
+    suspend fun armWorkbench(grant: Grant): Pair<Long, WorkbenchRemoval> = withGrant(grant) {
+        val draft = armSamples(grant)
+        draft.version to store.itemRemovalWorkbench(uploadAccess(grant, draft), draft.sampleBasis)
+    }
+
+    private suspend fun armSamples(grant: Grant): OnlineDraft {
         val capture = grant.access.captureGrant ?: throw WorkFailure(WorkProblem.SourceUnavailable)
         val source = grant.source ?: throw WorkFailure(WorkProblem.SourceUnavailable)
         workCheck(grant.access.session.canContribute, WorkProblem.SourceUnavailable)
@@ -355,6 +385,7 @@ internal class OnlineWorkCoordinator(
             workCheck(draft.task == grant.draft.task && draft.sampleBasis.editable, WorkProblem.ScopeMismatch)
             store.armOfflineSamples(grant.access, source, capture, draft.sampleBasis)
         }
+        return draft
     }
 
     private suspend fun reuse(grant: Grant, stored: StoredWorkSource): Grant? {
