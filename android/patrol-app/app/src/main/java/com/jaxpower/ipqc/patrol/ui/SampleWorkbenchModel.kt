@@ -277,7 +277,7 @@ internal class SampleWorkbenchModel(private val scope: CoroutineScope, private v
         val state = ui.value
         val view = state.removalView(online = true) ?: return
         if (state.target !== target || state.blocksNavigation || state.removalRefreshRequired ||
-            state.selectedItemId != row.attempt.taskItemId || view.rows.none { it === row } ||
+            state.selectedItemId != row.attempt.taskItemId || row !in view.rows ||
             row.state != WorkState.Queued || !row.currentAttempt || row.operationConfirmed || view.requiresRefresh) return
         run(target, uploadingRemoval = true) {
             invalidateRemovalProjection(target)
@@ -307,7 +307,7 @@ internal class SampleWorkbenchModel(private val scope: CoroutineScope, private v
         val batchId = row.batchId ?: return
         if (state.target !== target || state.blocksNavigation || state.removalRefreshRequired ||
             state.selectedItemId != row.attempt.taskItemId ||
-            state.removalView(online = true)?.rows?.any { it === row } != true || row.state !in uncertainItemRemovalStates) return
+            state.removalView(online = true)?.rows?.contains(row) != true || row.state !in uncertainItemRemovalStates) return
         run(target) {
             invalidateRemovalProjection(target)
             val grant = open(target)
@@ -392,7 +392,10 @@ internal class SampleWorkbenchModel(private val scope: CoroutineScope, private v
             }
         } catch (failure: Exception) {
             if (failure is CancellationException) throw failure
-            if (before === ui.value) recordFailure(target, failure)
+            if (before === ui.value) {
+                invalidateRemovalProjection(target)
+                recordFailure(target, failure)
+            }
         }
     }
 
