@@ -474,6 +474,11 @@ class OnlineWorkStorageTest {
     }
 
     private class CoordinatorApi(private val captureUntil: String = CAPTURE) : WorkContextApi {
+        override suspend fun ordinaryNgDetails(
+            bearer: String, taskId: String, lineId: String, expectedDraftVersion: Long,
+            page: Int, pageSize: Int, historyLimit: Int, beforeDraftVersion: Long?,
+        ): Response<ResponseBody> = error("Unexpected Ordinary NG read")
+
         var sampleReceipt: ServerBatchReceipt? = null
         var sampleUploads = 0
         var samplePreflights = 0

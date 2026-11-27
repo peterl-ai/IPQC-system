@@ -63,6 +63,19 @@ internal interface WorkContextApi {
                                  @Query("beforeDraftVersion") beforeDraftVersion: Long?,
                                  @Query("limit") limit: Int): Response<ResponseBody>
 
+    @Streaming
+    @GET("api/line-patrol/tasks/{taskId}/shared-draft/ordinary-ng-details")
+    suspend fun ordinaryNgDetails(
+        @Header("Authorization") bearer: String,
+        @Path("taskId") taskId: String,
+        @Query("expectedTaskLineId") lineId: String,
+        @Query("expectedDraftVersion") expectedDraftVersion: Long,
+        @Query("page") page: Int,
+        @Query("pageSize") pageSize: Int,
+        @Query("historyLimit") historyLimit: Int,
+        @Query("beforeDraftVersion") beforeDraftVersion: Long?,
+    ): Response<ResponseBody>
+
     @GET("api/line-patrol/tasks/{taskId}/shared-draft")
     suspend fun sharedDraft(@Header("Authorization") bearer: String, @Path("taskId") taskId: String): Response<SharedDraftWire>
 

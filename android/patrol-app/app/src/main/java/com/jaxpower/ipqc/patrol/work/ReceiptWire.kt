@@ -127,7 +127,7 @@ private suspend fun WorkContextApi.receiptResponse(target: ReceiptTarget, bearer
 private fun ResponseBody.readTypedReceipt(kind: ReceiptKind): ReceiptReply {
     val json = readWorkJson()
     return when (kind) {
-        ReceiptKind.Operation -> ReceiptReply.Operation(receiptJson.decodeFromJsonElement(operationJson(json)))
+        ReceiptKind.Operation -> ReceiptReply.Operation(json.decodeSampleOperationReceipt())
         ReceiptKind.Batch -> ReceiptReply.Batch(json.decodeBatchReceipt())
     }
 }
@@ -139,6 +139,9 @@ internal fun ResponseBody.readWorkJson(maxBytes: Long = MAX_RECEIPT_BYTES): Json
     validateObjectKeys(body)
     return receiptJson.parseToJsonElement(body) as? JsonObject ?: throw PatrolFailure(Issue.RESPONSE)
 }
+
+internal fun JsonObject.decodeSampleOperationReceipt(): ServerOperationReceipt =
+    receiptJson.decodeFromJsonElement(operationJson(this))
 
 internal fun JsonObject.decodeBatchReceipt(): ServerBatchReceipt {
     for (field in listOf("previousDraftVersion", "draftVersion")) requireInteger(field)

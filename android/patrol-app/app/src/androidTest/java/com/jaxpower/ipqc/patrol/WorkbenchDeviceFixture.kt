@@ -161,6 +161,20 @@ internal class WorkbenchDeviceFixture : AutoCloseable {
             return requireNotNull(headerReply)(expectedDraftVersion, beforeDraftVersion, limit)
         }
 
+        val ngReads = AtomicInteger()
+        var ngReply: ((String, String, Long, Int, Int, Int, Long?) -> Response<ResponseBody>)? = null
+        var ngSampleReply: ((String) -> Response<ResponseBody>)? = null
+        var ngDraftTransform: (SharedDraftWire) -> SharedDraftWire = { it }
+
+        override suspend fun ordinaryNgDetails(
+            bearer: String, taskId: String, lineId: String, expectedDraftVersion: Long,
+            page: Int, pageSize: Int, historyLimit: Int, beforeDraftVersion: Long?,
+        ): Response<ResponseBody> {
+            check(bearer == "Bearer fixture-access")
+            ngReads.incrementAndGet()
+            return requireNotNull(ngReply)(taskId, lineId, expectedDraftVersion, page, pageSize, historyLimit, beforeDraftVersion)
+        }
+
         override suspend fun sharedDraft(bearer: String, taskId: String): Response<SharedDraftWire> {
             reads.incrementAndGet()
             if (sharedDraftRateLimits.getAndUpdate { it.coerceAtLeast(1) - 1 } > 0)
@@ -177,13 +191,13 @@ internal class WorkbenchDeviceFixture : AutoCloseable {
                     DraftSampleValueWire("Quantitative", JsonPrimitive("1.25".toBigDecimal()), "OK", null),
                     false, benchId(32), IDENTITY.userId, benchId(32), removed.none { it.inspectionAttemptId == quant.inspectionAttemptId }))
             } else emptyList()
-            return Response.success(SharedDraftWire(taskId, line.id, 2, sharedDraftVersionOverride ?: removed.maxOfOrNull { it.draftVersion } ?: if (includeRemote) 7 else 0,
+            return Response.success(ngDraftTransform(SharedDraftWire(taskId, line.id, 2, sharedDraftVersionOverride ?: removed.maxOfOrNull { it.draftVersion } ?: if (includeRemote) 7 else 0,
                 if (includeRemote) "SharedDraftInitialized" else "AlreadyInitialized", attempts, remote, false,
                 "NotEvaluatedForFormalSubmission", items = attempts.map {
                     val receipt = removed.singleOrNull { r -> r.inspectionAttemptId == it.inspectionAttemptId }
                     DraftItemWire(it.taskItemId, it.inspectionAttemptId, it.minimumSampleCount,
                         receipt?.disposition?.name ?: "Applicable", receipt?.let { r -> Json.encodeToJsonElement(r).jsonObject })
-                }, allItemsRemoved = removed.size == attempts.size))
+                }, allItemsRemoved = removed.size == attempts.size)))
         }
 
         override suspend fun issue(bearer: String, taskId: String, input: WorkContextIssueWire): Response<WorkContextIssuedWire> {
@@ -298,6 +312,10 @@ internal class WorkbenchDeviceFixture : AutoCloseable {
         }
 
         override suspend fun operationReceipt(bearer: String, taskId: String, operationId: String): Response<ResponseBody> {
+            ngSampleReply?.let {
+                check(bearer == "Bearer fixture-access" && taskId == task().id)
+                return it(operationId)
+            }
             if (missingIndividualRemovalReceipt) return Response.error(404, "{}".toResponseBody())
             val receipt = checkNotNull(explicitIndividualRemovalReceipt) { "Unexpected operation receipt query" }
             check(device.api.loginSubject.userId == receipt.uploadedByUserId && receipt.taskId == taskId && receipt.operationId == operationId)

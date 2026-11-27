@@ -39,6 +39,7 @@ internal class OnlineWorkCoordinator(
     internal val offlineSamples = OfflineSampleCoordinator(store)
     internal val offlineItemRemovals = OfflineItemRemovalCoordinator(store)
     internal val offlineBasicInformation = OfflineBasicInformationCoordinator(store)
+    internal val offlineOrdinaryNgDetails = OfflineOrdinaryNgCoordinator(store)
 
     internal class Grant internal constructor(
         val draft: OnlineDraft,
@@ -93,6 +94,53 @@ internal class OnlineWorkCoordinator(
             store.observeOfflineSamples(session, draft.sampleBasis)
         }
         return draft
+    }
+
+    suspend fun readOrdinaryNgDetails(grant: Grant, query: OrdinaryNgQuery = OrdinaryNgQuery()): OrdinaryNgRead =
+        withGrant(grant) { observeOrdinaryNgDetails(grant, query) }
+
+    // Only explicit local preparation verifies sample hashes and persists a basis.
+    suspend fun prepareOrdinaryNgCapture(grant: Grant, attempt: WorkAttempt, query: OrdinaryNgQuery = OrdinaryNgQuery()) =
+        withGrant(grant) {
+            val access = grant.access
+            val draft = grant.draft
+            val samples = draft.sampleBasis.currentNgSamples(attempt).sortedBy { it.valueOperationId }
+            workCheck(access.session.canContribute && draft.sampleBasis.editable && attempt in draft.applicableAttempts &&
+                samples.size in 1..MAX_CURRENT_SAMPLES && samples.map { it.valueOperationId }.distinct().size == samples.size,
+                WorkProblem.ScopeMismatch)
+            val refs = samples.map { sample -> request(grant) { bearer ->
+                api.readOrdinaryNgSampleReference(bearer, draft, sample)
+            } }
+            // Read the pinned Ordinary NG page after the exact receipt lookups.
+            // A version advance while fetching receipts must prevent arming.
+            val read = observeOrdinaryNgDetails(grant, query)
+            val item = read.items.singleOrNull { it.attempt == attempt } ?: throw WorkFailure(WorkProblem.ScopeMismatch)
+            workCheck(item.state == OrdinaryNgState.OrdinaryNG, WorkProblem.ScopeMismatch)
+            item.latest?.let { latest ->
+                workCheck(latest.matchesAcceptedNgBasis == (latest.receipt.acceptedNgBasis == refs), WorkProblem.ReceiptMismatch)
+            }
+            val basis = OrdinaryNgCaptureBasis(access.task, read.draftVersion, attempt, refs, item.latest?.receipt)
+            selectionCommit.withLock {
+                access.requireCurrent()
+                store.protectOrdinaryNgBasis(access, basis, read.history.map { it.receipt }.filter { it.operation.attempt == attempt })
+            }
+        }
+
+    private suspend fun observeOrdinaryNgDetails(grant: Grant, query: OrdinaryNgQuery): OrdinaryNgRead {
+        val result = try {
+            request(grant) { bearer -> api.readOrdinaryNgDetails(bearer, grant.draft, query) }
+        } catch (_: OrdinaryNgVersionConflict) {
+            selectionCommit.withLock {
+                grant.access.requireCurrent()
+                store.recordOrdinaryNgVersionConflict(grant.access)
+            }
+            throw PatrolFailure(Issue.CONFLICT)
+        }
+        selectionCommit.withLock {
+            grant.access.requireCurrent()
+            store.observeOrdinaryNgVersion(grant.access)
+        }
+        return result
     }
 
     suspend fun readBasicInformation(
