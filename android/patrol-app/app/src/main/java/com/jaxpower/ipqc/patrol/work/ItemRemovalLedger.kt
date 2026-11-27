@@ -60,10 +60,20 @@ internal suspend fun WorkTransaction.sampleItemRemovalBlocks(entries: List<ItemR
             }
     }
 
-// A verified read from any implemented domain establishes a minimum task-wide version.
-internal suspend fun WorkTransaction.rememberTaskDraftVersion(version: Long) {
+// Once Header is observed, both authenticated reads can supply the task-wide
+// version. An ordinary pre-Header open keeps its existing removal-only writes.
+internal suspend fun WorkTransaction.rememberSharedDraftVersion(basis: OfflineSampleBasis) {
     val saved = catalog()
+    val version = if (saved.tracksBasicInformation) basis.draftVersion
+        else basis.attempts.mapNotNull { it.serverRemoval?.draftVersion }.maxOrNull() ?: return
     if (version > saved.observedTaskDraftVersion) save(saved.copy(observedTaskDraftVersion = version))
+}
+
+internal suspend fun WorkTransaction.rememberBasicInformationDraftVersion(version: Long) {
+    val saved = catalog()
+    if (!saved.tracksBasicInformation || version > saved.observedTaskDraftVersion) {
+        save(saved.copy(tracksBasicInformation = true, observedTaskDraftVersion = maxOf(version, saved.observedTaskDraftVersion)))
+    }
 }
 
 internal suspend fun WorkTransaction.taskDraftVersionProblem(entries: List<ItemRemovalEntry>,

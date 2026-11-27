@@ -24,6 +24,7 @@ internal data class WorkCatalog(
     // Keep the persisted V1 key so earlier removal observations stay effective.
     @SerialName("observedItemRemovalVersion") val observedTaskDraftVersion: Long = 0,
     val staleThroughDraftVersion: Long? = null,
+    val tracksBasicInformation: Boolean = false,
     val basicInformationIds: List<String> = emptyList(),
 )
 

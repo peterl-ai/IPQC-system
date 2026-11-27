@@ -89,7 +89,7 @@ internal class SharedWorkStore(private val rows: ProtectedWorkRows, private val 
     suspend fun observeOfflineSamples(session: SessionRepository.WorkSession, basis: OfflineSampleBasis) {
         sessions.withWorkSession(session, rows.origin) { requireCurrent ->
             rows.transaction(basis.task) {
-                rememberTaskDraftVersion(basis.draftVersion)
+                rememberSharedDraftVersion(basis)
                 val profile = offlineProfile(session.identity.userId)?.takeIf { it.owner == session.identity }
                 if (profile != null) {
                     val observed = updateBasis(profile.basis, basis.copy(editable = basis.editable && session.canContribute))
@@ -129,7 +129,7 @@ internal class SharedWorkStore(private val rows: ProtectedWorkRows, private val 
                 workCheck(latest.sameObservation(basis), WorkProblem.StaleGrant)
                 val profile = OfflineSampleProfile(owner, source.contextId, deadline.toString(), latest)
                 workCheck(requireOfflineSource(profile) == source, WorkProblem.SourceUnavailable)
-                rememberTaskDraftVersion(latest.draftVersion)
+                rememberSharedDraftVersion(latest)
                 requireCaptureTime(source, CaptureGrant(source.contextId, deadline), now)
                 saveOfflineProfile(profile)
                 requireCaptureTime(source, CaptureGrant(source.contextId, deadline), now)
@@ -155,7 +155,7 @@ internal class SharedWorkStore(private val rows: ProtectedWorkRows, private val 
                 }
                 saveBasicInformationBasis(owner, basis)
             }
-            rememberTaskDraftVersion(basis.draftVersion)
+            rememberBasicInformationDraftVersion(basis.draftVersion)
         }
     }
 
@@ -165,7 +165,9 @@ internal class SharedWorkStore(private val rows: ProtectedWorkRows, private val 
         workCheck(version == access.serverDraftVersion, WorkProblem.ScopeMismatch)
         transact(access, create = true) {
             val ledger = catalog()
-            if (version > (ledger.staleThroughDraftVersion ?: -1L)) save(ledger.copy(staleThroughDraftVersion = version))
+            if (version > (ledger.staleThroughDraftVersion ?: -1L)) {
+                save(ledger.copy(staleThroughDraftVersion = version, tracksBasicInformation = true))
+            }
         }
     }
 
