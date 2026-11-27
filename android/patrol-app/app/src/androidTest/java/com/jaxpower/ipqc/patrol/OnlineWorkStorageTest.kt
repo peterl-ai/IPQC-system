@@ -480,6 +480,13 @@ class OnlineWorkStorageTest {
         var batchQueries = 0
         var beforeSampleUpload: suspend () -> Unit = {}
 
+        override suspend fun uploadBasicInformationBatch(bearer: String, taskId: String, input: RequestBody,
+                                                          guard: GuardedUploadExchange): Response<ResponseBody> =
+            error("Unexpected Basic Information upload")
+
+        override suspend fun basicInformationOperationReceipt(bearer: String, taskId: String, operationId: String):
+            Response<ResponseBody> = error("Unexpected Basic Information receipt read")
+
         override suspend fun basicInformation(bearer: String, taskId: String, lineId: String,
                                              expectedDraftVersion: Long?, beforeDraftVersion: Long?,
                                              limit: Int): Response<ResponseBody> = error("Unexpected Basic Information read")

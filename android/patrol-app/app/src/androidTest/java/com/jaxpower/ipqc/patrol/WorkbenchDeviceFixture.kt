@@ -22,6 +22,7 @@ import java.util.Base64
 import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import okhttp3.MediaType.Companion.toMediaType
 import okio.Buffer
@@ -119,6 +120,32 @@ internal class WorkbenchDeviceFixture : AutoCloseable {
         var includeRemote = true
         var captureUntil = "2026-11-19T14:01:00Z"
         private val proof = Base64.getUrlEncoder().withoutPadding().encodeToString(ByteArray(32) { 29 })
+
+        val headerPosts = AtomicInteger()
+        var headerSource: WorkSource? = null
+        var beforeHeaderAdmission: suspend () -> Unit = {}
+        var headerPreflight: Response<ResponseBody>? = null
+        var headerPost: suspend (JsonObject) -> Response<ResponseBody> = { error("Unexpected Basic Information POST") }
+        var headerBatchLookup: ((String) -> Response<ResponseBody>)? = null
+        var headerOperationLookup: ((String) -> Response<ResponseBody>)? = null
+
+        override suspend fun uploadBasicInformationBatch(bearer: String, taskId: String, input: RequestBody,
+                                                          guard: GuardedUploadExchange): Response<ResponseBody> {
+            check(guard.maySend() && bearer == "Bearer fixture-access")
+            val source = requireNotNull(headerSource)
+            val body = Json.parseToJsonElement(Buffer().also(input::writeTo).readUtf8()).jsonObject
+            val sent = body.getValue("sourceProof").jsonObject
+            check(source.task.taskId == taskId && sent["workContextId"] == JsonPrimitive(source.contextId) &&
+                sent["proofSecret"] == JsonPrimitive(proof))
+            headerPosts.incrementAndGet()
+            return headerPost(body)
+        }
+
+        override suspend fun basicInformationOperationReceipt(bearer: String, taskId: String, operationId: String):
+            Response<ResponseBody> {
+            check(bearer == "Bearer fixture-access" && taskId == task().id)
+            return requireNotNull(headerOperationLookup)(operationId)
+        }
 
         val headerReads = AtomicInteger()
         var lastHeaderPin: Long? = null
@@ -219,6 +246,19 @@ internal class WorkbenchDeviceFixture : AutoCloseable {
 
         override suspend fun preflightUploadSources(bearer: String, taskId: String, input: WorkContextPreflightInputWire,
                                                   guard: GuardedUploadExchange): Response<ResponseBody> {
+            headerSource?.let { source ->
+                check(guard.maySend() && bearer == "Bearer fixture-access" && source.task.taskId == taskId &&
+                    input.expectedTaskLineId == source.task.lineId && input.expectedWorkflowVersion == source.task.workflowVersion &&
+                    input.expectedEnvironmentId == source.task.environmentId)
+                val sent = input.sources.single()
+                check(sent.workContextId == source.contextId && sent.proofSecret == proof &&
+                    sent.contributorUserIdAssertion == source.contributorUserId)
+                beforeHeaderAdmission()
+                val approved = WorkContextPreflightWire(NOW,
+                    listOf(WorkContextValidatedWire(source.contextId, source.contributorUserId, source.captureUntilUtc)),
+                    "SourcePreflightOnly", false)
+                return headerPreflight ?: Response.success(Json.encodeToString(approved).toResponseBody("application/json".toMediaType()))
+            }
             if (!removalUploadTestEnabled) {
                 sends.incrementAndGet()
                 error("Unexpected sample preflight")
@@ -245,6 +285,10 @@ internal class WorkbenchDeviceFixture : AutoCloseable {
         }
 
         override suspend fun batchReceipt(bearer: String, taskId: String, batchId: String): Response<ResponseBody> {
+            headerBatchLookup?.let {
+                check(bearer == "Bearer fixture-access" && taskId == task().id)
+                return it(batchId)
+            }
             if (missingRemovalReceipt) return Response.error(404, "{}".toResponseBody())
             val receipt = checkNotNull(explicitRemovalReceipt) { "Unexpected batch receipt query" }
             check(device.api.loginSubject.userId == receipt.uploadedByUserId && receipt.taskId == taskId && receipt.batchId == batchId)

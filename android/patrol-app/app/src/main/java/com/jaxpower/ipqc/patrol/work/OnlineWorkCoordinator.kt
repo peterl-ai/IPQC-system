@@ -17,6 +17,8 @@ import java.util.UUID
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -96,25 +98,151 @@ internal class OnlineWorkCoordinator(
     suspend fun readBasicInformation(
         grant: Grant, limit: Int = 20, beforeDraftVersion: Long? = null, pinToGrant: Boolean = true,
     ): BasicInformationRead = withGrant(grant) {
-        val task = grant.draft.task
         val query = BasicInformationQuery(limit, beforeDraftVersion, grant.draft.version.takeIf { pinToGrant })
+        observeBasicInformation(grant, grant.access, query)
+    }
+
+    private suspend fun observeBasicInformation(
+        grant: Grant, access: WorkAccess, query: BasicInformationQuery,
+    ): BasicInformationRead {
+        val task = access.task
         val observed = try {
             request(grant) { bearer -> api.readBasicInformation(bearer, task, query) }
         } catch (_: BasicInformationVersionConflict) {
             selectionCommit.withLock {
                 grant.access.requireCurrent()
-                store.recordBasicInformationVersionConflict(grant.access, requireNotNull(query.expectedDraftVersion))
+                store.recordBasicInformationVersionConflict(access, requireNotNull(query.expectedDraftVersion))
             }
             throw PatrolFailure(Issue.CONFLICT)
         }
         workCheck(observed.basis.draftVersion >= (latestVersion[task] ?: 0L), WorkProblem.StaleGrant)
         selectionCommit.withLock {
             grant.access.requireCurrent()
-            store.observeBasicInformation(grant.access, observed.basis)
+            store.observeBasicInformation(access, observed.basis)
             latestVersion[task] = observed.basis.draftVersion
         }
-        observed
+        return observed
     }
+
+    suspend fun basicInformationWorkbench(
+        grant: Grant, previousPage: BasicInformationRead? = null,
+    ): WorkbenchBasicInformation = withGrant(grant) {
+        val access = grant.access
+        val before = previousPage?.let {
+            workCheck(it.basis.task == access.task && it.basis.draftVersion == access.serverDraftVersion, WorkProblem.StaleGrant)
+            it.historyBeforeDraftVersion ?: throw WorkFailure(WorkProblem.InvalidState)
+        }
+        val observed = observeBasicInformation(grant, access, BasicInformationQuery(beforeDraftVersion = before,
+            expectedDraftVersion = access.serverDraftVersion))
+        if (previousPage != null) workCheck(observed.basis == previousPage.basis, WorkProblem.ReceiptMismatch)
+        val read = if (previousPage == null) observed else observed.copy(history = previousPage.history + observed.history)
+        store.basicInformationWorkbench(access, read)
+    }
+
+    suspend fun recheckBasicInformationWorkbench(grant: Grant, observation: BasicInformationRead): WorkbenchBasicInformation =
+        withGrant(grant) { store.basicInformationWorkbench(grant.access, observation) }
+
+    suspend fun sendWorkbenchBasicInformation(
+        grant: Grant, selected: WorkbenchBasicInformation.Row,
+    ): BasicInformationUploadResult = withGrant(grant) {
+        withUploadLease(grant, requireApplicableAttempts = false) { draft ->
+            val access = uploadAccess(grant, draft)
+            val observed = observeBasicInformation(grant, access,
+                BasicInformationQuery(expectedDraftVersion = draft.version))
+            workCheck(selected.canUpload && selected.state == WorkState.Queued &&
+                selected.baseDraftVersion == draft.version, WorkProblem.StaleGrant)
+            val id = selected.batchId ?: UUID.nameUUIDFromBytes(
+                ("ipqc:basic-information:batch:" + selected.operation.operationId).encodeToByteArray()).toString()
+            val candidate = selectionCommit.withLock {
+                grant.access.requireCurrent()
+                store.prepareBasicInformationUpload(access, observed.basis, id, selected.operation)
+            }
+            uploadPreparedBasicInformation(grant, draft, observed.basis, candidate)
+        }
+    }
+
+    private suspend fun uploadPreparedBasicInformation(
+        grant: Grant, draft: OnlineDraft, basis: BasicInformationBasis, candidate: BasicInformationUploadCandidate,
+    ): BasicInformationUploadResult {
+        val fence = uploadFence(grant)
+        val preflight = request(grant) {
+            api.checkUploadSources(it, draft.task.taskId, candidate.preflightInput(), fence)
+        }
+        val sources = when (preflight) {
+            is UploadExchange.Success -> validateUploadSources(listOf(candidate.source), preflight.body)
+            is UploadExchange.Rejected ->
+                return rejectBasicInformation(grant, uploadAccess(grant, draft), candidate, preflight.rejection, preflight = true)
+            is UploadExchange.Unknown -> return BasicInformationUploadResult.NotSent(preflight.issue)
+        }
+        val access = uploadAccess(grant, draft, sources)
+        try {
+            val body = selectionCommit.withLock {
+                grant.access.requireCurrent()
+                store.beginBasicInformationUpload(access, basis, candidate)
+            }
+            return when (val reply = request(grant) { api.sendBasicInformationBatch(it, draft.task, body, fence) }) {
+                is UploadExchange.Success -> acceptBasicInformation(grant, access, candidate, reply.body)
+                is UploadExchange.Rejected -> rejectBasicInformation(grant, access, candidate, reply.rejection, preflight = false)
+                is UploadExchange.Unknown -> BasicInformationUploadResult.OutcomeUnknown(reply.issue)
+            }
+        } finally {
+            withContext(NonCancellable) {
+                try {
+                    store.leaveBasicInformationUncertain(candidate)
+                } catch (_: WorkFailure) {
+                    // Leave the exact InFlight record recoverable if the cleanup write fails.
+                }
+            }
+        }
+    }
+
+    private suspend fun rejectBasicInformation(
+        grant: Grant, access: WorkAccess, candidate: BasicInformationUploadCandidate, rejection: UploadRejection, preflight: Boolean,
+    ): BasicInformationUploadResult {
+        val recorded = selectionCommit.withLock {
+            grant.access.requireCurrent()
+            store.applyBasicInformationRejection(access, candidate, rejection, preflight)
+        }
+        return if (recorded) BasicInformationUploadResult.Rejected(rejection.reason, submitted = !preflight)
+        else if (preflight) BasicInformationUploadResult.NotSent(Issue.RESPONSE)
+        else BasicInformationUploadResult.OutcomeUnknown(Issue.RESPONSE)
+    }
+
+    private suspend fun acceptBasicInformation(
+        grant: Grant, access: WorkAccess, candidate: BasicInformationUploadCandidate, reply: BasicInformationBatchResult,
+    ): BasicInformationUploadResult {
+        val operation = reply.operation
+        val receipt = reply.receipt
+        val uploader = access.session.identity
+        if (!candidate.original.matches(operation) ||
+            (!reply.replayOnly && (operation.actorUserId != uploader.userId || operation.actorPersonalSessionId != uploader.familyId)) ||
+            (receipt == null && operation.batchId == candidate.target.batchId))
+            return BasicInformationUploadResult.OutcomeUnknown(Issue.RESPONSE)
+        val target = if (receipt != null) candidate.target else
+            candidate.target.copy(lookup = ReceiptLookup(ReceiptKind.Operation, operation.operation.operationId))
+        val result = selectionCommit.withLock {
+            grant.access.requireCurrent()
+            store.reconcileBasicInformationReceipt(access, target, if (receipt != null)
+                BasicInformationReceiptReply.Batch(receipt) else BasicInformationReceiptReply.Operation(operation))
+        }
+        return when (result) {
+            is BasicInformationReceiptRecovery.BatchConfirmed ->
+                BasicInformationUploadResult.Accepted(result.receipt, reply.replayOnly)
+            is BasicInformationReceiptRecovery.OperationObserved -> BasicInformationUploadResult.NeedsBatchReceipt(result.receipt)
+            else -> BasicInformationUploadResult.OutcomeUnknown(Issue.RESPONSE)
+        }
+    }
+
+    suspend fun recoverBasicInformationReceipt(grant: Grant, lookup: ReceiptLookup): BasicInformationReceiptRecovery =
+        withGrant(grant) {
+            val target = store.locateBasicInformationReceipt(grant.access, lookup)
+                ?: return@withGrant BasicInformationReceiptRecovery.Unresolved(ReceiptUncertainty.NoLocalAttempt)
+            val reply = request(grant) { api.readBasicInformationReceipt(target, it) }
+            selectionCommit.withLock {
+                grant.access.requireCurrent()
+                store.reconcileBasicInformationReceipt(grant.access, target, reply)
+            }
+        }
 
     suspend fun uploadBatch(grant: Grant, batchId: String): SampleUploadResult = withGrant(grant) {
         withUploadLease(grant) { draft -> uploadPreparedSampleBatch(grant, draft, batchId) }
@@ -124,9 +252,11 @@ internal class OnlineWorkCoordinator(
         withUploadLease(grant) { draft -> uploadPreparedItemRemoval(grant, draft, batchId) }
     }
 
-    // One process lease across both transport kinds covers refresh, preflight,
-    // the POST and settlement. Room also fences unresolved work after a restart.
-    private suspend fun <T> withUploadLease(grant: Grant, upload: suspend (OnlineDraft) -> T): T {
+    // All draft domains share the process lease across refresh, preflight, POST
+    // and settlement. Room fences unresolved attempts across process restarts.
+    private suspend fun <T> withUploadLease(
+        grant: Grant, requireApplicableAttempts: Boolean = true, upload: suspend (OnlineDraft) -> T,
+    ): T {
         val session = grant.access.session
         if (!session.canContribute) throw PatrolFailure(Issue.FORBIDDEN)
         val scope = origin to grant.draft.task
@@ -135,7 +265,8 @@ internal class OnlineWorkCoordinator(
             store.recoverInterrupted(grant.access)
             val draft = readDraft(grant.selectedTask, session, grant.selection)
             workCheck(draft.task == grant.draft.task && draft.validPlanning &&
-                draft.availability in uploadableDrafts && draft.applicableAttempts.isNotEmpty(), WorkProblem.ScopeMismatch)
+                draft.availability in uploadableDrafts && (!requireApplicableAttempts || draft.applicableAttempts.isNotEmpty()),
+                WorkProblem.ScopeMismatch)
             return upload(draft)
         } finally {
             synchronized(uploading) { uploading.remove(scope) }
@@ -148,9 +279,12 @@ internal class OnlineWorkCoordinator(
             true
         })
 
-    private fun uploadFence(grant: Grant) = GuardedUploadExchange {
-        runCatching { grant.access.requireCurrent() }.isSuccess &&
-            sessions.maySendContribution(grant.access.session, origin)
+    private suspend fun uploadFence(grant: Grant): GuardedUploadExchange {
+        val exchange = currentCoroutineContext()
+        return GuardedUploadExchange {
+            exchange.isActive && runCatching { grant.access.requireCurrent() }.isSuccess &&
+                sessions.maySendContribution(grant.access.session, origin)
+        }
     }
 
     private suspend fun uploadPreparedSampleBatch(grant: Grant, draft: OnlineDraft, batchId: String): SampleUploadResult {

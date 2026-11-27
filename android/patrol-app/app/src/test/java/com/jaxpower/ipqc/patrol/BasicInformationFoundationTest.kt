@@ -1,10 +1,14 @@
 package com.jaxpower.ipqc.patrol
 
+import com.jaxpower.ipqc.patrol.api.GuardedUploadExchange
 import com.jaxpower.ipqc.patrol.api.Issue
+import com.jaxpower.ipqc.patrol.auth.SessionIdentity
 import com.jaxpower.ipqc.patrol.api.PatrolFailure
 import com.jaxpower.ipqc.patrol.work.*
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import okhttp3.mockwebserver.MockResponse
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -138,6 +142,181 @@ class BasicInformationFoundationTest {
         val headerBatch = Json.parseToJsonElement("""{"receiptVersion":6,"operations":[],"headerOperations":[]}""").jsonObject
         assertThrows(Exception::class.java) { headerBatch.decodeBatchReceipt() }
         assertThrows(Exception::class.java) { headerBatch.decodeItemRemovalBatchReceipt() }
+    }
+
+    @Test fun v6AcceptsExactReplayAndDistinguishesOperationOnlyResults() {
+        val op = operation(3, BasicInformationField.Customer, null, 7, OperationReference(id(8), "A".repeat(64)))
+        val operation = receipt(op)
+        val full = uploadResult(operation)
+        for (replay in listOf(false, true)) {
+            val parsed = full.replacing("replayOnly", replay).decodeBasicInformationUpload(task)
+            assertEquals(replay, parsed.replayOnly)
+            assertEquals(operation, parsed.operation)
+            assertEquals(operation.actorPersonalSessionId, parsed.receipt?.operation?.actorPersonalSessionId)
+            assertEquals(op.predecessor, parsed.receipt?.operation?.operation?.predecessor)
+            assertNull(parsed.operation.operation.value)
+        }
+        val individual = full.replacing("replayOnly", true).replacing("batchReceipt", JsonNull)
+            .decodeBasicInformationUpload(task)
+        assertNull(individual.receipt)
+        assertEquals(operation, individual.operation)
+        assertThrows(PatrolFailure::class.java) { full.replacing("batchReceipt", JsonNull).decodeBasicInformationUpload(task) }
+    }
+
+    @Test fun v6RejectsIncompatibleMembersTamperedPinsAndContradictoryOuterResponse() {
+        val operation = receipt(operation(3, BasicInformationField.Customer, " ", 7))
+        val full = uploadResult(operation)
+        val batch = full.getValue("batchReceipt").jsonObject
+        val individual = full.getValue("operation").jsonObject
+        for (bad in listOf(
+            full.replacing("canSubmit", true), full.replacing("replayOnly", "true"),
+            full.replacing("operation", individual.replacing("value", JsonNull)),
+            full.replacing("operation", individual.replacing("field", "ProductMo")),
+            full.replacing("operation", individual.replacing("originLocalEditVersion", 10)),
+            full.replacing("operation", individual.replacing("predecessor",
+                buildJsonObject { put("operationId", id(8)); put("contentHash", "A".repeat(64)) })),
+            full.replacing("operation", individual.replacing("operationId", id(90))),
+            full.replacing("operation", individual.replacing("actorPersonalSessionId", "invalid")),
+            full.replacing("operation", individual.replacing("environmentId", "other")),
+            full.replacing("operation", individual.replacing("lineId", id(94))),
+            full.replacing("operation", individual.replacing("value", "x".repeat(201))),
+            full.replacing("operation", individual.replacing("acceptedAtUtc", "broken")),
+        )) assertThrows(PatrolFailure::class.java) { bad.decodeBasicInformationUpload(task) }
+        for (bad in listOf(
+            batch.replacing("receiptVersion", 2), batch.replacing("receiptVersion", "6"),
+            batch.replacing("taskId", id(30)), batch.replacing("batchId", id(31)),
+            batch.replacing("draftVersion", 9), batch.replacing("previousDraftVersion", 6),
+            batch.replacing("uploadedByUserId", id(40)), batch.replacing("uploadedPersonalSessionId", id(41)),
+            batch.replacing("acceptedAtUtc", "2026-11-27T08:59:59Z"), batch.replacing("requestFingerprint", "A".repeat(64)),
+            batch.replacing("operations", JsonArray(listOf(individual))),
+            batch.replacing("itemOperations", JsonArray(emptyList())),
+            batch.replacing("headerOperations", JsonArray(listOf(individual, individual))),
+        )) assertThrows(PatrolFailure::class.java) { bad.decodeBasicInformationBatch(task) }
+    }
+
+    @Test fun headerPostEncodesOneOperationUsesExactBearerAndNeverFollowsOrRetries() = runBlocking<Unit> {
+        TestServer().use { server ->
+            val op = operation(3, BasicInformationField.Customer, null, 7, OperationReference(id(8), "A".repeat(64)))
+            val owner = SessionIdentity(op.contributorUserId, id(13), task.environmentId)
+            val batchId = id(6)
+            val operation = receipt(op).copy(batchId = batchId)
+            val candidate = candidate(op, owner, batchId, operation.originLocalEditVersion)
+            server.enqueue(uploadResult(operation).toString())
+            val sent = server.workApi.sendBasicInformationBatch("Bearer synthetic-B", task, candidate.encodeBatch(),
+                GuardedUploadExchange { true })
+            assertTrue(sent is UploadExchange.Success)
+            val path = "/api/line-patrol/tasks/${task.taskId}/basic-information-batches"
+            val request = server.request(path, "POST", "synthetic-B")
+            val body = Json.parseToJsonElement(request.body.readUtf8()).jsonObject
+            val item = body.getValue("operation").jsonObject
+            assertEquals(JsonPrimitive(op.contributorUserId), item["contributorUserIdAssertion"])
+            assertEquals(JsonPrimitive(op.sourceWorkContextId), item["sourceWorkContextId"])
+            assertEquals(JsonNull, item["value"])
+            assertEquals(JsonPrimitive(op.predecessor?.operationId), item.getValue("predecessor").jsonObject["operationId"])
+            assertFalse("operations" in body)
+            assertEquals(JsonPrimitive(7), body["expectedDraftVersion"])
+            assertEquals(JsonPrimitive(1), item["canonicalizationVersion"])
+            for (status in listOf(302, 307, 503, 408)) {
+                server.web.enqueue(MockResponse().setResponseCode(status)
+                    .setHeader("Location", server.origin.resolve(path).toString()).setHeader("Retry-After", "0").setBody("{}"))
+                assertTrue(server.workApi.sendBasicInformationBatch("Bearer synthetic-B", task, candidate.encodeBatch(),
+                    GuardedUploadExchange { true }) is UploadExchange.Unknown)
+                server.request(path, "POST", "synthetic-B")
+            }
+            assertEquals(5, server.web.requestCount)
+            assertTrue(server.workApi.sendBasicInformationBatch("Bearer synthetic-B", task, candidate.encodeBatch(),
+                GuardedUploadExchange { false }) is UploadExchange.Unknown)
+            assertEquals(5, server.web.requestCount)
+        }
+    }
+
+    @Test fun headerUsesBothExactReceiptRoutesAndPreservesUncertaintyForMissingOrInvalidResults() = runBlocking<Unit> {
+        TestServer().use { server ->
+            val operation = receipt(operation(3, BasicInformationField.Customer, "Synthetic", 7))
+            val version6 = uploadResult(operation).getValue("batchReceipt").jsonObject
+            val base = "/api/line-patrol/tasks/${task.taskId}/"
+            val batchTarget = ReceiptTarget(ReceiptLookup(ReceiptKind.Batch, operation.batchId), task,
+                id(11), operation.batchId, version6.getValue("requestFingerprint").toString().trim('"'))
+            val opTarget = batchTarget.copy(lookup = ReceiptLookup(ReceiptKind.Operation, operation.operation.operationId))
+            server.enqueue(version6.toString())
+            val full = server.workApi.readBasicInformationReceipt(batchTarget, "Bearer synthetic-B")
+            assertEquals(operation, (full as BasicInformationReceiptReply.Batch).receipt.operation)
+            server.request(base + "operation-batches/${operation.batchId}/receipt", "GET", "synthetic-B")
+            server.enqueue(receiptJson(operation).toString())
+            val exact = server.workApi.readBasicInformationReceipt(opTarget, "Bearer synthetic-B")
+            assertEquals(operation, (exact as BasicInformationReceiptReply.Operation).receipt)
+            val path = base + "basic-information-operations/${operation.operation.operationId}/receipt"
+            server.request(path, "GET", "synthetic-B")
+            server.enqueue("{}", 404)
+            assertEquals(BasicInformationReceiptReply.Missing, server.workApi.readBasicInformationReceipt(opTarget, "Bearer synthetic-B"))
+            server.request(path, "GET", "synthetic-B")
+            for (bad in listOf("{\"taskId\":1,\"taskId\":2}", " ".repeat(513 * 1024), "{", version6.toString())) {
+                server.enqueue(bad)
+                assertEquals(BasicInformationReceiptReply.Unavailable(Issue.RESPONSE),
+                    server.workApi.readBasicInformationReceipt(opTarget, "Bearer synthetic-B"))
+                server.request(path, "GET", "synthetic-B")
+            }
+            assertEquals(7, server.web.requestCount)
+        }
+    }
+
+    @Test fun onlyDocumentedDefinitiveHeaderCodesAreClassified() = runBlocking<Unit> {
+        TestServer().use { server ->
+            val op = operation(3, BasicInformationField.Customer, "", 7)
+            val owner = SessionIdentity(op.contributorUserId, id(13), task.environmentId)
+            val request = candidate(op, owner, id(6), 9).encodeBatch()
+            val cases = listOf(
+                Triple(409, "DraftVersionConflict", WorkConflict.DraftVersionConflict),
+                Triple(409, "BasicInformationPredecessorConflict", WorkConflict.TaskScopeConflict),
+                Triple(400, "InvalidBasicInformationBatch", WorkConflict.BatchInputRejected),
+                Triple(409, "BatchIdentityConflict", null), Triple(409, "SourceSecurityRevoked", null),
+                Triple(400, "UnhandledError", null), Triple(429, "DraftVersionConflict", null),
+            )
+            val path = "/api/line-patrol/tasks/${task.taskId}/basic-information-batches"
+            for ((status, code, expected) in cases) {
+                server.web.enqueue(MockResponse().setResponseCode(status).setHeader("Content-Type", "application/problem+json")
+                    .setBody("""{"status":$status,"title":"$code","code":"$code"}"""))
+                val result = server.workApi.sendBasicInformationBatch("Bearer synthetic-B", task, request, GuardedUploadExchange { true })
+                if (expected == null) assertTrue(result is UploadExchange.Unknown)
+                else assertEquals(expected, (result as UploadExchange.Rejected).rejection.reason)
+                server.request(path, "POST", "synthetic-B")
+            }
+            for ((status, issue) in listOf(401 to Issue.UNAUTHENTICATED, 403 to Issue.FORBIDDEN)) {
+                server.enqueue("{}", status)
+                expectIssue(issue) {
+                    server.workApi.sendBasicInformationBatch("Bearer synthetic-B", task, request, GuardedUploadExchange { true })
+                }
+                server.request(path, "POST", "synthetic-B")
+            }
+        }
+    }
+
+    private fun candidate(op: BasicInformationOperation, owner: SessionIdentity, batchId: String, local: Long):
+        BasicInformationUploadCandidate {
+        val source = WorkSource(task, op.sourceWorkContextId, owner.userId, owner.familyId, Fixture.NOW,
+            "2026-11-19T14:01:00Z", Fixture.FAMILY_EXPIRY, 1)
+        val payload = BasicInformationCanonical.operation(task, op, local)
+        val original = BasicInformationEnvelope(id(11), BasicInformationCommand(task, owner, op), source,
+            local, CANONICAL_VERSION, payload, workHash(payload), OfflineCaptureEvidence(Fixture.NOW, source.captureUntilUtc))
+        val batch = BasicInformationBatch.seal(original, batchId)
+        return BasicInformationUploadCandidate(ReceiptTarget(ReceiptLookup(ReceiptKind.Batch, batchId), task,
+            original.workspaceId, batchId, batch.fingerprint), original, BasicInformationTransport(batch),
+            StoredWorkSource(source, "A".repeat(43)))
+    }
+
+    private fun uploadResult(operation: BasicInformationReceipt) = buildJsonObject {
+        val member = receiptJson(operation)
+        put("batchReceipt", buildJsonObject {
+            put("receiptVersion", 6); put("taskId", task.taskId); put("batchId", operation.batchId)
+            put("requestFingerprint", BasicInformationCanonical.fingerprint(task, operation.batchId,
+                operation.operation.baseDraftVersion, operation.reference()))
+            put("uploadedByUserId", operation.actorUserId); put("uploadedPersonalSessionId", operation.actorPersonalSessionId)
+            put("acceptedAtUtc", operation.acceptedAtUtc); put("previousDraftVersion", operation.operation.baseDraftVersion)
+            put("draftVersion", operation.draftVersion); put("operations", JsonArray(emptyList()))
+            put("headerOperations", JsonArray(listOf(member)))
+        })
+        put("operation", member); put("replayOnly", false)
+        put("canExecute", false); put("canSubmit", false); put("acceptsFormalInspection", false)
     }
 
     private fun decodeRead(r: BasicInformationReceipt) =

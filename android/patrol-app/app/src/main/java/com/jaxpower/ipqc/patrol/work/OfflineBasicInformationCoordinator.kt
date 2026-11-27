@@ -16,6 +16,9 @@ internal class OfflineBasicInformationCoordinator(private val store: SharedWorkS
 
     suspend fun draft(task: WorkTask, owner: SessionIdentity): LocalBasicInformationDraft =
         store.offlineBasicInformationDraft(task, owner)
+
+    suspend fun workbench(task: WorkTask, owner: SessionIdentity): WorkbenchBasicInformation =
+        store.offlineBasicInformationWorkbench(task, owner)
 }
 
 internal suspend fun WorkTransaction.checkedBasicInformation(task: WorkTask, id: String): BasicInformationEnvelope? {

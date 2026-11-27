@@ -35,6 +35,9 @@ import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonObject
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.ResponseBody.Companion.toResponseBody
+import retrofit2.Response
 import org.junit.Assert.*
 import org.junit.Rule
 import org.junit.Test
@@ -133,6 +136,9 @@ class SampleWorkbenchTest {
             pane().performScrollToNode(hasTestTag("inspection-value"))
             compose.onNodeWithTag("inspection-value").performTextInput("1e-40")
             saveSample()
+            // The expanded heading returns when focus has cleared and the IME inset is gone.
+            val expandedHeading = compose.onNodeWithText("Development Pilot / Local Draft")
+            compose.waitUntil(20_000) { expandedHeading.isDisplayed() }
             compose.onNodeWithText("Enter a valid decimal", substring = true).assertIsDisplayed()
             assertEquals(3, draft(app).history.size)
             pane().performScrollToNode(hasTestTag("inspection-value"))
@@ -882,6 +888,473 @@ class SampleWorkbenchTest {
         }
     }
 
+    @Test fun basicInformationWorkbenchKeepsThreeExactProposalsAndRecoversOneByExactBatch() {
+        WorkbenchDeviceFixture().use { fixture ->
+            fixture.respondBasicInformation(7)
+            val app = fixture.components()
+            val size = install(app)
+            login(app)
+            openWorkbench(fixture, app)
+            assertEquals(0, fixture.wire.headerPosts.get())
+            button("Basic Information").performClick()
+            awaitHeader(app)
+            button("Activate local capture").performClick()
+            compose.waitUntil(20_000) { app.model.workbench?.ui?.value?.header?.canCapture == true }
+            compose.onNodeWithTag("basic-information-field-Customer").assertIsDisplayed()
+            compose.onNodeWithTag("basic-information-field-Production").assertIsDisplayed()
+            compose.onNodeWithText("Product MO").assertIsDisplayed()
+            compose.onNodeWithTag("basic-information-confirmed").assertTextContains("Server-confirmed · Never recorded")
+            captureHeaderLayouts(size, "editor")
+
+            val value = compose.onNodeWithTag("basic-information-value")
+            value.performTextInput("x".repeat(201))
+            button("Save field locally").assertIsNotEnabled()
+            value.performTextClearance()
+            value.performTextInput("Synthetic Customer")
+            button("Save field locally").performClick()
+            awaitHeader(app) { it.proposals.size == 1 }
+            compose.onNodeWithText("Local proposal · Synthetic Customer").assertIsDisplayed()
+            compose.onNodeWithTag("basic-information-confirmed").assertTextContains("Server-confirmed · Never recorded")
+            captureHeaderLayouts(size, "local-proposal")
+            compose.onNodeWithTag("basic-information-field-Production").performClick()
+            button("Save field locally").performClick()
+            awaitHeader(app) { it.proposals.size == 2 }
+            compose.onNodeWithText("Local proposal · Empty").assertIsDisplayed()
+            compose.onNodeWithTag("basic-information-field-ProductMo").performClick()
+            value.performTextInput("  ")
+            button("Save field locally").performClick()
+            val queued = awaitHeader(app) { it.proposals.size == 3 }
+            compose.onNodeWithText("Local proposal · Whitespace only").assertIsDisplayed()
+            assertEquals(listOf("Synthetic Customer", "", "  "), queued.proposals.map { it.value })
+            assertEquals(0, fixture.wire.headerPosts.get())
+
+            val oldTarget = requireNotNull(app.model.workbench?.ui?.value?.target)
+            val a = queued.proposals.single { it.field == BasicInformationField.Customer }
+            advance(fixture, 61_000)
+            awaitHeader(app) { !it.canCapture && it.proposals.size == 3 }
+            val original = requireNotNull(runBlocking {
+                app.rows.transaction(fixture.scope()) { checkedBasicInformation(fixture.scope(), a.operation.operationId) }
+            })
+            compose.runOnIdle { app.model.logout() }
+            compose.waitUntil(20_000) { app.model.ui.value.screen == Screen.Login && !app.model.ui.value.busy }
+            fixture.device.api.loginSubject = fixture.b
+            login(app)
+            openWorkbench(fixture, app)
+            button("Basic Information").performClick()
+            val current = awaitHeader(app) { it.proposals.size == 3 }
+            assertFalse(current.canCapture)
+            button("Save field locally").assertDoesNotExist()
+            button("Upload field").assertIsEnabled()
+            compose.runOnIdle {
+                app.model.uploadBasicInformation(oldTarget, queued, a)
+                app.model.saveBasicInformation(oldTarget, queued, BasicInformationField.Customer, "Old session")
+            }
+            assertEquals(0, fixture.wire.headerPosts.get())
+
+            fixture.wire.headerSource = original.source
+            fixture.wire.headerPost = {
+                fixture.wire.sharedDraftRateLimits.incrementAndGet()
+                throw java.io.IOException("Synthetic response loss")
+            }
+            val target = requireNotNull(app.model.workbench?.ui?.value?.target)
+            val row = current.proposals.single { it.operation == a.operation }
+            compose.runOnIdle {
+                app.model.uploadBasicInformation(target, current, row)
+                app.model.uploadBasicInformation(target, current, row)
+            }
+            awaitHeaderRefreshFailure(app)
+            compose.onNodeWithTag("basic-information-result").assertTextContains("Upload outcome unknown. Check the exact receipt.")
+            button("Upload field").assertDoesNotExist()
+            captureHeaderLayouts(size, "refresh-required")
+            button("Reload draft").performClick()
+            val unknown = awaitHeader(app) { it.proposals.any { p -> p.state == WorkState.OutcomeUnknown } }
+            captureHeaderLayouts(size, "outcome-unknown")
+            val record = requireNotNull(runBlocking {
+                app.rows.transaction(fixture.scope()) { checkedBasicInformationTransport(original) }
+            })
+            val receipt = headerAccepted(original, record.batch, fixture.b)
+            fixture.wire.headerBatchLookup = { Response.error(404, "{}".toResponseBody()) }
+            button("Check batch receipt").performClick()
+            awaitHeader(app) { it.proposals.any { p -> p.state == WorkState.OutcomeUnknown } }
+            compose.onNodeWithTag("basic-information-result")
+                .assertTextContains("Receipt not found yet. The upload outcome remains unknown.")
+            fixture.wire.sharedDraftVersionOverride = 8
+            fixture.respondBasicInformation(8, receipt.operation)
+            fixture.wire.headerOperationLookup = { Response.success(wireBasicInformationReceipt(receipt.operation).jsonResponse()) }
+            button("Check field receipt").performClick()
+            awaitHeader(app) { it.proposals.any { p -> p.state == WorkState.OutcomeUnknown && p.confirmed == receipt.operation } }
+            fixture.wire.headerBatchLookup = {
+                fixture.wire.sharedDraftRateLimits.incrementAndGet()
+                Response.success(headerBatchJson(receipt).jsonResponse())
+            }
+            button("Check batch receipt").performClick()
+            awaitHeaderRefreshFailure(app)
+            compose.onNodeWithTag("basic-information-result")
+                .assertTextContains("Server confirmed the Basic Information field and its batch.")
+            button("Reload draft").performClick()
+            val accepted = awaitHeader(app) { it.proposals.any { p -> p.state == WorkState.Accepted } }
+            compose.onNodeWithTag("basic-information-confirmed").assertTextContains("Server-confirmed · Synthetic Customer")
+            captureHeaderLayouts(size, "accepted")
+            compose.onNodeWithTag("basic-information-field-Production").performClick()
+            compose.onNodeWithText("Stale local proposal · Empty").assertIsDisplayed()
+            compose.onNodeWithText("Last action · Customer").assertIsDisplayed()
+            button("Upload field").assertDoesNotExist()
+            captureHeaderLayouts(size, "stale")
+            assertEquals(listOf("", "  "), accepted.proposals.filter { it.stale && it.confirmed == null }.map { it.value })
+            assertEquals(1, fixture.wire.headerPosts.get())
+            assertEquals(record.batch.batchId, unknown.proposals.single { it.operation == a.operation }.batchId)
+            close(app)
+        }
+    }
+
+    @Test fun headerCaptureExpiryDisablesVisibleEditorAndRejectsRetainedSave() {
+        WorkbenchDeviceFixture().use { fixture ->
+            fixture.respondBasicInformation(7)
+            val app = fixture.components()
+            val size = install(app)
+            login(app)
+            openWorkbench(fixture, app)
+            activate(app)
+            button("Basic Information").performClick()
+            val customer = awaitHeader(app) { it.canCapture }
+            button("Save field locally").performClick()
+            awaitHeader(app) { it.proposals.size == 1 }
+            compose.onNodeWithTag("basic-information-field-Production").performClick()
+            val active = awaitHeader(app) { it !== customer && it.canCapture }
+            val target = requireNotNull(app.model.workbench?.ui?.value?.target)
+            val retainedSave = {
+                app.model.saveBasicInformation(target, active, BasicInformationField.Production, "Expired draft")
+            }
+            val before = requireNotNull(runBlocking { app.rows.transaction(fixture.scope()) { catalog() } })
+            button("Save field locally").assertIsEnabled()
+
+            advance(fixture, 61_000)
+            compose.waitUntil(20_000) { app.model.workbench?.ui?.value?.blocked == WorkProblem.CaptureWindowClosed }
+            button("Save field locally").assertDoesNotExist()
+            compose.runOnIdle { retainedSave() }
+            compose.onNodeWithTag("basic-information-confirmed").assertIsDisplayed()
+            assertNull(app.model.workbench?.ui?.value?.error)
+            captureHeaderLayouts(size, "capture-expired")
+            val after = requireNotNull(runBlocking { app.rows.transaction(fixture.scope()) { catalog() } })
+            assertEquals(before.localEditVersion, after.localEditVersion)
+            assertEquals(before.basicInformationIds, after.basicInformationIds)
+            compose.onNodeWithTag("basic-information-field-Customer").performClick()
+            compose.onNodeWithText("Local proposal · Empty").assertIsDisplayed()
+            assertEquals(0, fixture.wire.headerPosts.get())
+            close(app)
+        }
+    }
+
+    @Test fun higherProtectedDraftVersionInvalidatesHeaderAndOppositeModeCallbacks() {
+        WorkbenchDeviceFixture().use { fixture ->
+            fixture.respondBasicInformation(7)
+            val app = fixture.components()
+            install(app)
+            login(app)
+            openWorkbench(fixture, app)
+            activate(app)
+            button("Basic Information").performClick()
+            val previous = awaitHeader(app) { it.canCapture }
+            val target = requireNotNull(app.model.workbench?.ui?.value?.target)
+            val attempt = fixture.attempt(fixture.task().id, 0)
+            compose.runOnIdle {
+                app.model.workbench?.save(target, attempt, SampleInput.Qualitative(QualitativeJudgment.OK), null)
+                app.model.saveWorkbenchItemRemoval(target, attempt, true, RemovalConfirmation.Production, null)
+            }
+            assertEquals(0L, runBlocking { app.rows.transaction(fixture.scope()) { catalog().localEditVersion } })
+            runBlocking {
+                app.rows.transaction(fixture.scope()) { save(catalog().copy(observedTaskDraftVersion = 8)) }
+            }
+            awaitHeaderRefreshFailure(app)
+            button("Save field locally").assertDoesNotExist()
+            compose.onNodeWithTag("basic-information-refresh-required").assertIsDisplayed()
+            compose.runOnIdle { app.model.saveBasicInformation(target, previous, BasicInformationField.Customer, "Old version") }
+            fixture.respondBasicInformation(8)
+            fixture.wire.sharedDraftVersionOverride = 8
+            button("Reload draft").performClick()
+            val fresh = awaitHeader(app) { it.observation.basis.draftVersion == 8L }
+            assertTrue(fresh.canCapture)
+            button("Inspection items").performClick()
+            compose.onNodeWithTag("basic-information-editor").assertDoesNotExist()
+            compose.runOnIdle { app.model.saveBasicInformation(target, fresh, BasicInformationField.Customer, "Old mode") }
+            assertEquals(0L, runBlocking { app.rows.transaction(fixture.scope()) { catalog().localEditVersion } })
+            assertEquals(0, fixture.wire.headerPosts.get())
+            close(app)
+        }
+    }
+
+    @Test fun headerSourceRevocationRemovesCaptureAndOnlyTheRevokedUpload() {
+        WorkbenchDeviceFixture().use { fixture ->
+            fixture.respondBasicInformation(7)
+            val app = fixture.components()
+            install(app)
+            login(app)
+            openWorkbench(fixture, app)
+            activate(app)
+            button("Basic Information").performClick()
+            awaitHeader(app) { it.canCapture }
+            button("Save field locally").performClick()
+            val previous = awaitHeader(app) { it.proposals.size == 1 }
+            val row = previous.proposals.single()
+            val target = requireNotNull(app.model.workbench?.ui?.value?.target)
+            val original = requireNotNull(runBlocking {
+                app.rows.transaction(fixture.scope()) { checkedBasicInformation(fixture.scope(), row.operation.operationId) }
+            })
+            button("Upload field").assertIsEnabled()
+            runBlocking { app.rows.transaction(fixture.scope()) { rememberSourceRevoked(original.source.contextId) } }
+            awaitHeader(app) { !it.canCapture && it.proposals.singleOrNull()?.state == WorkState.Quarantined }
+            button("Upload field").assertDoesNotExist()
+            compose.onNodeWithText("Source quarantined · Empty").assertIsDisplayed()
+            compose.onNodeWithTag("basic-information-field-Production").performClick()
+            button("Save field locally").assertDoesNotExist()
+            compose.runOnIdle {
+                app.model.uploadBasicInformation(target, previous, row)
+                app.model.saveBasicInformation(target, previous, BasicInformationField.Production, "Revoked source")
+            }
+            assertEquals(0, fixture.wire.headerPosts.get())
+            assertEquals(1L, runBlocking { app.rows.transaction(fixture.scope()) { catalog().localEditVersion } })
+            assertEquals(original, runBlocking {
+                app.rows.transaction(fixture.scope()) { checkedBasicInformation(fixture.scope(), row.operation.operationId) }
+            })
+            close(app)
+        }
+    }
+
+    @Test fun headerClockAnomalyRevokesOldSaveAuthority() {
+        WorkbenchDeviceFixture().use { fixture ->
+            fixture.respondBasicInformation(7)
+            val app = fixture.components()
+            install(app)
+            login(app)
+            openWorkbench(fixture, app)
+            activate(app)
+            button("Basic Information").performClick()
+            val previous = awaitHeader(app) { it.canCapture }
+            val target = requireNotNull(app.model.workbench?.ui?.value?.target)
+            fixture.device.sample = fixture.device.sample.copy(boot = -1)
+            awaitHeaderRefreshFailure(app)
+            button("Save field locally").assertDoesNotExist()
+            compose.onNodeWithTag("basic-information-refresh-required").assertIsDisplayed()
+            compose.runOnIdle { app.model.saveBasicInformation(target, previous, BasicInformationField.Customer, "Bad clock") }
+            assertEquals(0L, runBlocking { app.rows.transaction(fixture.scope()) { catalog().localEditVersion } })
+            assertEquals(0, fixture.wire.headerPosts.get())
+            close(app)
+        }
+    }
+
+    @Test fun unavailableProtectedStorageRequiresHeaderRefreshBeforeAction() {
+        WorkbenchDeviceFixture().use { fixture ->
+            fixture.respondBasicInformation(7)
+            val faults = FaultRows(fixture.device.rows)
+            val app = fixture.components(rows = faults)
+            install(app)
+            login(app)
+            openWorkbench(fixture, app)
+            activate(app)
+            button("Basic Information").performClick()
+            val previous = awaitHeader(app) { it.canCapture }
+            val target = requireNotNull(app.model.workbench?.ui?.value?.target)
+            faults.mode.set(Fault.Unavailable)
+            awaitHeaderRefreshFailure(app)
+            button("Save field locally").assertDoesNotExist()
+            compose.onNodeWithTag("basic-information-refresh-required").assertIsDisplayed()
+            faults.mode.set(Fault.None)
+            compose.runOnIdle { app.model.saveBasicInformation(target, previous, BasicInformationField.Customer, "Old storage view") }
+            assertEquals(0L, runBlocking { app.rows.transaction(fixture.scope()) { catalog().localEditVersion } })
+            assertEquals(0, fixture.wire.headerPosts.get())
+            button("Reload draft").performClick()
+            awaitHeader(app) { it.canCapture }
+            button("Save field locally").assertIsEnabled()
+            close(app)
+        }
+    }
+
+    @Test fun olderHeaderPageChecksCaptureAfterTheResponseAndKeepsAcceptedHistory() {
+        WorkbenchDeviceFixture().use { fixture ->
+            val task = fixture.scope()
+            val history = (1..21).fold(emptyList<BasicInformationReceipt>()) { entries, version ->
+                val predecessor = entries.lastOrNull()?.reference()
+                val op = BasicInformationOperation(benchId(200 + version), if (predecessor == null)
+                    BasicInformationKind.CaptureBasicInformationField else BasicInformationKind.CorrectBasicInformationField,
+                    BasicInformationField.ProductMo, "Synthetic version $version", benchId(32),
+                    IDENTITY.userId, version.toLong() - 1, predecessor)
+                entries + BasicInformationReceipt(task, op, benchId(300 + version),
+                    workHash(BasicInformationCanonical.operation(task, op, version.toLong())), IDENTITY.userId,
+                    IDENTITY.familyId, version.toLong(), FIXTURE_NOW, version.toLong())
+            }
+            fixture.wire.sharedDraftVersionOverride = 21
+            fixture.respondBasicInformation(21, history.last(), history = history, beforeRead = { before ->
+                if (before != null) advance(fixture, 61_000)
+            })
+            val app = fixture.components()
+            install(app)
+            login(app)
+            openWorkbench(fixture, app)
+            activate(app)
+            button("Basic Information").performClick()
+            val first = awaitHeader(app) { it.canCapture && it.observation.history.size == 20 }
+            val target = requireNotNull(app.model.workbench?.ui?.value?.target)
+            button("Save field locally").assertIsEnabled()
+            button("Load older field history").performClick()
+            val older = awaitHeader(app) { !it.canCapture && it.observation.history.size == 21 }
+            button("Save field locally").assertDoesNotExist()
+            compose.runOnIdle { app.model.saveBasicInformation(target, first, BasicInformationField.Customer, "Expired pagination") }
+            compose.onNodeWithTag("basic-information-field-ProductMo").performClick()
+            compose.onNodeWithTag("basic-information-confirmed").assertTextContains("Server-confirmed · Synthetic version 21")
+            assertEquals(history.asReversed(), older.observation.history)
+            assertEquals(0L, runBlocking { app.rows.transaction(fixture.scope()) { catalog().localEditVersion } })
+            assertEquals(0, fixture.wire.headerPosts.get())
+            close(app)
+        }
+    }
+
+    @Test fun basicInformationUnknownLocalSaveRetriesTheSameExplicitNullAndRejectsLateFieldCallback() {
+        WorkbenchDeviceFixture().use { fixture ->
+            fixture.respondBasicInformation(7)
+            val faults = FaultRows(fixture.device.rows)
+            val app = fixture.components(rows = faults)
+            install(app)
+            login(app)
+            openWorkbench(fixture, app)
+            activate(app)
+            button("Basic Information").performClick()
+            val before = awaitHeader(app) { it.canCapture }
+            val target = requireNotNull(app.model.workbench?.ui?.value?.target)
+            compose.onNodeWithTag("basic-information-field-Production").performClick()
+            compose.runOnIdle { app.model.saveBasicInformation(target, before, BasicInformationField.Customer, "Wrong field") }
+            assertTrue(awaitHeader(app).proposals.isEmpty())
+            button("Use explicit null").performClick()
+            faults.mode.set(Fault.After)
+            button("Save field locally").performClick()
+            compose.waitUntil(20_000) { app.model.workbench?.ui?.value?.headerSavePending == true }
+            button("Check Basic Information save").performClick()
+            val verified = awaitHeader(app) { it.proposals.size == 1 }
+            assertNull(verified.proposals.single().value)
+            assertEquals(BasicInformationField.Production, verified.proposals.single().field)
+            compose.onNodeWithText("Local proposal · Explicit null").assertIsDisplayed()
+            assertEquals(0, fixture.wire.headerPosts.get())
+            close(app)
+        }
+    }
+
+    private fun awaitHeader(app: WorkbenchComponents, accepts: (WorkbenchBasicInformation) -> Boolean = { true }):
+        WorkbenchBasicInformation {
+        fun active() = app.model.workbench?.ui?.value?.takeUnless { it.busy || it.headerRefreshRequired }?.header
+        compose.waitUntil(20_000) { active()?.let(accepts) == true }
+        return requireNotNull(active())
+    }
+
+    private fun awaitHeaderRefreshFailure(app: WorkbenchComponents) {
+        compose.waitUntil(20_000) {
+            app.model.workbench?.ui?.value?.let { !it.busy && it.headerRefreshRequired && it.error != null } == true
+        }
+        compose.onNodeWithTag("basic-information-refresh-required").assertIsDisplayed()
+    }
+
+    private fun captureHeaderLayouts(size: MutableState<DpSize>, name: String) =
+        captureLayouts(size, name, "basic-information") {
+            compose.onNodeWithTag("sample-workbench").captureToImage().asAndroidBitmap()
+        }
+
+    @Test fun acceptedHeaderPostSurvivesRateLimitedPresentation() = headerPostWithRateLimitedPresentation(WorkState.Accepted)
+
+    @Test fun definiteHeaderConflictSurvivesRateLimitedPresentation() = headerPostWithRateLimitedPresentation(WorkState.Conflict)
+
+    @Test fun headerQuarantineSurvivesRateLimitedPresentation() = headerPostWithRateLimitedPresentation(WorkState.Quarantined)
+
+    private fun headerPostWithRateLimitedPresentation(expected: WorkState) {
+        WorkbenchDeviceFixture().use { fixture ->
+            fixture.respondBasicInformation(7)
+            val app = fixture.components()
+            install(app)
+            login(app)
+            openWorkbench(fixture, app)
+            activate(app)
+            button("Basic Information").performClick()
+            awaitHeader(app) { it.canCapture }
+            compose.onNodeWithTag("basic-information-value").performTextInput("Retain this proposal")
+            button("Save field locally").performClick()
+            val prior = awaitHeader(app) { it.proposals.size == 1 }
+            val queued = prior.proposals.single()
+            val task = fixture.scope()
+            val original = requireNotNull(runBlocking {
+                app.rows.transaction(task) { checkedBasicInformation(task, queued.operation.operationId) }
+            })
+            fixture.wire.headerSource = original.source
+            fixture.wire.headerPost = {
+                fixture.wire.sharedDraftRateLimits.incrementAndGet()
+                val inFlight = requireNotNull(app.rows.transaction(task) { checkedBasicInformationTransport(original) })
+                assertEquals(WorkState.InFlight, inFlight.state)
+                val accepted = headerAccepted(original, inFlight.batch, IDENTITY)
+                when (expected) {
+                    WorkState.Accepted -> {
+                        fixture.wire.sharedDraftVersionOverride = 8
+                        fixture.respondBasicInformation(8, accepted.operation)
+                        Response.success(headerUploadJson(accepted).jsonResponse())
+                    }
+                    WorkState.Conflict -> {
+                        fixture.wire.sharedDraftVersionOverride = 8
+                        fixture.respondBasicInformation(8)
+                        headerProblem("""{"status":409,"title":"DraftVersionConflict","code":"DraftVersionConflict"}""")
+                    }
+                    else -> headerProblem("""{"status":409,"title":"SourceSecurityRevoked","code":"SourceSecurityRevoked",
+                        "preserveOriginals":true,"quarantineRequired":true,"sourceContextIds":["${original.source.contextId}"],
+                        "operationIds":["${original.reference().operationId}"]}""")
+                }
+            }
+            button("Upload field").performClick()
+            awaitHeaderRefreshFailure(app)
+            val target = requireNotNull(app.model.workbench?.ui?.value?.target)
+            val calls = fixture.detailCalls.get()
+            compose.runOnIdle { app.model.uploadBasicInformation(target, prior, queued) }
+            compose.waitForIdle()
+            assertEquals(calls, fixture.detailCalls.get())
+            button("Upload field").assertDoesNotExist()
+            val stored = requireNotNull(runBlocking {
+                app.rows.transaction(task) { checkedBasicInformationTransport(original) }
+            })
+            assertEquals(expected, stored.state)
+            compose.onNodeWithTag("basic-information-result").assertTextContains(if (expected == WorkState.Accepted)
+                "Server confirmed the Basic Information field and its batch." else
+                "The server rejected the field update. The original is retained.")
+            button("Reload draft").performClick()
+            val clean = awaitHeader(app) { it.proposals.any { p -> p.state == expected } }
+            assertEquals(original.reference(), clean.proposals.single().operation)
+            assertEquals(1, fixture.wire.headerPosts.get())
+            close(app)
+        }
+    }
+
+    private fun headerProblem(body: String): Response<okhttp3.ResponseBody> =
+        Response.error(409, body.toResponseBody("application/problem+json".toMediaType()))
+
+    @Test fun headerActivationRefreshesDraftVersionAndOldTargetCannotSaveAfterLineSwitch() {
+        WorkbenchDeviceFixture().use { fixture ->
+            fixture.respondBasicInformation(7)
+            val app = fixture.components()
+            install(app)
+            login(app)
+            openWorkbench(fixture, app)
+            button("Basic Information").performClick()
+            val before = awaitHeader(app)
+            assertFalse(before.canCapture)
+            fixture.wire.sharedDraftVersionOverride = 8
+            fixture.respondBasicInformation(8)
+            button("Activate local capture").performClick()
+            val after = awaitHeader(app) { it.canCapture && it.observation.basis.draftVersion == 8L }
+            val target = requireNotNull(app.model.workbench?.ui?.value?.target)
+            compose.runOnIdle { app.model.saveBasicInformation(target, before, BasicInformationField.Customer, "Old observation") }
+            assertTrue(awaitHeader(app).proposals.isEmpty())
+            button("Switch line").performClick()
+            openFromLines(fixture, app, SECOND_LINE)
+            enterWorkbench(app)
+            compose.runOnIdle { app.model.saveBasicInformation(target, after, BasicInformationField.Customer, "Old line") }
+            assertEquals(0, fixture.wire.headerPosts.get())
+            assertTrue(runBlocking { app.rows.transaction(fixture.scope()) { catalog().basicInformationIds.isEmpty() } } == true)
+            close(app)
+        }
+    }
+
     private fun openRemovalDialog() {
         pane().performScrollToNode(hasTestTag("remove-inspection-item"))
         compose.onNodeWithTag("remove-inspection-item").performClick()
@@ -936,15 +1409,15 @@ class SampleWorkbenchTest {
         }
     }
 
-    private fun captureLayouts(size: MutableState<DpSize>, name: String, capture: () -> Bitmap) {
+    private fun captureLayouts(size: MutableState<DpSize>, name: String, domain: String = "item-removal", capture: () -> Bitmap) {
         if (InstrumentationRegistry.getArguments().getString("ipqcWorkbenchScreenshots") != "true") return
         val context = InstrumentationRegistry.getInstrumentation().targetContext
-        val dir = File(context.cacheDir, "item-removal-evidence").apply { mkdirs() }
+        val dir = File(context.cacheDir, "$domain-evidence").apply { mkdirs() }
         for ((layout, viewport) in listOf("portrait" to DpSize(680.dp, 910.dp), "landscape" to DpSize(1000.dp, 710.dp))) {
             compose.runOnIdle { size.value = viewport }
             compose.waitForIdle()
             val image = capture()
-            File(dir, "synthetic-item-removal-$layout-$name.png").outputStream().use {
+            File(dir, "synthetic-$domain-$layout-$name.png").outputStream().use {
                 check(image.compress(Bitmap.CompressFormat.PNG, 100, it))
             }
         }
@@ -1049,7 +1522,7 @@ class SampleWorkbenchTest {
         }
     }
 
-    private enum class Fault { None, Before, After, Hold }
+    private enum class Fault { None, Before, After, Hold, Unavailable }
 
     private class FaultRows(private val base: CacheRows) : CacheRows by base {
         val mode = AtomicReference(Fault.None)
@@ -1068,6 +1541,7 @@ class SampleWorkbenchTest {
         }
 
         override suspend fun <T> transaction(block: suspend () -> T): T {
+            check(mode.get() != Fault.Unavailable) { "Synthetic protected storage unavailable" }
             val before = writes.get()
             val result = base.transaction(block)
             if (writes.get() > before && mode.compareAndSet(Fault.After, Fault.None)) error("Synthetic lost acknowledgement")

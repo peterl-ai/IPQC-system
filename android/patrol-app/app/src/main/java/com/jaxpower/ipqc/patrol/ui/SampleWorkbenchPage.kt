@@ -120,9 +120,16 @@ internal fun SampleWorkbenchPage(patrol: PatrolUi, model: PatrolViewModel, pilot
             Text("Development Pilot / Local Draft · " + origin.task.taskNo, style = MaterialTheme.typography.labelLarge)
         } else {
             WorkbenchHeading(origin, state, canUseOnline, arm = { model.armWorkbench(target) },
-                reload = { model.reloadWorkbench(target) }, switchLine = model::switchLine)
+                reload = { model.reloadWorkbench(target) }, switchLine = model::switchLine, toggleHeader = {
+                    focus.clearFocus()
+                    model.showBasicInformation(target, !state.showBasicInformation)
+                })
         }
         state.error?.let { WorkbenchNotice(it, error = true) }
+        if (state.showBasicInformation) {
+            BasicInformationEditor(Modifier.weight(1f).fillMaxWidth(), state, model, target, canUseOnline)
+            return@Column
+        }
         state.saved?.let { WorkbenchNotice(it) }
         if (state.uploadingRemoval) WorkbenchNotice("Uploading removal…")
         if (canUseOnline && state.removalRefreshRequired && !state.busy)
@@ -241,7 +248,7 @@ internal fun SampleWorkbenchPage(patrol: PatrolUi, model: PatrolViewModel, pilot
 
 @Composable
 private fun WorkbenchHeading(origin: Screen.Detail, state: WorkbenchUi, online: Boolean, arm: () -> Unit,
-                             reload: () -> Unit, switchLine: () -> Unit) {
+                             reload: () -> Unit, switchLine: () -> Unit, toggleHeader: () -> Unit) {
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Surface(color = MaterialTheme.colorScheme.primaryContainer, shape = MaterialTheme.shapes.small) {
             Text("Development Pilot / Local Draft", Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
@@ -249,7 +256,7 @@ private fun WorkbenchHeading(origin: Screen.Detail, state: WorkbenchUi, online: 
         }
         Text("Task " + origin.task.taskNo, style = MaterialTheme.typography.headlineSmall)
         Text(origin.line.name + " · " + origin.line.code, style = MaterialTheme.typography.titleSmall)
-        state.draft?.let { draft ->
+        state.draft?.takeUnless { state.showBasicInformation }?.let { draft ->
             val serverVersion = "Observed server draft " + draft.observedServerDraftVersion
             Text(if (state.hasLocalAccess) serverVersion + " · Local edit " + draft.localEditVersion else serverVersion,
                 style = MaterialTheme.typography.bodySmall)
@@ -267,6 +274,9 @@ private fun WorkbenchHeading(origin: Screen.Detail, state: WorkbenchUi, online: 
             }
             TextButton(onClick = reload, enabled = !state.blocksNavigation) { Text("Reload draft") }
             TextButton(onClick = switchLine, enabled = !state.blocksNavigation) { Text("Switch line") }
+            TextButton(onClick = toggleHeader, enabled = !state.blocksNavigation) {
+                Text(if (state.showBasicInformation) "Inspection items" else "Basic Information")
+            }
         }
         state.blocked?.let { Text(it.label(), style = MaterialTheme.typography.bodySmall) }
     }

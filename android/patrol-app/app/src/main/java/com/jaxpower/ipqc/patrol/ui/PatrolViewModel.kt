@@ -16,6 +16,9 @@ import com.jaxpower.ipqc.patrol.tasks.PatrolRepository
 import com.jaxpower.ipqc.patrol.work.OnlineWorkCoordinator
 import com.jaxpower.ipqc.patrol.work.RemovalConfirmation
 import com.jaxpower.ipqc.patrol.work.WorkAttempt
+import com.jaxpower.ipqc.patrol.work.BasicInformationField
+import com.jaxpower.ipqc.patrol.work.ReceiptKind
+import com.jaxpower.ipqc.patrol.work.WorkbenchBasicInformation
 import com.jaxpower.ipqc.patrol.work.WorkbenchRemoval
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -211,6 +214,41 @@ class PatrolViewModel internal constructor(
         if (canUseWorkbenchNetwork()) workbench?.checkItemRemovalReceipt(target, row)
     }
 
+    internal fun showBasicInformation(target: WorkbenchTarget, show: Boolean) {
+        if (canUseWorkbench()) workbench?.showBasicInformation(target, show, canUseWorkbenchNetwork())
+    }
+
+    internal fun selectBasicInformationField(target: WorkbenchTarget, field: BasicInformationField) {
+        if (canUseWorkbench()) workbench?.selectBasicInformationField(target, field)
+    }
+
+    internal fun saveBasicInformation(target: WorkbenchTarget, view: WorkbenchBasicInformation, field: BasicInformationField,
+                                      value: String?) {
+        if (canUseWorkbench()) workbench?.saveBasicInformation(target, view, field, value, canUseWorkbenchNetwork())
+    }
+
+    internal fun checkBasicInformationSave(target: WorkbenchTarget) {
+        if (canUseWorkbench()) workbench?.checkBasicInformationSave(target, canUseWorkbenchNetwork())
+    }
+
+    internal fun retryBasicInformationSave(target: WorkbenchTarget) {
+        if (canUseWorkbench()) workbench?.retryBasicInformationSave(target, canUseWorkbenchNetwork())
+    }
+
+    internal fun uploadBasicInformation(target: WorkbenchTarget, view: WorkbenchBasicInformation,
+                                        row: WorkbenchBasicInformation.Row) {
+        if (canUseWorkbenchNetwork()) workbench?.uploadBasicInformation(target, view, row)
+    }
+
+    internal fun checkBasicInformationReceipt(target: WorkbenchTarget, view: WorkbenchBasicInformation,
+                                              row: WorkbenchBasicInformation.Row, kind: ReceiptKind) {
+        if (canUseWorkbenchNetwork()) workbench?.checkBasicInformationReceipt(target, view, row, kind)
+    }
+
+    internal fun loadOlderBasicInformation(target: WorkbenchTarget, view: WorkbenchBasicInformation) {
+        if (canUseWorkbenchNetwork()) workbench?.loadOlderBasicInformation(target, view)
+    }
+
     private fun canUseWorkbench(): Boolean = foreground && !signingOut && !ui.value.busy &&
         ui.value.screen is Screen.SampleWorkbench
 
@@ -284,6 +322,7 @@ class PatrolViewModel internal constructor(
     private fun enterOffline(fallback: Issue? = Issue.OFFLINE) {
         val retained = ui.value.screen as? Screen.SampleWorkbench
         val expected = workbench?.ui?.value?.target?.owner
+        workbench?.pauseBasicInformation()
         interrupt()
         val service = sessions
         val localCache = cache
