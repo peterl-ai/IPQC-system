@@ -1,6 +1,8 @@
 # Current IPQC project state
 
-**Verified 2026-11-25 · A04-03 merged · A04-04 gated Item Removal Workbench UI**
+**Verified 2026-11-27 · A04-03 merged · A04-04 Open Draft under independent HOLD**
+
+PR #46 remains an Open Draft. Independent ChatGPT issued **HOLD — P2 REPAIR REQUIRED**. Codex recorded R46-P2-01 as **FIXED — AWAITING INDEPENDENT RE-REVIEW**. [PR #46](https://github.com/peterl-ai/IPQC-system/pull/46) · [Review history](REVIEW_HISTORY.md#2026-11-27-initial-independent-review-of-pr-46)
 
 Peter merged PR #45 after the final independent **PASS — APPROVED FOR MERGE**. Codex verified that the merge contains the exact reviewed HEAD and tree. The currently authorized scope is a development-pilot Workbench UI for the existing per-item removal, foreground transport and receipt workflow. A04-04 is the working label introduced by this authorization. Peter owns manual merge and deployment. [PR #45](https://github.com/peterl-ai/IPQC-system/pull/45) · [Final independent review](REVIEW_HISTORY.md#2026-11-25-final-independent-review-of-pr-45)
 

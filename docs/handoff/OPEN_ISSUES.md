@@ -1,6 +1,6 @@
 # Open issues and known limitations
 
-Updated 2026-11-25. A pending gate applies to its named scope. Keep verified closed findings closed unless new evidence supports reopening them.
+Updated 2026-11-27. A pending gate applies to its named scope. Keep verified closed findings closed unless new evidence supports reopening them.
 
 | ID | Priority and status | Owner or responsible role | Evidence, dependency and next action |
 | --- | --- | --- | --- |
@@ -18,6 +18,7 @@ Updated 2026-11-25. A pending gate applies to its named scope. Keep verified clo
 | O-012 | Deferred | MES vendor / Peter | Material Verification, work-order/BOM integration and legacy GQMS migration excluded from current scope. Preserve placeholder and independent backend boundary. [Project scope](https://github.com/peterl-ai/IPQC-system/blob/4c74c1000c7c30997c4877dcfb693b354d80fba5/docs/01_PROJECT_SCOPE.md) |
 | O-013 | Owner merge, **VERIFIED CLOSED** | Peter | Peter merged PR #43 on 2026-11-24 as `cadd0973795aaecd4143c96de44ffd80f2ed356a`. The merge contains the exact reviewed HEAD and matches the reviewed Tree. [Merged-main CI 45489357549, attempt 1](https://github.com/peterl-ai/IPQC-system/actions/runs/45489357549/attempts/1) |
 | R44-P3-01 | P3, **VERIFIED CLOSED** | Independent ChatGPT | Targeted PASS on 2026-11-25 at reviewed HEAD `273a0631b10652c5968e5f7adff8e5dbb458d3d3`. Bounded CI monitoring and safe fetch guidance matched in both operating protocols. [Final independent re-review](REVIEW_HISTORY.md#2026-11-25-final-independent-re-review-of-pr-44) |
+| R46-P2-01 | P2, **FIXED — AWAITING INDEPENDENT RE-REVIEW** | Codex implements. Independent ChatGPT reviews closure. | Workbench invalidates obsolete removal actions after durable state changes or newer observations, preserves durable feedback and requires fresh authorization before restoring shared recovery actions. [Review history](REVIEW_HISTORY.md#2026-11-27-initial-independent-review-of-pr-46) |
 
 ## PR #43 evidence gaps closed
 

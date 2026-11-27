@@ -1,9 +1,9 @@
 # IPQC V1 project roadmap
 
-Updated 2026-11-25 from verified Git, approved Rev3.2 and the retained F2/F3 sign-off. The roadmap is a planning record. Peter owns scope, final merge, release and deployment. [Current state](CURRENT_PROJECT_STATE.md) · [Approved Rev3.2](../architecture/IPQC_ANDROID_ARCHITECTURE_V1_REV3_2_2026-11-10.md) · [Rev3.2 supersession](../architecture/IPQC_ANDROID_ARCHITECTURE_V1_REV3_2_IMPLEMENTATION_HANDOFF_SUPERSESSION_2026-11-10.md) · [F2/F3 handoff](../architecture/IPQC_ANDROID_ARCHITECTURE_V1_IMPLEMENTATION_HANDOFF_2026-11-06.md)
+Updated 2026-11-27 from verified Git, approved Rev3.2 and the retained F2/F3 sign-off. The roadmap is a planning record. Peter owns scope, final merge, release and deployment. [Current state](CURRENT_PROJECT_STATE.md) · [Approved Rev3.2](../architecture/IPQC_ANDROID_ARCHITECTURE_V1_REV3_2_2026-11-10.md) · [Rev3.2 supersession](../architecture/IPQC_ANDROID_ARCHITECTURE_V1_REV3_2_IMPLEMENTATION_HANDOFF_SUPERSESSION_2026-11-10.md) · [F2/F3 handoff](../architecture/IPQC_ANDROID_ARCHITECTURE_V1_IMPLEMENTATION_HANDOFF_2026-11-06.md)
 
 - **Latest verified merge in this record.** PR #45, Android A04-03 foreground item-removal transport, `8120ace2ce5b4f458745dbf601f211960a2af4ca` · Tree `7c473c37b5436079f7557314688e35420f3bddcd`. [PR #45](https://github.com/peterl-ai/IPQC-system/pull/45) · [Merged-main CI](https://github.com/peterl-ai/IPQC-system/actions/runs/45663299370/attempts/1)
-- **Active Draft scope.** A04-04, gated Item Removal Workbench UI. Verify the assigned PR number and exact pins from the branch and developer handoff. A04-04 is a new working label. This Draft contributes no merged completion. [Active branch PRs](https://github.com/peterl-ai/IPQC-system/pulls?q=is%3Apr+head%3Acodex%2Fandroid-v1-a04-04-item-removal-workbench-ui)
+- **Active Draft scope.** A04-04, gated Item Removal Workbench UI in [PR #46](https://github.com/peterl-ai/IPQC-system/pull/46). Independent HOLD for R46-P2-01, developer repair awaiting independent re-review. Verify exact pins in the review handoff. A04-04 is a new working label. This Draft contributes no merged completion. [Active branch PRs](https://github.com/peterl-ai/IPQC-system/pulls?q=is%3Apr+head%3Acodex%2Fandroid-v1-a04-04-item-removal-workbench-ui)
 
 | V1 capability | Evidence or next work |
 | --- | --- |
