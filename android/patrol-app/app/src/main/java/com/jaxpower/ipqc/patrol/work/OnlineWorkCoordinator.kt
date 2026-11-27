@@ -366,7 +366,16 @@ internal class OnlineWorkCoordinator(
 
     // Arming requires a current authenticated contribution grant and a fresh paired
     // task/detail read. Ordinary offline browse and merely fetching a task never arm it.
-    suspend fun armOfflineSamples(grant: Grant) = withGrant(grant) {
+    suspend fun armOfflineSamples(grant: Grant) {
+        withGrant(grant) { armSamples(grant) }
+    }
+
+    suspend fun armWorkbench(grant: Grant): Pair<Long, WorkbenchRemoval> = withGrant(grant) {
+        val draft = armSamples(grant)
+        draft.version to store.itemRemovalWorkbench(uploadAccess(grant, draft), draft.sampleBasis)
+    }
+
+    private suspend fun armSamples(grant: Grant): OnlineDraft {
         val capture = grant.access.captureGrant ?: throw WorkFailure(WorkProblem.SourceUnavailable)
         val source = grant.source ?: throw WorkFailure(WorkProblem.SourceUnavailable)
         workCheck(grant.access.session.canContribute, WorkProblem.SourceUnavailable)
@@ -376,6 +385,7 @@ internal class OnlineWorkCoordinator(
             workCheck(draft.task == grant.draft.task && draft.sampleBasis.editable, WorkProblem.ScopeMismatch)
             store.armOfflineSamples(grant.access, source, capture, draft.sampleBasis)
         }
+        return draft
     }
 
     private suspend fun reuse(grant: Grant, stored: StoredWorkSource): Grant? {

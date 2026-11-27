@@ -69,6 +69,7 @@ internal data class WorkbenchUi(
     val retryPending: Boolean = false,
     val selectedItemId: String? = null,
     val onlineRemoval: WorkbenchRemoval? = null,
+    val removalRefreshRequired: Boolean = false,
     val removalSavePending: Boolean = false,
     val uploadingRemoval: Boolean = false,
 ) {
@@ -126,15 +127,30 @@ internal class SampleWorkbenchModel(private val scope: CoroutineScope, private v
     }
 
     fun reload(target: WorkbenchTarget, canReachServer: Boolean) = run(target) {
+        if (canReachServer) {
+            invalidateRemovalProjection(target)
+        } else {
+            update(target) { it.copy(onlineRemoval = null,
+                removalRefreshRequired = it.removalRefreshRequired || it.onlineRemoval != null) }
+        }
         refresh(target, canReachServer)
     }
 
+    // The previous online or local removal row must not survive an action that
+    // can change its durable state or replace its server observation.
+    private fun invalidateRemovalProjection(target: WorkbenchTarget) {
+        update(target) { it.copy(onlineRemoval = null, draft = it.draft?.copy(itemRemoval = null),
+            removalRefreshRequired = true) }
+    }
+
     private suspend fun refresh(target: WorkbenchTarget, canReachServer: Boolean) {
+        var rateLimit: PatrolFailure? = null
         val grant = if (canReachServer) {
             try {
                 open(target)
             } catch (failure: PatrolFailure) {
-                if (!failure.canUseOffline) throw failure
+                if (failure.issue == Issue.RATE_LIMITED) rateLimit = failure
+                else if (!failure.canUseOffline) throw failure
                 null
             }
         } else null
@@ -149,24 +165,26 @@ internal class SampleWorkbenchModel(private val scope: CoroutineScope, private v
             if (remoteBasis == null) throw failure
             null
         }
-        update(target) { it.copy(onlineRemoval = shared) }
         if (local != null) {
-            showProtected(target, local)
+            showProtected(target, local, shared, remoteBasis?.draftVersion)
         } else if (remoteBasis != null) {
             val board = LocalSampleBoard(remoteBasis, emptyMap())
             update(target) { it.copy(draft = LocalSampleDraft(remoteBasis.draftVersion, 0, remoteBasis.samples,
-                board.values(), emptyList(), board.progress()), hasLocalAccess = false, blocked = WorkProblem.SourceUnavailable) }
-        } else {
+                board.values(), emptyList(), board.progress()), hasLocalAccess = false, blocked = WorkProblem.SourceUnavailable,
+                onlineRemoval = shared, removalRefreshRequired = false) }
+        } else if (rateLimit == null) {
             update(target) { it.copy(draft = null, hasLocalAccess = false, blocked = WorkProblem.SourceUnavailable) }
         }
+        rateLimit?.let { throw it }
     }
 
     fun arm(target: WorkbenchTarget) = run(target) {
+        invalidateRemovalProjection(target)
         val grant = open(target)
         workCheck(grant.access.session.canContribute, WorkProblem.SourceUnavailable)
         workCheck(grant.draft.sampleBasis.editable, WorkProblem.ScopeMismatch)
-        online.armOfflineSamples(online.issueOrReuse(grant))
-        showProtected(target, samples.draft(target.task, target.owner))
+        val (version, shared) = online.armWorkbench(online.issueOrReuse(grant))
+        showProtected(target, samples.draft(target.task, target.owner), shared, version)
     }
 
     private suspend fun open(target: WorkbenchTarget): OnlineWorkCoordinator.Grant =
@@ -258,10 +276,11 @@ internal class SampleWorkbenchModel(private val scope: CoroutineScope, private v
     fun uploadItemRemoval(target: WorkbenchTarget, row: WorkbenchRemoval.Row) {
         val state = ui.value
         val view = state.removalView(online = true) ?: return
-        if (state.target !== target || state.blocksNavigation || state.selectedItemId != row.attempt.taskItemId ||
-            row !in view.rows || row.state != WorkState.Queued || !row.currentAttempt || row.operationConfirmed ||
-            view.requiresRefresh) return
+        if (state.target !== target || state.blocksNavigation || state.removalRefreshRequired ||
+            state.selectedItemId != row.attempt.taskItemId || view.rows.none { it === row } ||
+            row.state != WorkState.Queued || !row.currentAttempt || row.operationConfirmed || view.requiresRefresh) return
         run(target, uploadingRemoval = true) {
+            invalidateRemovalProjection(target)
             val grant = open(target)
             val reply = try {
                 online.sendWorkbenchItemRemoval(grant, row)
@@ -271,7 +290,6 @@ internal class SampleWorkbenchModel(private val scope: CoroutineScope, private v
                 update(target) { it.copy(error = "The saved removal source is unavailable or no longer eligible.") }
                 return@run
             }
-            refresh(target, true)
             val message = when (reply) {
                 is ItemRemovalUploadResult.Accepted -> "Server confirmed the item removal."
                 is ItemRemovalUploadResult.NeedsBatchReceipt -> "Item removal verified. Check the batch receipt."
@@ -280,22 +298,24 @@ internal class SampleWorkbenchModel(private val scope: CoroutineScope, private v
                 is ItemRemovalUploadResult.NotSent -> "The removal was not sent. ${reply.issue.message}"
             }
             update(target) { it.copy(saved = message) }
+            refresh(target, true)
         }
     }
 
     fun checkItemRemovalReceipt(target: WorkbenchTarget, row: WorkbenchRemoval.Row) {
         val state = ui.value
         val batchId = row.batchId ?: return
-        if (state.target !== target || state.blocksNavigation || state.selectedItemId != row.attempt.taskItemId ||
-            state.removalView(online = true)?.rows?.contains(row) != true || row.state !in uncertainItemRemovalStates) return
+        if (state.target !== target || state.blocksNavigation || state.removalRefreshRequired ||
+            state.selectedItemId != row.attempt.taskItemId ||
+            state.removalView(online = true)?.rows?.any { it === row } != true || row.state !in uncertainItemRemovalStates) return
         run(target) {
+            invalidateRemovalProjection(target)
             val grant = open(target)
             val batch = online.recoverItemRemovalReceipt(grant, ReceiptLookup(ReceiptKind.Batch, batchId))
             val reply = if (batch is ItemRemovalReceiptRecovery.Unresolved && batch.reason == ReceiptUncertainty.NotObserved)
                 online.recoverItemRemovalReceipt(grant, ReceiptLookup(ReceiptKind.Operation, row.operation.operationId))
             else batch
             if (reply is ItemRemovalReceiptRecovery.AuthenticationFailure) throw PatrolFailure(reply.issue)
-            refresh(target, true)
             val message = when (reply) {
                 is ItemRemovalReceiptRecovery.BatchConfirmed -> "Server confirmed the item removal and its batch."
                 is ItemRemovalReceiptRecovery.OperationObserved -> "Item removal verified. The batch receipt is still required."
@@ -305,6 +325,7 @@ internal class SampleWorkbenchModel(private val scope: CoroutineScope, private v
                 is ItemRemovalReceiptRecovery.AuthenticationFailure -> error("Already handled")
             }
             update(target) { it.copy(saved = message) }
+            refresh(target, true)
         }
     }
 
@@ -375,8 +396,17 @@ internal class SampleWorkbenchModel(private val scope: CoroutineScope, private v
         }
     }
 
-    private fun showProtected(target: WorkbenchTarget, draft: LocalSampleDraft) {
-        update(target) { it.copy(draft = draft, hasLocalAccess = true, blocked = draft.captureProblem) }
+    private fun showProtected(target: WorkbenchTarget, draft: LocalSampleDraft,
+                              shared: WorkbenchRemoval? = null, sharedVersion: Long? = null) {
+        val verified = shared?.takeIf { sharedVersion == draft.observedServerDraftVersion &&
+            (draft.itemRemoval?.requiresRefresh != true || it.requiresRefresh) }
+        update(target) {
+            val superseded = it.onlineRemoval != null && (it.draft?.observedServerDraftVersion != draft.observedServerDraftVersion ||
+                it.draft?.itemRemoval != draft.itemRemoval || draft.itemRemoval?.requiresRefresh == true)
+            it.copy(draft = draft, hasLocalAccess = true, blocked = draft.captureProblem,
+                onlineRemoval = verified ?: it.onlineRemoval.takeUnless { superseded },
+                removalRefreshRequired = verified == null && (it.removalRefreshRequired || superseded))
+        }
     }
 
     private fun run(target: WorkbenchTarget, uploadingRemoval: Boolean = false, block: suspend () -> Unit) {

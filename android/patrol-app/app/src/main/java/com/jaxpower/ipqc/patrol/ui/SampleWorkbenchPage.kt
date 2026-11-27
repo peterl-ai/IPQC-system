@@ -125,6 +125,8 @@ internal fun SampleWorkbenchPage(patrol: PatrolUi, model: PatrolViewModel, pilot
         state.error?.let { WorkbenchNotice(it, error = true) }
         state.saved?.let { WorkbenchNotice(it) }
         if (state.uploadingRemoval) WorkbenchNotice("Uploading removal…")
+        if (canUseOnline && state.removalRefreshRequired && !state.busy)
+            WorkbenchNotice("Reload the draft to verify removal status.")
         if (state.removalSavePending) {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedButton(onClick = { model.checkWorkbenchRemovalSave(target) }, enabled = !state.busy) {
@@ -167,7 +169,7 @@ internal fun SampleWorkbenchPage(patrol: PatrolUi, model: PatrolViewModel, pilot
                 },
                 remove = { removal = it },
                 itemRemovalPanel = {
-                    ItemRemovalPanel(selected.id, removalView, canUseOnline, state.blocksNavigation,
+                    ItemRemovalPanel(selected.id, removalView, canUseOnline && !state.removalRefreshRequired, state.blocksNavigation,
                         state.blocked == WorkProblem.StaleGrant,
                         canStart = requirement?.attempt?.let(state::canStartRemoval) == true,
                         start = {

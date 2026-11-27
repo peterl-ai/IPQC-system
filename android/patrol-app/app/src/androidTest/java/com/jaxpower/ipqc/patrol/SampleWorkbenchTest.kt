@@ -573,6 +573,145 @@ class SampleWorkbenchTest {
         }
     }
 
+    @Test fun rateLimitedPresentationAfterUnknownUploadRequiresReloadAndExactRecoveryForB() =
+        verifyRateLimitedRemovalPresentation(WorkState.OutcomeUnknown)
+
+    @Test fun rateLimitedPresentationAfterAcceptedUploadKeepsTheDurableReceipt() =
+        verifyRateLimitedRemovalPresentation(WorkState.Accepted)
+
+    @Test fun rateLimitedPresentationAfterDefinitiveConflictKeepsTheOriginal() =
+        verifyRateLimitedRemovalPresentation(WorkState.Conflict)
+
+    private fun verifyRateLimitedRemovalPresentation(expected: WorkState) {
+        WorkbenchDeviceFixture().use { fixture ->
+            val app = fixture.components()
+            val size = install(app)
+            login(app)
+            openWorkbench(fixture, app)
+            activate(app)
+            openRemovalDialog()
+            confirmRemoval("Production")
+            button("Save removal").performClick()
+            val task = fixture.scope()
+            val queued = awaitRemoval(app, WorkState.Queued)
+            val id = queued.operation.operationId
+            fun stored() = requireNotNull(runBlocking { app.rows.transaction(task) { itemRemoval(id) } })
+            val original = stored().removal
+            val sampleHistory = runBlocking { app.online.offlineItemRemovals.draft(task, IDENTITY).samples }
+            compose.runOnIdle { app.model.logout() }
+            compose.waitUntil(20_000) { app.model.ui.value.screen == Screen.Login && !app.model.ui.value.busy }
+            fixture.device.api.loginSubject = fixture.b
+            login(app)
+            openWorkbench(fixture, app)
+            val before = awaitRemoval(app, WorkState.Queued)
+            assertFalse(requireNotNull(app.model.workbench?.ui?.value).hasLocalAccess)
+            fixture.wire.explicitRemovalSource = original.source
+            fixture.wire.removalUploadTestEnabled = true
+            fixture.wire.afterRemovalPost = { fixture.wire.sharedDraftRateLimits.incrementAndGet() }
+            if (expected == WorkState.Conflict) {
+                fixture.wire.removalProblem = 409 to """{"status":409,"title":"DraftVersionConflict","code":"DraftVersionConflict"}"""
+            }
+            fixture.wire.removalResponse = {
+                if (expected == WorkState.OutcomeUnknown) throw java.io.IOException("Synthetic disconnect after POST")
+                val receipt = removalAcceptance(stored(), fixture.b, remaining = 1)
+                fixture.wire.observedRemoval = receipt.itemOperations.single()
+                removalReply(receipt)
+            }
+            button("Upload removal").performClick()
+            awaitRemovalRefreshFailure(app)
+            assertEquals(expected, stored().state)
+            assertEquals(0, fixture.wire.sharedDraftRateLimits.get())
+            assertTrue(app.model.ui.value.online)
+            if (compose.onAllNodes(hasText("Upload removal") and hasClickAction()).fetchSemanticsNodes().isNotEmpty())
+                button("Upload removal").assertIsNotEnabled()
+            val target = requireNotNull(app.model.workbench?.ui?.value?.target)
+            val reads = fixture.detailCalls.get()
+            compose.runOnIdle { app.model.uploadWorkbenchItemRemoval(target, before) }
+            compose.waitForIdle()
+            assertEquals(reads, fixture.detailCalls.get())
+            assertEquals(1, fixture.wire.removalPosts.get())
+            compose.onNodeWithText("Reload the draft to verify removal status.", substring = true).assertIsDisplayed()
+            if (expected == WorkState.Accepted)
+                compose.onNodeWithText("Server confirmed the item removal.", substring = true).assertIsDisplayed()
+            if (expected == WorkState.Conflict)
+                compose.onNodeWithText("The removal was rejected.", substring = true).assertIsDisplayed()
+            if (expected == WorkState.OutcomeUnknown) captureRemovalLayouts(size, "p2-refresh-required")
+
+            button("Reload draft").performClick()
+            val after = awaitRemoval(app, expected)
+            assertEquals(before.operation, after.operation)
+            val batch = requireNotNull(stored().batch)
+            assertEquals(batch.batchId, after.batchId)
+            if (expected == WorkState.OutcomeUnknown) {
+                captureRemovalLayouts(size, "p2-recovery-restored")
+                fixture.wire.missingRemovalReceipt = true
+                fixture.wire.missingIndividualRemovalReceipt = true
+                button("Check removal receipt").performClick()
+                awaitRemoval(app, WorkState.OutcomeUnknown)
+                assertEquals(WorkState.OutcomeUnknown, stored().state)
+                val receipt = removalAcceptance(stored(), fixture.b, remaining = 1)
+                fixture.wire.missingIndividualRemovalReceipt = false
+                fixture.wire.explicitIndividualRemovalReceipt = receipt.itemOperations.single()
+                button("Check removal receipt").performClick()
+                awaitRemoval(app, WorkState.OutcomeUnknown, confirmed = true)
+                assertEquals(WorkState.OutcomeUnknown, stored().state)
+                fixture.wire.missingRemovalReceipt = false
+                fixture.wire.explicitRemovalReceipt = receipt
+                fixture.wire.observedRemoval = receipt.itemOperations.single()
+                fixture.wire.afterFullReceipt = { fixture.wire.sharedDraftRateLimits.incrementAndGet() }
+                button("Check removal receipt").performClick()
+                awaitRemovalRefreshFailure(app)
+                assertEquals(WorkState.Accepted, stored().state)
+                assertEquals(receipt, stored().batchReceipt)
+                compose.onNodeWithText("Server confirmed the item removal and its batch.").assertIsDisplayed()
+                button("Reload draft").performClick()
+                awaitRemoval(app, WorkState.Accepted)
+            }
+            assertEquals(original, stored().removal)
+            assertEquals(batch, stored().batch)
+            assertEquals(sampleHistory, requireNotNull(app.model.workbench?.ui?.value?.draft).confirmed)
+            assertEquals(1, fixture.wire.removalPosts.get())
+            close(app)
+        }
+    }
+
+    private fun awaitRemovalRefreshFailure(app: WorkbenchComponents) {
+        compose.waitUntil(20_000) {
+            val state = app.model.workbench?.ui?.value
+            state != null && !state.busy && state.error?.contains("Too many requests") == true
+        }
+    }
+
+    @Test fun activationReplacesOlderApplicableProjectionWithNewerRemoteRemoval() {
+        WorkbenchDeviceFixture().use { fixture ->
+            val app = fixture.components()
+            val size = install(app)
+            login(app)
+            openWorkbench(fixture, app)
+            val task = fixture.scope()
+            val removed = fixture.attempt(task.taskId, 0)
+            val before = requireNotNull(app.model.workbench?.ui?.value)
+            assertEquals(7L, before.draft?.observedServerDraftVersion)
+            assertEquals(ItemDisposition.Applicable, before.removalView(true)?.items?.single { it.attempt == removed }?.server)
+            fixture.wire.observedRemoval = ItemRemovalReceipt(task.taskId, benchId(81), benchId(82), "RemoveItem", 1,
+                "A".repeat(64), removed.taskItemId, removed.inspectionAttemptId, benchId(83), IDENTITY.userId, IDENTITY.userId,
+                IDENTITY.familyId, task.environmentId, task.lineId, task.workflowVersion, FIXTURE_NOW, 8,
+                ItemDisposition.Removed, true, RemovalConfirmation.Equipment, null, 1, 1, false)
+            activate(app)
+            val current = requireNotNull(app.model.workbench?.ui?.value)
+            assertEquals(8L, current.draft?.observedServerDraftVersion)
+            val view = requireNotNull(current.removalView(true))
+            assertEquals(ItemDisposition.Removed, view.items.single { it.attempt == removed }.server)
+            assertEquals(1, view.items.count { it.server == ItemDisposition.Applicable })
+            assertFalse(current.canStartRemoval(removed))
+            assertTrue(current.draft?.progress.orEmpty().none { it.attempt == removed })
+            compose.onNodeWithTag("remove-inspection-item").assertDoesNotExist()
+            removalStatus("Server-confirmed Removed").assertIsDisplayed()
+            captureRemovalLayouts(size, "p2-activation-current")
+            close(app)
+        }
+    }
+
     @Test fun receiptRecoveryKeepsUnknownThrough404AndIndividualAndShowsLastItemInBothLayouts() {
         WorkbenchDeviceFixture().use { fixture ->
             val app = fixture.components()

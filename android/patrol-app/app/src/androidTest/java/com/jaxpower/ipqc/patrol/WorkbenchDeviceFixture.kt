@@ -106,6 +106,9 @@ internal class WorkbenchDeviceFixture : AutoCloseable {
         var beforeRemovalAdmission: () -> Unit = {}
         var removalResponse: suspend (kotlinx.serialization.json.JsonObject) -> String = { error("Unexpected item removal POST") }
         var removalProblem: Pair<Int, String>? = null
+        val sharedDraftRateLimits = AtomicInteger()
+        var afterRemovalPost: () -> Unit = {}
+        var afterFullReceipt: () -> Unit = {}
         var missingRemovalReceipt = false
         var missingIndividualRemovalReceipt = false
         var priorObservedRemoval: ItemRemovalReceipt? = null
@@ -119,6 +122,8 @@ internal class WorkbenchDeviceFixture : AutoCloseable {
 
         override suspend fun sharedDraft(bearer: String, taskId: String): Response<SharedDraftWire> {
             reads.incrementAndGet()
+            if (sharedDraftRateLimits.getAndUpdate { it.coerceAtLeast(1) - 1 } > 0)
+                return Response.error(429, "{}".toResponseBody())
             val line = if (taskId == TASK.id) LINE else SECOND_LINE
             val attempts = definitions.indices.map { index ->
                 val attempt = attempt(taskId, index)
@@ -191,6 +196,7 @@ internal class WorkbenchDeviceFixture : AutoCloseable {
             check(source.task.taskId == taskId && proofPassed["workContextId"] == JsonPrimitive(source.contextId) &&
                 proofPassed["proofSecret"] == JsonPrimitive(proof))
             removalPosts.incrementAndGet()
+            afterRemovalPost()
             removalProblem?.let { (status, problem) ->
                 return Response.error(status, problem.toResponseBody("application/problem+json".toMediaType()))
             }
@@ -229,6 +235,7 @@ internal class WorkbenchDeviceFixture : AutoCloseable {
             val receipt = checkNotNull(explicitRemovalReceipt) { "Unexpected batch receipt query" }
             check(device.api.loginSubject.userId == receipt.uploadedByUserId && receipt.taskId == taskId && receipt.batchId == batchId)
             removalReceiptReads.incrementAndGet()
+            afterFullReceipt()
             return Response.success(Json.encodeToString(receipt).toResponseBody())
         }
 
