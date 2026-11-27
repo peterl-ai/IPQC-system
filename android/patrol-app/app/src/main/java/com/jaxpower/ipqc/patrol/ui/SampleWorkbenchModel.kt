@@ -77,7 +77,7 @@ internal data class WorkbenchUi(
     val canEdit get() = hasLocalAccess && draft != null && !blocksNavigation && blocked == null
 
     fun canEditSamples(attempt: WorkAttempt): Boolean =
-        canEdit && draft?.itemRemoval?.sampleBlocks?.contains(attempt) != true
+        canEdit && (draft?.itemRemoval?.let { attempt !in it.sampleBlocks } ?: !removalRefreshRequired)
 
     fun canStartRemoval(attempt: WorkAttempt): Boolean {
         val local = draft?.itemRemoval ?: return false

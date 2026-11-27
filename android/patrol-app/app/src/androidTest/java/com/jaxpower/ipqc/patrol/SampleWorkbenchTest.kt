@@ -598,6 +598,18 @@ class SampleWorkbenchTest {
             fun stored() = requireNotNull(runBlocking { app.rows.transaction(task) { itemRemoval(id) } })
             val original = stored().removal
             val sampleHistory = runBlocking { app.online.offlineItemRemovals.draft(task, IDENTITY).samples }
+            if (expected == WorkState.OutcomeUnknown) {
+                // A failed authorization read must not reopen sample editing when the removal view is invalidated.
+                assertFalse(requireNotNull(app.model.workbench?.ui?.value).canEditSamples(queued.attempt))
+                fixture.wire.sharedDraftRateLimits.incrementAndGet()
+                button("Upload removal").performClick()
+                awaitRemovalRefreshFailure(app)
+                assertEquals(0, fixture.wire.removalPosts.get())
+                assertEquals(WorkState.Queued, stored().state)
+                assertFalse(requireNotNull(app.model.workbench?.ui?.value).canEditSamples(queued.attempt))
+                button("Reload draft").performClick()
+                assertEquals(queued.operation, awaitRemoval(app, WorkState.Queued).operation)
+            }
             compose.runOnIdle { app.model.logout() }
             compose.waitUntil(20_000) { app.model.ui.value.screen == Screen.Login && !app.model.ui.value.busy }
             fixture.device.api.loginSubject = fixture.b
