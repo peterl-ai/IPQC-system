@@ -24,3 +24,7 @@ On 2026-11-25 Peter authorized the internal foreground POST for one immutable pr
 ### A04-04 scoped implementation planning
 
 Peter authorized a feature-gated Item Removal Workbench UI after verified PR #45 merged-main preflight. A04-04 is the new working label for this implementation. Keep the approved Removed semantics, protected Room save/replay, existing source checks, explicit foreground upload, batch-versus-operation receipt handling and task-wide version fence. Existing public Debug and Release boundaries apply. Production activation, formal workflows and subsequent Android features require separate scope. [Current state](CURRENT_PROJECT_STATE.md) · [Project roadmap](PROJECT_ROADMAP.md)
+
+### A04-05A owner-authorized implementation sequencing
+
+On 2026-11-27 Peter authorized the Android Basic Information foundation after verified PR #46 merged-main preflight. Implement the scoped GET, typed V1 identity and local protected operations before foreground Header POST, complete ReceiptVersion 6 settlement or editable Workbench UI. Reuse encrypted Room rows, task-wide version fencing and the existing contributor/session authority. Local proposed fields remain separate from accepted facts; correction targets an exact accepted same-field predecessor, and subsequent edits of a pending same-version field are deferred. This sequencing adds no business or material architecture policy. [Prior Backend contract](../29_R3205_BASIC_INFORMATION_DRAFT.md) · [Roadmap](PROJECT_ROADMAP.md)

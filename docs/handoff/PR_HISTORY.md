@@ -1,4 +1,4 @@
-# IPQC PR history through #45
+# IPQC PR history through #46
 
 Recovered and reconciled through the PR #43 merge on 2026-11-24 against live GitHub metadata, main first-parent history, scoped docs and recovered reports. PR #17 merged before #16. The table is ordered by PR number. A merge date comes from GitHub UTC. Main CI links point to runs indexed by the actual merge commit. Early #1–7 evidence is the PR-local implementation/validation record or Web v1 handoff, where available. See [Review History](REVIEW_HISTORY.md) for supported findings and gaps. GitHub draft description text is historical and may describe a past hold even when the authoritative state is merged.
 
@@ -193,4 +193,10 @@ Peter authorized the internal foreground transport slice on `codex/android-v1-a0
 
 ## A04-04 gated Item Removal Workbench UI
 
-Peter authorized the development-pilot integration. [PR #46](https://github.com/peterl-ai/IPQC-system/pull/46) remains Open Draft. On 2026-11-27 the initial independent review issued **HOLD — P2 REPAIR REQUIRED** at HEAD `86de1df6696935f10cef6870459e046d4b1df6b8`. Codex repaired R46-P2-01 in application commit `7e1820e4d0caf7fad1f81abaf091f170ea9947cf` with Tree `e62f3d7e3a9a31c0c140b481cc293329dd8a71f4`. Independent re-review is pending. [Review history](REVIEW_HISTORY.md#2026-11-27-initial-independent-review-of-pr-46) Verify the actual assigned PR number, revisions and CI at the [implementation branch PRs](https://github.com/peterl-ai/IPQC-system/pulls?q=is%3Apr+head%3Acodex%2Fandroid-v1-a04-04-item-removal-workbench-ui) and exact review handoff. [Roadmap](PROJECT_ROADMAP.md)
+Peter authorized the development-pilot integration. [PR #46](https://github.com/peterl-ai/IPQC-system/pull/46) was Open Draft when the initial independent review issued **HOLD — P2 REPAIR REQUIRED** at HEAD `86de1df6696935f10cef6870459e046d4b1df6b8`. Codex repaired R46-P2-01 in application commit `7e1820e4d0caf7fad1f81abaf091f170ea9947cf` with Tree `e62f3d7e3a9a31c0c140b481cc293329dd8a71f4`. The final independent re-review passed and Peter merged after approval. [Review history](REVIEW_HISTORY.md#2026-11-27-final-independent-re-review-of-pr-46) Verify the actual assigned PR number, revisions and CI at the [implementation branch PRs](https://github.com/peterl-ai/IPQC-system/pulls?q=is%3Apr+head%3Acodex%2Fandroid-v1-a04-04-item-removal-workbench-ui) and exact review handoff. [Roadmap](PROJECT_ROADMAP.md)
+
+## PR #46 final review, merge and A04-05A continuation
+
+[PR #46](https://github.com/peterl-ai/IPQC-system/pull/46) independently passed at Base `8120ace2ce5b4f458745dbf601f211960a2af4ca`, HEAD `5b6622c936bcca42bcdb5730166b394cac31d8e1`, Tree `b4268accd7f35d515513b305c4037e439ee29d38`. R46-P2-01 VERIFIED CLOSED. Peter merged `1a30fe61a744b9282a20d18f92a521d6b59b9207` on 2026-11-27. The exact approved HEAD is the second parent, the approved Base is the first parent, and the merged Tree matches. [Final independent review](REVIEW_HISTORY.md#2026-11-27-final-independent-re-review-of-pr-46) · [Merged-main CI](https://github.com/peterl-ai/IPQC-system/actions/runs/46026722209/attempts/1)
+
+A04-05A is the active, separately authorized Android Basic Information foundation Draft at that verified Base. Independent review is pending. [Draft by branch](https://github.com/peterl-ai/IPQC-system/pulls?q=is%3Apr+head%3Acodex%2Fandroid-v1-a04-05a-basic-information-foundation) · [Project roadmap](PROJECT_ROADMAP.md)

@@ -13,6 +13,7 @@ import retrofit2.http.GET
 import retrofit2.http.Header
 import retrofit2.http.POST
 import retrofit2.http.Path
+import retrofit2.http.Query
 import retrofit2.http.Streaming
 import retrofit2.http.Tag
 
@@ -42,6 +43,14 @@ internal interface WorkContextApi {
     @GET("api/line-patrol/tasks/{taskId}/operations/{operationId}/receipt")
     suspend fun operationReceipt(@Header("Authorization") bearer: String, @Path("taskId") taskId: String,
                                   @Path("operationId") operationId: String): Response<ResponseBody>
+
+    @Streaming
+    @GET("api/line-patrol/tasks/{taskId}/shared-draft/basic-information")
+    suspend fun basicInformation(@Header("Authorization") bearer: String, @Path("taskId") taskId: String,
+                                 @Query("expectedTaskLineId") lineId: String,
+                                 @Query("expectedDraftVersion") expectedDraftVersion: Long?,
+                                 @Query("beforeDraftVersion") beforeDraftVersion: Long?,
+                                 @Query("limit") limit: Int): Response<ResponseBody>
 
     @GET("api/line-patrol/tasks/{taskId}/shared-draft")
     suspend fun sharedDraft(@Header("Authorization") bearer: String, @Path("taskId") taskId: String): Response<SharedDraftWire>

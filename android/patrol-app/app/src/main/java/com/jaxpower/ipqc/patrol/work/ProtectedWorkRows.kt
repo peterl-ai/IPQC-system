@@ -1,6 +1,7 @@
 package com.jaxpower.ipqc.patrol.work
 
 import com.jaxpower.ipqc.patrol.api.PatrolFailure
+import com.jaxpower.ipqc.patrol.auth.SessionIdentity
 import com.jaxpower.ipqc.patrol.offline.CacheCipher
 import com.jaxpower.ipqc.patrol.offline.CacheRows
 import com.jaxpower.ipqc.patrol.offline.KeystoreBox
@@ -8,6 +9,7 @@ import com.jaxpower.ipqc.patrol.offline.TaskCacheDatabase
 import com.jaxpower.ipqc.patrol.offline.decode
 import com.jaxpower.ipqc.patrol.offline.workspaceId
 import kotlinx.coroutines.CancellationException
+import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.decodeFromJsonElement
@@ -19,7 +21,11 @@ internal data class WorkCatalog(
     val operationIds: List<String> = emptyList(),
     val batchIds: List<String> = emptyList(),
     val itemRemovalIds: List<String> = emptyList(),
-    val observedItemRemovalVersion: Long = 0,
+    // Keep the persisted V1 key so earlier removal observations stay effective.
+    @SerialName("observedItemRemovalVersion") val observedTaskDraftVersion: Long = 0,
+    val staleThroughDraftVersion: Long? = null,
+    val tracksBasicInformation: Boolean = false,
+    val basicInformationIds: List<String> = emptyList(),
 )
 
 @Serializable
@@ -99,6 +105,19 @@ internal class WorkTransaction(
     suspend fun reserveOperationId(id: String) = claimOperationId(id, slot("operation", id))
 
     suspend fun reserveItemRemovalId(id: String) = claimOperationId(id, slot("item-removal", id))
+
+    suspend fun reserveBasicInformationId(id: String) = claimOperationId(id, slot("basic-information", id))
+
+    suspend fun basicInformationOperation(id: String): BasicInformationEnvelope? = read("basic-information", id)
+
+    suspend fun saveBasicInformation(envelope: BasicInformationEnvelope) =
+        write("basic-information", envelope.command.operation.operationId, envelope)
+
+    suspend fun basicInformationBasis(owner: SessionIdentity): BasicInformationBasis? =
+        read("basic-information-basis", "${owner.userId}:${owner.familyId}")
+
+    suspend fun saveBasicInformationBasis(owner: SessionIdentity, basis: BasicInformationBasis) =
+        write("basic-information-basis", "${owner.userId}:${owner.familyId}", basis)
 
     private suspend fun claimOperationId(id: String, operationSlot: String) {
         val marker = registrySlot("ready")

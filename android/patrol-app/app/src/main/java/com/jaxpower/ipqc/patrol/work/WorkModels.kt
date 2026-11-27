@@ -13,6 +13,7 @@ internal enum class WorkProblem {
     DependencyMismatch, InvalidState, ReceiptMismatch, StorageUnavailable,
     CaptureTimeUnavailable, CaptureWindowClosed, StaleGrant, IssuanceUncertain,
     SampleInputMismatch, SampleLimit, ItemRemovalInputMismatch, ItemDispositionConflict, ItemRemovalReconciliationRequired,
+    BasicInformationInputMismatch,
 }
 
 internal class WorkFailure(val problem: WorkProblem) : Exception(problem.name)

@@ -60,29 +60,40 @@ internal suspend fun WorkTransaction.sampleItemRemovalBlocks(entries: List<ItemR
             }
     }
 
-// Authenticated shared-draft observations also carry receipts for operations
-// from other devices. Remember only the version, in the task-wide catalog.
-internal suspend fun WorkTransaction.rememberObservedItemRemovalVersion(basis: OfflineSampleBasis) {
-    val version = basis.attempts.mapNotNull { it.serverRemoval?.draftVersion }.maxOrNull() ?: return
+// Once Header is observed, both authenticated reads can supply the task-wide
+// version. An ordinary pre-Header open keeps its existing removal-only writes.
+internal suspend fun WorkTransaction.rememberSharedDraftVersion(basis: OfflineSampleBasis) {
     val saved = catalog()
-    if (version > saved.observedItemRemovalVersion) save(saved.copy(observedItemRemovalVersion = version))
+    val version = if (saved.tracksBasicInformation) basis.draftVersion
+        else basis.attempts.mapNotNull { it.serverRemoval?.draftVersion }.maxOrNull() ?: return
+    if (version > saved.observedTaskDraftVersion) save(saved.copy(observedTaskDraftVersion = version))
 }
 
-internal suspend fun WorkTransaction.itemRemovalVersionProblem(entries: List<ItemRemovalEntry>,
-                                                               observedVersion: Long): WorkProblem? =
-    WorkProblem.StaleGrant.takeIf {
-        catalog().observedItemRemovalVersion > observedVersion ||
+internal suspend fun WorkTransaction.rememberBasicInformationDraftVersion(version: Long) {
+    val saved = catalog()
+    if (!saved.tracksBasicInformation || version > saved.observedTaskDraftVersion) {
+        save(saved.copy(tracksBasicInformation = true, observedTaskDraftVersion = maxOf(version, saved.observedTaskDraftVersion)))
+    }
+}
+
+internal suspend fun WorkTransaction.taskDraftVersionProblem(entries: List<ItemRemovalEntry>,
+                                                              observedVersion: Long): WorkProblem? {
+    val saved = catalog()
+    return WorkProblem.StaleGrant.takeIf {
+        saved.observedTaskDraftVersion > observedVersion ||
+            saved.staleThroughDraftVersion?.let { it >= observedVersion } == true ||
             entries.any { (it.serverEvidence?.draftVersion ?: 0) > observedVersion }
     }
+}
 
-internal suspend fun WorkTransaction.requireCurrentItemRemovalVersion(entries: List<ItemRemovalEntry>, observedVersion: Long) {
-    itemRemovalVersionProblem(entries, observedVersion)?.let { throw WorkFailure(it) }
+internal suspend fun WorkTransaction.requireCurrentTaskDraftVersion(entries: List<ItemRemovalEntry>, observedVersion: Long) {
+    taskDraftVersionProblem(entries, observedVersion)?.let { throw WorkFailure(it) }
 }
 
 internal suspend fun WorkTransaction.checkItemRemovalBarrier(task: WorkTask, observedVersion: Long) {
     val entries = itemRemovals(task)
     workCheck(entries.none { it.state in uncertainItemRemovalStates }, WorkProblem.InvalidState)
-    requireCurrentItemRemovalVersion(entries, observedVersion)
+    requireCurrentTaskDraftVersion(entries, observedVersion)
 }
 
 internal fun ItemRemovalEnvelope.matches(receipt: ItemRemovalReceipt): Boolean =
